@@ -1,0 +1,68 @@
+services:
+  mqtt:
+    image: eclipse-mosquitto:2
+    container_name: tars-mqtt
+    network_mode: host
+    env_file: .env
+    volumes:
+      - ./ops:/ops:ro
+    entrypoint: ["/bin/sh","-c"]
+    command:
+      - >
+        set -e;
+        mkdir -p /mosquitto/config;
+        cp /ops/mosquitto.conf /mosquitto/config/mosquitto.conf;
+        if [ ! -f /mosquitto/config/passwd ]; then
+          if [ -n "$MQTT_USER" ] && [ -n "$MQTT_PASS" ]; then
+            mosquitto_passwd -b -c /mosquitto/config/passwd "$MQTT_USER" "$MQTT_PASS";
+            echo 'Generated passwd file';
+          else
+            echo 'WARNING: MQTT_USER/PASS not set; creating anonymous passwd placeholder';
+            touch /mosquitto/config/passwd;
+          fi;
+        fi;
+        exec /docker-entrypoint.sh mosquitto -c /mosquitto/config/mosquitto.conf
+
+  stt:
+    build: ./apps/stt-worker
+    container_name: tars-stt
+    network_mode: host
+    env_file: .env
+    devices:
+      - /dev/snd:/dev/snd
+    volumes:
+      - /run/user/1000/pulse:/run/user/1000/pulse:ro
+      - ./models/whisper:/host-models
+    environment:
+      - MQTT_URL=mqtt://$MQTT_USER:$MQTT_PASS@$MQTT_HOST:$MQTT_PORT
+      - WHISPER_MODEL=${WHISPER_MODEL:-small}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - PULSE_RUNTIME_PATH=/run/user/1000/pulse
+      - PULSE_SERVER=unix:/run/user/1000/pulse/native
+
+  router:
+    build: ./apps/router
+    container_name: tars-router
+    network_mode: host
+    env_file: .env
+    environment:
+      - MQTT_URL=mqtt://$MQTT_USER:$MQTT_PASS@$MQTT_HOST:$MQTT_PORT
+      - PROFILE=offline_fast
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+  tts:
+    build: ./apps/tts-worker
+    container_name: tars-tts
+    network_mode: host
+    env_file: .env
+    devices:
+      - /dev/snd:/dev/snd
+    volumes:
+      - ./apps/tts-worker/voices:/voice-models:ro
+      - /run/user/1000/pulse:/run/user/1000/pulse:ro
+    environment:
+      - MQTT_URL=mqtt://$MQTT_USER:$MQTT_PASS@$MQTT_HOST:$MQTT_PORT
+      - PIPER_VOICE=/voices/TARS.onnx
+      - PULSE_RUNTIME_PATH=/run/user/1000/pulse
+      - PULSE_SERVER=unix:/run/user/1000/pulse/native
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}

@@ -1,0 +1,1 @@
+mosquitto_pub -h 127.0.0.1 -p 1883 -u tars -P change_me   -t tts/say -m '{"text":"Test line one."}'
