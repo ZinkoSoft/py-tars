@@ -1,0 +1,115 @@
+# Cached Models and Data
+models/
+*.onnx
+*.onnx.json
+
+# Environment and Configuration
+.env
+.env.local
+.env.production
+.env.staging
+
+# Docker and Containers
+.dockerignore
+docker-compose.override.yml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs and Runtime data
+*.log
+logs/
+*.pid
+*.seed
+*.pid.lock
+
+# MQTT and temporary files
+*.passwd
+passwd
+mosquitto.log
+*.tmp
+*.temp
+
+# Audio files (if any test recordings are made)
+*.wav
+*.mp3
+*.flac
+*.ogg
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Test coverage and reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Documentation builds
+docs/_build/
+
+# Local development
+.local/
+local/
+scratch/
+debug/
+
+ops/passwd
