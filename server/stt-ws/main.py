@@ -39,6 +39,23 @@ async def health():
         return JSONResponse(status_code=500, content={"ok": False, "err": str(e)})
 
 
+@app.get("/")
+async def root():
+    return {"service": "stt-ws", "ok": True, "endpoints": ["/health", "/stt (websocket)"]}
+
+
+@app.get("/live")
+async def live():
+    # Liveness probe that doesn't load model
+    return {"ok": True}
+
+
+@app.get("/ready")
+async def ready():
+    # Readiness probe that ensures model can be loaded
+    return await health()
+
+
 class Session:
     def __init__(self, sample_rate: int, lang: str | None, enable_partials: bool):
         self.sample_rate = sample_rate
