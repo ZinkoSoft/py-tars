@@ -44,3 +44,9 @@ class VADProcessor:
                     self.silence_count = 0
                     return utterance
         return None
+
+    def get_active_buffer(self) -> bytes:
+        """Return current buffered speech bytes (excluding trailing silence) if speech ongoing."""
+        if self.is_speech and self.speech_buffer:
+            return b''.join(self.speech_buffer)
+        return b''

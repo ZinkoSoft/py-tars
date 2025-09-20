@@ -6,12 +6,16 @@ services:
     env_file: .env
     volumes:
       - ./ops:/ops:ro
+      - ./ops/mosquitto-data:/mosquitto/data
+      - ./ops/mosquitto-config:/mosquitto/config
     entrypoint: ["/bin/sh","-c"]
     command:
       - >
         set -e;
         mkdir -p /mosquitto/config;
-        cp /ops/mosquitto.conf /mosquitto/config/mosquitto.conf;
+        if [ ! -f /mosquitto/config/mosquitto.conf ]; then
+          cp /ops/mosquitto.conf /mosquitto/config/mosquitto.conf;
+        fi;
         if [ ! -f /mosquitto/config/passwd ]; then
           if [ -n "$MQTT_USER" ] && [ -n "$MQTT_PASS" ]; then
             mosquitto_passwd -b -c /mosquitto/config/passwd "$MQTT_USER" "$MQTT_PASS";
@@ -37,6 +41,8 @@ services:
       - MQTT_URL=mqtt://$MQTT_USER:$MQTT_PASS@$MQTT_HOST:$MQTT_PORT
       - WHISPER_MODEL=${WHISPER_MODEL:-small}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - STT_BACKEND=${STT_BACKEND:-whisper}
+      - WS_URL=${WS_URL:-ws://127.0.0.1:9000/stt}
       - PULSE_RUNTIME_PATH=/run/user/1000/pulse
       - PULSE_SERVER=unix:/run/user/1000/pulse/native
 

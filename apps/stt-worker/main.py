@@ -5,7 +5,11 @@ import time
 import numpy as np
 import orjson
 
-from config import LOG_LEVEL, MQTT_URL, POST_PUBLISH_COOLDOWN_MS, TTS_BASE_MUTE_MS, TTS_PER_CHAR_MS, TTS_MAX_MUTE_MS
+from config import (
+    LOG_LEVEL, MQTT_URL, POST_PUBLISH_COOLDOWN_MS, TTS_BASE_MUTE_MS, TTS_PER_CHAR_MS, TTS_MAX_MUTE_MS,
+    STREAMING_PARTIALS, PARTIAL_INTERVAL_MS, PARTIAL_MIN_DURATION_MS, PARTIAL_MIN_CHARS, PARTIAL_MIN_NEW_CHARS,
+    PARTIAL_ALPHA_RATIO_MIN, STT_BACKEND
+)
 from audio_capture import AudioCapture
 from vad import VADProcessor
 from transcriber import SpeechTranscriber
@@ -30,6 +34,8 @@ class STTWorker:
         self.pending_tts = False
         self.recent_unmute_time = 0.0
         self.fallback_unmute_task = None
+        self._partials_task = None
+        self._last_partial_text: str = ""
 
     async def initialize(self):
         if os.path.exists("/host-models"):
@@ -40,6 +46,12 @@ class STTWorker:
         await self.mqtt.connect()
         await self.publish_health(True, "STT service ready")
         await self.mqtt.subscribe_stream('tts/status', self._handle_tts_status)
+        # For WS backend the current transcriber opens a new WS per call; avoid partials to reduce overhead
+        self._enable_partials = STREAMING_PARTIALS and STT_BACKEND != "ws"
+        if self._enable_partials:
+            logger.info(f"Streaming partial transcripts enabled (interval={PARTIAL_INTERVAL_MS}ms)")
+        else:
+            logger.info("Streaming partial transcripts disabled")
 
     async def publish_health(self, ok: bool, message: str = ""):
         await self.mqtt.safe_publish('system/health/stt', {"ok": ok, "event": message, "timestamp": time.time()})
@@ -118,12 +130,16 @@ class STTWorker:
             self.suppress_engine.register_publication(text.strip().lower())
             await self.publish_transcript(text.strip(), confidence)
             self.state.cooldown_until = time.time() + (POST_PUBLISH_COOLDOWN_MS / 1000.0)
+            # Reset partial tracking after a final utterance
+            self._last_partial_text = ""
 
     async def run(self):
         try:
             await self.initialize()
             self.audio_capture.start_capture()
             self.vad_processor = VADProcessor(self.audio_capture.sample_rate, self.audio_capture.frame_size)
+            if self._enable_partials:
+                self._partials_task = asyncio.create_task(self._partials_loop())
             await self.process_audio_stream()
         except Exception as e:
             logger.error(f"STT worker error: {e}")
@@ -131,6 +147,52 @@ class STTWorker:
         finally:
             self.audio_capture.stop_capture()
             await self.mqtt.disconnect()
+
+    async def _partials_loop(self):
+        interval = PARTIAL_INTERVAL_MS / 1000.0
+        while True:
+            await asyncio.sleep(interval)
+            if not STREAMING_PARTIALS:
+                continue
+            if not self.vad_processor or not self.vad_processor.is_speech:
+                continue
+            if self.pending_tts or self.audio_capture.is_muted:
+                continue
+            # Basic guard after unmute
+            if self.recent_unmute_time and (time.time() - self.recent_unmute_time) < 0.3:
+                continue
+            buf = self.vad_processor.get_active_buffer()
+            if not buf:
+                continue
+            duration_ms = (len(buf) / 2) / self.audio_capture.sample_rate * 1000.0
+            if duration_ms < PARTIAL_MIN_DURATION_MS:
+                continue
+            try:
+                text, confidence, metrics = self.transcriber.transcribe(buf, self.audio_capture.sample_rate)
+            except Exception as e:
+                logger.debug(f"Partial transcription error: {e}")
+                continue
+            t = text.strip()
+            if not t or len(t) < PARTIAL_MIN_CHARS:
+                continue
+            alpha = sum(c.isalpha() for c in t)
+            alpha_ratio = alpha / max(1, len(t))
+            if alpha_ratio < PARTIAL_ALPHA_RATIO_MIN:
+                continue
+            # Require some growth
+            if self._last_partial_text and (len(t) - len(self._last_partial_text)) < PARTIAL_MIN_NEW_CHARS and not t.endswith('.'):
+                continue
+            if t == self._last_partial_text:
+                continue
+            self._last_partial_text = t
+            await self.mqtt.safe_publish('stt/partial', {
+                "text": t,
+                "lang": "en",
+                "confidence": confidence,
+                "timestamp": time.time(),
+                "is_final": False
+            })
+            logger.debug(f"Published partial: {t[:60]}{'...' if len(t)>60 else ''}")
 
 async def main():
     logger.info("Starting TARS STT Worker")

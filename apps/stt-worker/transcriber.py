@@ -1,14 +1,15 @@
 import logging
 import numpy as np
-from faster_whisper import WhisperModel
+import orjson
 from typing import Tuple, Dict, Any
 
-from config import WHISPER_MODEL, MODEL_PATH
+from config import WHISPER_MODEL, MODEL_PATH, STT_BACKEND, WS_URL
 
 logger = logging.getLogger("stt-worker.transcriber")
 
-class SpeechTranscriber:
+class _LocalWhisperTranscriber:
     def __init__(self):
+        from faster_whisper import WhisperModel  # lazy import to avoid requiring package for WS backend
         logger.info(f"Loading Whisper model: {WHISPER_MODEL}")
         self.model = WhisperModel(
             WHISPER_MODEL,
@@ -56,3 +57,49 @@ class SpeechTranscriber:
             "num_segments": len(seg_list)
         }
         return text, confidence, metrics
+
+
+class _WebSocketTranscriber:
+    def __init__(self, ws_url: str):
+        self.ws_url = ws_url
+
+    def transcribe(self, audio_data: bytes, input_sample_rate: int) -> Tuple[str, float, Dict[str, Any]]:
+        # Synchronous round-trip: open WS, send init + audio + end, wait final
+        # This is kept simple to integrate without changing the STT worker orchestration.
+        import websockets
+        import asyncio
+
+        async def _do():
+            async with websockets.connect(self.ws_url, max_size=None) as ws:
+                await ws.send(orjson.dumps({
+                    "type": "init",
+                    "sample_rate": input_sample_rate,
+                    "lang": "en",
+                    "enable_partials": False
+                }))
+                await ws.send(audio_data)
+                await ws.send(orjson.dumps({"type": "end"}))
+                # Read until we get a final
+                while True:
+                    msg = await ws.recv()
+                    if isinstance(msg, (bytes, bytearray)):
+                        continue
+                    data = orjson.loads(msg)
+                    if data.get("type") == "final":
+                        return data.get("text", ""), data.get("confidence")
+
+        text, conf = asyncio.get_event_loop().run_until_complete(_do())
+        # Return empty metrics for WS backend (server can compute if needed)
+        return text or "", conf, {"backend": "ws"}
+
+
+class SpeechTranscriber:
+    def __init__(self):
+        if STT_BACKEND == "ws":
+            logger.info(f"Using WebSocket STT backend: {WS_URL}")
+            self._impl = _WebSocketTranscriber(WS_URL)
+        else:
+            self._impl = _LocalWhisperTranscriber()
+
+    def transcribe(self, audio_data: bytes, input_sample_rate: int) -> Tuple[str, float, Dict[str, Any]]:
+        return self._impl.transcribe(audio_data, input_sample_rate)

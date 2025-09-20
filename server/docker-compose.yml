@@ -1,0 +1,18 @@
+version: "3.8"
+
+services:
+  stt-ws:
+    build: ./stt-ws
+    container_name: tars-stt-ws
+    network_mode: host
+    env_file: .env
+    environment:
+      - WHISPER_MODEL=${WHISPER_MODEL:-small}
+      - DEVICE=${DEVICE:-auto}
+      - COMPUTE_TYPE=${COMPUTE_TYPE:-auto}
+      - PARTIAL_INTERVAL_MS=${PARTIAL_INTERVAL_MS:-300}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    # For older setups on Jetson, uncomment the following line
+    # runtime: nvidia
+    restart: unless-stopped
