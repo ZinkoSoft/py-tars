@@ -64,33 +64,38 @@ class _WebSocketTranscriber:
         self.ws_url = ws_url
 
     def transcribe(self, audio_data: bytes, input_sample_rate: int) -> Tuple[str, float, Dict[str, Any]]:
-        # Synchronous round-trip: open WS, send init + audio + end, wait final
-        # This is kept simple to integrate without changing the STT worker orchestration.
-        import websockets
-        import asyncio
+        # Synchronous round-trip using websockets.sync to avoid interfering with asyncio loop
+        from websockets.sync.client import connect
 
-        async def _do():
-            async with websockets.connect(self.ws_url, max_size=None) as ws:
-                await ws.send(orjson.dumps({
-                    "type": "init",
-                    "sample_rate": input_sample_rate,
-                    "lang": "en",
-                    "enable_partials": False
-                }))
-                await ws.send(audio_data)
-                await ws.send(orjson.dumps({"type": "end"}))
-                # Read until we get a final
-                while True:
-                    msg = await ws.recv()
-                    if isinstance(msg, (bytes, bytearray)):
-                        continue
+        text_out: str = ""
+        conf_out = None
+        with connect(self.ws_url, max_size=None) as ws:
+            # Send init as text frame
+            ws.send(orjson.dumps({
+                "type": "init",
+                "sample_rate": input_sample_rate,
+                "lang": "en",
+                "enable_partials": False
+            }).decode())
+            # Send audio as binary frame
+            ws.send(audio_data)
+            # Signal end as text frame
+            ws.send(orjson.dumps({"type": "end"}).decode())
+            # Drain until final
+            while True:
+                msg = ws.recv()
+                if isinstance(msg, (bytes, bytearray)):
+                    continue
+                try:
                     data = orjson.loads(msg)
-                    if data.get("type") == "final":
-                        return data.get("text", ""), data.get("confidence")
+                except Exception:
+                    continue
+                if data.get("type") == "final":
+                    text_out = data.get("text", "") or ""
+                    conf_out = data.get("confidence")
+                    break
 
-        text, conf = asyncio.get_event_loop().run_until_complete(_do())
-        # Return empty metrics for WS backend (server can compute if needed)
-        return text or "", conf, {"backend": "ws"}
+        return text_out, conf_out, {"backend": "ws"}
 
 
 class SpeechTranscriber:

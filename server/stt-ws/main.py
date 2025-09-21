@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import time
 from typing import Optional
@@ -11,6 +12,8 @@ from fastapi.websockets import WebSocketState
 from faster_whisper import WhisperModel
 
 app = FastAPI(title="Jetson STT WS")
+logger = logging.getLogger("stt-ws")
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
 DEVICE = os.getenv("DEVICE", "auto")  # let faster-whisper/ctranslate2 decide (cuda if available)
@@ -103,45 +106,73 @@ async def stt_ws(ws: WebSocket):
     try:
         while True:
             msg = await ws.receive()
-            if msg.get("type") == "websocket.disconnect":
+            mtype = msg.get("type")
+            if mtype == "websocket.disconnect":
                 break
-            if "text" in msg:
+
+            text_frame = msg.get("text")
+            bytes_frame = msg.get("bytes")
+
+            if text_frame is not None:
+                # Control messages come as text JSON
                 try:
-                    data = orjson.loads(msg["text"]) if isinstance(msg["text"], str) else msg["text"]
+                    data = orjson.loads(text_frame) if isinstance(text_frame, str) else text_frame
                 except Exception:
                     await ws.send_text(orjson.dumps({"type": "error", "err": "invalid json"}).decode())
                     continue
-                mtype = data.get("type")
-                if mtype == "init":
+                mt = data.get("type")
+                if mt == "init":
                     sr = int(data.get("sample_rate", 16000))
                     lang = data.get("lang")
                     enable_partials = bool(data.get("enable_partials", True))
                     session = Session(sr, lang, enable_partials)
+                    logger.info(f"session init: sr={sr} lang={lang} partials={enable_partials}")
                     await ws.send_text(orjson.dumps({"type": "health", "ok": True}).decode())
-                elif mtype == "end":
+                elif mt == "end":
                     if session and session.buf:
+                        buf_len = len(session.buf)
+                        logger.info(f"end received: transcribing {buf_len} bytes")
                         text, conf = await transcribe_bytes(bytes(session.buf), session.sample_rate, session.lang)
-                        await ws.send_text(orjson.dumps({"type": "final", "text": text, "confidence": conf, "t_ms": int(session.duration_ms())}).decode())
+                        await ws.send_text(orjson.dumps({
+                            "type": "final",
+                            "text": text,
+                            "confidence": conf,
+                            "t_ms": int(session.duration_ms()),
+                            "bytes": buf_len
+                        }).decode())
+                        logger.info(f"final sent: text_len={len(text)}")
                         session.clear()
+                    else:
+                        logger.info("end received: empty buffer")
+                        await ws.send_text(orjson.dumps({"type": "final", "text": "", "confidence": None, "t_ms": 0, "bytes": 0}).decode())
                 else:
                     await ws.send_text(orjson.dumps({"type": "error", "err": "unknown message type"}).decode())
-            elif "bytes" in msg:
+
+            elif bytes_frame is not None:
+                # Audio frames come as binary
                 if ws.client_state != WebSocketState.CONNECTED:
                     break
                 if not session:
                     await ws.send_text(orjson.dumps({"type": "error", "err": "send init first"}).decode())
                     continue
-                pcm = msg["bytes"]
-                if not pcm:
+                if not bytes_frame:
                     continue
-                session.append(pcm)
+                session.append(bytes_frame)
+                logger.debug(f"audio bytes appended: +{len(bytes_frame)} total={len(session.buf)}")
                 now = time.time()
                 if session.enable_partials and ((now - session.last_partial_ts) * 1000.0) >= PARTIAL_INTERVAL_MS:
                     # Transcribe current buffer for a partial
                     text, conf = await transcribe_bytes(bytes(session.buf), session.sample_rate, session.lang)
                     if text:
-                        await ws.send_text(orjson.dumps({"type": "partial", "text": text, "confidence": conf, "t_ms": int(session.duration_ms())}).decode())
+                        await ws.send_text(orjson.dumps({
+                            "type": "partial",
+                            "text": text,
+                            "confidence": conf,
+                            "t_ms": int(session.duration_ms())
+                        }).decode())
+                        logger.debug(f"partial sent: len={len(text)} t_ms={int(session.duration_ms())}")
                     session.last_partial_ts = now
+
     except WebSocketDisconnect:
         pass
     except Exception as e:
