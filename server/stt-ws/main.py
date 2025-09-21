@@ -118,12 +118,23 @@ async def transcribe_bytes(pcm: bytes, sample_rate: int, language: Optional[str]
     load_model()
     # Convert PCM16LE bytes to float32 numpy array scaled to -1..1
     audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+    orig_len = audio.shape[0]
+    # Resample to 16 kHz if needed (faster-whisper & its VAD expect 16 kHz)
+    if sample_rate != 16000 and orig_len > 0:
+        target_len = int(round(orig_len * 16000 / max(1, sample_rate)))
+        if target_len > 0:
+            audio = np.interp(
+                np.linspace(0, orig_len - 1, target_len, dtype=np.float32),
+                np.arange(orig_len, dtype=np.float32),
+                audio
+            ).astype(np.float32)
+            logger.debug(f"resampled audio: sr {sample_rate} -> 16000, {orig_len} -> {target_len} samples")
+
+    # Transcribe (disable VAD filter initially to avoid over-pruning; upstream VAD on client already gates speech)
     segments, info = model.transcribe(
         audio,
         language=language,
-        vad_filter=True,
-        vad_parameters=dict(min_silence_duration_ms=250),
-        no_speech_threshold=0.45,
+        vad_filter=False,
         beam_size=5,
         best_of=5,
         condition_on_previous_text=True,
