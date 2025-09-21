@@ -19,6 +19,7 @@ WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
 DEVICE = os.getenv("DEVICE", "auto")  # let faster-whisper/ctranslate2 decide (cuda if available)
 COMPUTE_TYPE = os.getenv("COMPUTE_TYPE", "auto")  # let library pick best (fp16 on GPU, int8 on CPU)
 PARTIAL_INTERVAL_MS = int(os.getenv("PARTIAL_INTERVAL_MS", "300"))
+TAIL_WINDOW_SEC = float(os.getenv("TAIL_WINDOW_SEC", "6.0"))
 MODELS_DIR = os.getenv("MODELS_DIR", "/models")
 
 model: Optional[WhisperModel] = None
@@ -211,8 +212,17 @@ async def stt_ws(ws: WebSocket):
                 logger.debug(f"audio bytes appended: +{len(bytes_frame)} total={len(session.buf)}")
                 now = time.time()
                 if session.enable_partials and ((now - session.last_partial_ts) * 1000.0) >= PARTIAL_INTERVAL_MS:
-                    # Transcribe current buffer for a partial
-                    text, conf = await transcribe_bytes(bytes(session.buf), session.sample_rate, session.lang)
+                    # Transcribe only the tail window for a partial to reduce latency/cost
+                    if session.buf:
+                        if session.sample_rate > 0 and TAIL_WINDOW_SEC > 0:
+                            tail_samples = int(session.sample_rate * TAIL_WINDOW_SEC)
+                            tail_bytes = tail_samples * 2
+                            buf = bytes(session.buf[-tail_bytes:]) if len(session.buf) > tail_bytes else bytes(session.buf)
+                        else:
+                            buf = bytes(session.buf)
+                    else:
+                        buf = b""
+                    text, conf = await transcribe_bytes(buf, session.sample_rate, session.lang)
                     if text:
                         await ws.send_text(orjson.dumps({
                             "type": "partial",
