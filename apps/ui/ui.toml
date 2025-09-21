@@ -1,0 +1,17 @@
+# UI configuration for the 5" IPS touchscreen
+
+[mqtt]
+url = "mqtt://tars:pass@127.0.0.1:1883"
+
+[ui]
+width = 800
+height = 480
+fps = 30
+num_bars = 64
+font = "Arial"
+
+[topics]
+audio = "stt/audio_fft"
+partial = "stt/partial"
+final = "stt/final"
+tts = "tts/status"

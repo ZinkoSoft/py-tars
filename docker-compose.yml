@@ -72,3 +72,16 @@ services:
       - PULSE_RUNTIME_PATH=/run/user/1000/pulse
       - PULSE_SERVER=unix:/run/user/1000/pulse/native
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+  ui:
+    build: ./apps/ui
+    container_name: tars-ui
+    network_mode: host
+    environment:
+      - MQTT_URL=mqtt://$MQTT_USER:$MQTT_PASS@$MQTT_HOST:$MQTT_PORT
+      - UI_CONFIG=/config/ui.toml
+      - DISPLAY=${DISPLAY}
+      - SDL_VIDEODRIVER=x11
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ./apps/ui/ui.toml:/config/ui.toml:ro

@@ -12,7 +12,7 @@ CHUNK_DURATION_MS = int(os.getenv("CHUNK_DURATION_MS", "30"))
 VAD_AGGRESSIVENESS = int(os.getenv("VAD_AGGRESSIVENESS", "2"))
 SILENCE_THRESHOLD_MS = int(os.getenv("SILENCE_THRESHOLD_MS", "1000"))
 POST_PUBLISH_COOLDOWN_MS = int(os.getenv("POST_PUBLISH_COOLDOWN_MS", "400"))
-UNMUTE_GUARD_MS = int(os.getenv("UNMUTE_GUARD_MS", "300"))
+UNMUTE_GUARD_MS = int(os.getenv("UNMUTE_GUARD_MS", "1000"))
 ECHO_SUPPRESS_MATCH = int(os.getenv("ECHO_SUPPRESS_MATCH", "1"))
 TTS_BASE_MUTE_MS = int(os.getenv("TTS_BASE_MUTE_MS", "1200"))
 TTS_PER_CHAR_MS = float(os.getenv("TTS_PER_CHAR_MS", "45"))
@@ -36,7 +36,7 @@ DICT_MATCH_MIN_RATIO = float(os.getenv("DICT_MATCH_MIN_RATIO", "0.40"))
 REPEAT_COOLDOWN_SEC = float(os.getenv("REPEAT_COOLDOWN_SEC", "8"))
 
 # Streaming partial transcription options
-STREAMING_PARTIALS = int(os.getenv("STREAMING_PARTIALS", "0"))  # 1 to enable live partial transcripts
+STREAMING_PARTIALS = int(os.getenv("STREAMING_PARTIALS", "1"))  # 1 to enable live partial transcripts
 PARTIAL_INTERVAL_MS = int(os.getenv("PARTIAL_INTERVAL_MS", "600"))  # how often to attempt partial decode during active speech
 PARTIAL_MIN_DURATION_MS = int(os.getenv("PARTIAL_MIN_DURATION_MS", "500"))  # don't partial until buffer has this much audio
 PARTIAL_MIN_CHARS = int(os.getenv("PARTIAL_MIN_CHARS", "4"))  # minimum characters to publish a partial
