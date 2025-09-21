@@ -2,7 +2,17 @@ import logging
 import webrtcvad
 from typing import Optional
 
-from config import VAD_AGGRESSIVENESS, SILENCE_THRESHOLD_MS, CHUNK_DURATION_MS
+import numpy as np
+
+from config import (
+    VAD_AGGRESSIVENESS,
+    SILENCE_THRESHOLD_MS,
+    CHUNK_DURATION_MS,
+    NOISE_MIN_RMS,
+    NOISE_FLOOR_INIT,
+    NOISE_FLOOR_ALPHA,
+    NOISE_GATE_OFFSET,
+)
 
 logger = logging.getLogger("stt-worker.vad")
 
@@ -17,10 +27,35 @@ class VADProcessor:
         self.speech_buffer = []
         self.silence_count = 0
         self.max_silence_chunks = SILENCE_THRESHOLD_MS // CHUNK_DURATION_MS
+        # Adaptive noise floor state (RMS units)
+        self.noise_floor = float(NOISE_FLOOR_INIT)
+        self.last_rms = 0.0
 
     def process_chunk(self, audio_chunk: bytes) -> Optional[bytes]:
         if len(audio_chunk) != self.frame_size * 2:
             return None
+
+        # Compute RMS
+        try:
+            arr = np.frombuffer(audio_chunk, dtype=np.int16).astype(np.float32)
+            rms = float(np.sqrt(np.mean(arr ** 2))) if arr.size else 0.0
+        except Exception:
+            return None
+
+        # Update adaptive noise floor using EMA when not in speech (or during trailing silence)
+        if not self.is_speech:
+            self.noise_floor = (1.0 - NOISE_FLOOR_ALPHA) * self.noise_floor + NOISE_FLOOR_ALPHA * rms
+        else:
+            # During speech, avoid training the floor to high levels; optionally decay slightly toward current rms
+            self.noise_floor = max(self.noise_floor * (1.0 - NOISE_FLOOR_ALPHA * 0.25), min(self.noise_floor, rms))
+        self.last_rms = rms
+
+        # Adaptive gate: require rms above floor * offset OR above absolute minimum
+        gate = max(NOISE_MIN_RMS, self.noise_floor * NOISE_GATE_OFFSET)
+        if not self.is_speech and rms < gate:
+            logger.debug(f"Dropping frame: rms={rms:.1f} < gate={gate:.1f} (floor={self.noise_floor:.1f})")
+            return None
+
         try:
             has_speech = self.vad.is_speech(audio_chunk, self.sample_rate)
         except Exception:

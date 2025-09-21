@@ -121,7 +121,9 @@ async def transcribe_bytes(pcm: bytes, sample_rate: int, language: Optional[str]
     orig_len = audio.shape[0]
     # Resample to 16 kHz if needed (faster-whisper & its VAD expect 16 kHz)
     if sample_rate != 16000 and orig_len > 0:
-        target_len = int(round(orig_len * 16000 / max(1, sample_rate)))
+        if sample_rate <= 0:
+            raise ValueError(f"Invalid sample_rate: {sample_rate}. Must be > 0 for resampling.")
+        target_len = int(round(orig_len * 16000 / sample_rate))
         if target_len > 0:
             audio = np.interp(
                 np.linspace(0, orig_len - 1, target_len, dtype=np.float32),

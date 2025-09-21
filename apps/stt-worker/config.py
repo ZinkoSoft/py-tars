@@ -19,6 +19,10 @@ TTS_PER_CHAR_MS = float(os.getenv("TTS_PER_CHAR_MS", "45"))
 TTS_MAX_MUTE_MS = int(os.getenv("TTS_MAX_MUTE_MS", "6000"))
 NOISE_MIN_DURATION_MS = int(os.getenv("NOISE_MIN_DURATION_MS", "400"))
 NOISE_MIN_RMS = int(os.getenv("NOISE_MIN_RMS", "180"))
+# Adaptive noise floor parameters
+NOISE_FLOOR_INIT = int(os.getenv("NOISE_FLOOR_INIT", str(NOISE_MIN_RMS)))
+NOISE_FLOOR_ALPHA = float(os.getenv("NOISE_FLOOR_ALPHA", "0.05"))  # EMA smoothing factor
+NOISE_GATE_OFFSET = float(os.getenv("NOISE_GATE_OFFSET", "1.5"))  # gate = floor * offset
 NOISE_MIN_ALPHA_RATIO = float(os.getenv("NOISE_MIN_ALPHA_RATIO", "0.55"))
 NOISE_MIN_LENGTH = int(os.getenv("NOISE_MIN_LENGTH", "3"))
 NOISE_MAX_PUNCT_RATIO = float(os.getenv("NOISE_MAX_PUNCT_RATIO", "0.35"))
