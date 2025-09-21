@@ -11,8 +11,11 @@ services:
       - DEVICE=${DEVICE:-auto}
       - COMPUTE_TYPE=${COMPUTE_TYPE:-auto}
       - PARTIAL_INTERVAL_MS=${PARTIAL_INTERVAL_MS:-300}
+      - MODELS_DIR=/models
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     # For older setups on Jetson, uncomment the following line
     # runtime: nvidia
     restart: unless-stopped
+    volumes:
+      - ./models-cache:/models

@@ -19,27 +19,52 @@ WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
 DEVICE = os.getenv("DEVICE", "auto")  # let faster-whisper/ctranslate2 decide (cuda if available)
 COMPUTE_TYPE = os.getenv("COMPUTE_TYPE", "auto")  # let library pick best (fp16 on GPU, int8 on CPU)
 PARTIAL_INTERVAL_MS = int(os.getenv("PARTIAL_INTERVAL_MS", "300"))
+MODELS_DIR = os.getenv("MODELS_DIR", "/models")
 
 model: Optional[WhisperModel] = None
+model_ready: bool = False
+model_loading: bool = False
+model_error: Optional[str] = None
 
 
 def load_model():
     global model
+    global model_ready, model_loading, model_error
     if model is None:
+        model_loading = True
+        model_error = None
         try:
-            model = WhisperModel(WHISPER_MODEL, device=DEVICE, compute_type=COMPUTE_TYPE)
-        except Exception:
+            logger.info(f"Loading Faster-Whisper model '{WHISPER_MODEL}' (device={DEVICE}, compute_type={COMPUTE_TYPE}) into {MODELS_DIR}")
+            os.makedirs(MODELS_DIR, exist_ok=True)
+            model = WhisperModel(WHISPER_MODEL, device=DEVICE, compute_type=COMPUTE_TYPE, download_root=MODELS_DIR)
+            model_ready = True
+        except Exception as e:
             # Graceful fallback in case auto detection fails in container runtime
-            model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
+            logger.warning("Auto device selection failed; falling back to CPU int8")
+            try:
+                model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8", download_root=MODELS_DIR)
+                model_ready = True
+            except Exception as e2:
+                model_error = f"{e}; fallback: {e2}"
+                raise
+        finally:
+            model_loading = False
 
 
 @app.get("/health")
 async def health():
-    try:
-        load_model()
-        return {"ok": True, "model": WHISPER_MODEL, "device": DEVICE, "compute_type": COMPUTE_TYPE}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"ok": False, "err": str(e)})
+    # Health should not trigger model download; report current state
+    if model_loading and not model_ready:
+        return JSONResponse(status_code=200, content={
+            "ok": False, "loading": True, "ready": False,
+            "model": WHISPER_MODEL, "device": DEVICE, "compute_type": COMPUTE_TYPE
+        })
+    if model_error and not model_ready:
+        return JSONResponse(status_code=500, content={
+            "ok": False, "loading": False, "ready": False,
+            "err": model_error, "model": WHISPER_MODEL
+        })
+    return {"ok": True, "loading": False, "ready": model_ready, "model": WHISPER_MODEL, "device": DEVICE, "compute_type": COMPUTE_TYPE}
 
 
 @app.get("/")
@@ -49,14 +74,26 @@ async def root():
 
 @app.get("/live")
 async def live():
-    # Liveness probe that doesn't load model
-    return {"ok": True}
+    # Liveness probe that doesn't load model; true even before model is ready
+    return {"ok": True, "loading": model_loading, "ready": model_ready}
 
 
 @app.get("/ready")
 async def ready():
-    # Readiness probe that ensures model can be loaded
-    return await health()
+    # Ready only when model is fully loaded
+    status_code = 200 if model_ready else 200
+    body = {"ok": bool(model_ready), "loading": model_loading, "ready": model_ready}
+    return JSONResponse(status_code=status_code, content=body)
+
+
+@app.on_event("startup")
+async def on_startup():
+    # Preload model on startup so the first transcription doesn't pay the download cost
+    try:
+        await asyncio.get_event_loop().run_in_executor(None, load_model)
+        logger.info("Model ready at startup")
+    except Exception as e:
+        logger.error(f"Model preload failed: {e}")
 
 
 class Session:
