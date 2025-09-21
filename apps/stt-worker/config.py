@@ -46,6 +46,13 @@ PARTIAL_ALPHA_RATIO_MIN = float(os.getenv("PARTIAL_ALPHA_RATIO_MIN", "0.5"))  # 
 # Server-side partials tail window (used by WS server); defined here for centralized env management
 TAIL_WINDOW_SEC = float(os.getenv("TAIL_WINDOW_SEC", "6.0"))
 
+# UI spectrum/FFT publishing
+FFT_PUBLISH = int(os.getenv("FFT_PUBLISH", "1"))
+FFT_TOPIC = os.getenv("FFT_TOPIC", "stt/audio_fft")
+FFT_RATE_HZ = float(os.getenv("FFT_RATE_HZ", "12"))
+FFT_BINS = int(os.getenv("FFT_BINS", "64"))
+FFT_LOG_SCALE = int(os.getenv("FFT_LOG_SCALE", "1"))  # 1 to use log magnitude scaling
+
 COMMON_WORDS: Set[str] = set(
     "the a an and of to you i it is that in we for on with this my your yes no thanks thank hello hi ok okay please what who where when why how can do are was were have has had just really sure right time date day weather play stop start open close tell give set make turn off on up down volume name today now current temperature".split()
 )

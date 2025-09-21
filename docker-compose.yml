@@ -12,6 +12,7 @@ services:
     command:
       - >
         set -e;
+        mkdir -p /mosquitto/data;
         mkdir -p /mosquitto/config;
         if [ ! -f /mosquitto/config/mosquitto.conf ]; then
           cp /ops/mosquitto.conf /mosquitto/config/mosquitto.conf;
@@ -77,6 +78,7 @@ services:
     build: ./apps/ui
     container_name: tars-ui
     network_mode: host
+    profiles: ["pygame"]
     environment:
       - MQTT_URL=mqtt://$MQTT_USER:$MQTT_PASS@$MQTT_HOST:$MQTT_PORT
       - UI_CONFIG=/config/ui.toml
@@ -85,3 +87,13 @@ services:
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ./apps/ui/ui.toml:/config/ui.toml:ro
+
+  ui-web:
+    build: ./apps/ui-web
+    container_name: tars-ui-web
+    network_mode: host
+    environment:
+      - MQTT_URL=mqtt://$MQTT_USER:$MQTT_PASS@$MQTT_HOST:$MQTT_PORT
+    depends_on:
+      - mqtt
+    restart: unless-stopped

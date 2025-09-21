@@ -8,7 +8,8 @@ import orjson
 from config import (
     LOG_LEVEL, MQTT_URL, POST_PUBLISH_COOLDOWN_MS, TTS_BASE_MUTE_MS, TTS_PER_CHAR_MS, TTS_MAX_MUTE_MS,
     STREAMING_PARTIALS, PARTIAL_INTERVAL_MS, PARTIAL_MIN_DURATION_MS, PARTIAL_MIN_CHARS, PARTIAL_MIN_NEW_CHARS,
-    PARTIAL_ALPHA_RATIO_MIN, STT_BACKEND
+    PARTIAL_ALPHA_RATIO_MIN, STT_BACKEND,
+    FFT_PUBLISH, FFT_TOPIC, FFT_RATE_HZ, FFT_BINS, FFT_LOG_SCALE
 )
 from audio_capture import AudioCapture
 from vad import VADProcessor
@@ -36,6 +37,7 @@ class STTWorker:
         self.fallback_unmute_task = None
         self._partials_task = None
         self._last_partial_text: str = ""
+        self._fft_task = None
 
     async def initialize(self):
         if os.path.exists("/host-models"):
@@ -140,6 +142,8 @@ class STTWorker:
             self.vad_processor = VADProcessor(self.audio_capture.sample_rate, self.audio_capture.frame_size)
             if self._enable_partials:
                 self._partials_task = asyncio.create_task(self._partials_loop())
+            if FFT_PUBLISH:
+                self._fft_task = asyncio.create_task(self._fft_loop())
             await self.process_audio_stream()
         except Exception as e:
             logger.error(f"STT worker error: {e}")
@@ -193,6 +197,52 @@ class STTWorker:
                 "is_final": False
             })
             logger.debug(f"Published partial: {t[:60]}{'...' if len(t)>60 else ''}")
+
+    async def _fft_loop(self):
+        """Publish a compact FFT magnitude array for UI visualization."""
+        period = 1.0 / max(1e-3, FFT_RATE_HZ)
+        bins = max(8, min(512, FFT_BINS))
+        window = np.hanning(1024)
+        last_pub = 0.0
+        while True:
+            await asyncio.sleep(0.01)
+            now = time.time()
+            if now - last_pub < period:
+                continue
+            last_pub = now
+            # Use the active buffer if speaking, else skip to avoid noise-only visuals
+            buf = self.vad_processor.get_active_buffer() if self.vad_processor else None
+            if not buf:
+                continue
+            # Convert to float32 mono signal
+            x = np.frombuffer(buf, dtype=np.int16).astype(np.float32)
+            if x.size < 256:
+                continue
+            # Take the last 1024 samples for FFT
+            segment = x[-1024:]
+            segment = segment - np.mean(segment)
+            segment = segment * window[: segment.size]
+            spec = np.fft.rfft(segment)
+            mag = np.abs(spec)
+            # Convert to dB-like scale if requested
+            if FFT_LOG_SCALE:
+                mag = 20.0 * np.log10(1e-6 + mag)
+                # Normalize to [0,1]
+                mag -= mag.min()
+                denom = (mag.max() - mag.min()) or 1.0
+                mag = mag / denom
+            else:
+                # Linear normalize
+                mag = mag / (np.max(mag) or 1.0)
+            # Keep only positive frequencies and downsample to bins
+            pos = mag[: len(mag)]
+            idx = np.linspace(0, len(pos) - 1, bins)
+            down = np.interp(idx, np.arange(len(pos)), pos)
+            try:
+                await self.mqtt.safe_publish(FFT_TOPIC, {"fft": down.tolist(), "ts": now})
+            except Exception:
+                # Non-fatal
+                pass
 
 async def main():
     logger.info("Starting TARS STT Worker")

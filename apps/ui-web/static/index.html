@@ -1,0 +1,80 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TARS Web UI</title>
+  <style>
+    body { background:#0a0a12; color:#eaeaea; font-family: system-ui, sans-serif; margin:0; padding:16px; }
+    .row { display:flex; gap:16px; align-items:center; }
+    .card { background:#111422; border:1px solid #1f2440; border-radius:8px; padding:12px; }
+    #spectrum { width:100%; height:200px; background:#0f1220; border-radius:6px; }
+    #partial { color:#cfe7ff; }
+    #final { color:#fff; font-weight:600; }
+    #tts { color:#a6f3b5; }
+  </style>
+  <script>
+    let ws;
+    let spectrum = new Array(64).fill(0);
+    function connect() {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      ws = new WebSocket(`${proto}://${location.host}/ws`);
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (!msg.topic) return;
+          const topic = typeof msg.topic === 'string' ? msg.topic : (msg.topic.value || String(msg.topic));
+          if (topic.endsWith('stt/partial')) {
+            document.getElementById('partial').textContent = msg.payload.text || '';
+          } else if (topic.endsWith('stt/final')) {
+            document.getElementById('final').textContent = msg.payload.text || '';
+            document.getElementById('partial').textContent = '';
+          } else if (topic.endsWith('tts/status')) {
+            if ((msg.payload.event||'') === 'speaking_start') {
+              document.getElementById('tts').textContent = msg.payload.text || '';
+            }
+          } else if (topic.endsWith('stt/audio_fft')) {
+            const a = msg.payload.fft || [];
+            spectrum = a;
+          }
+        } catch(e) {}
+      };
+      ws.onclose = () => setTimeout(connect, 1000);
+    }
+    function drawSpectrum() {
+      const canvas = document.getElementById('spectrum');
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width = canvas.clientWidth; 
+      const h = canvas.height = canvas.clientHeight;
+      ctx.clearRect(0,0,w,h);
+      const n = spectrum.length || 1;
+      const barW = w / n;
+      for (let i=0;i<n;i++) {
+        const v = Math.max(0, Math.min(1, spectrum[i] || 0));
+        const bh = v * (h-10);
+        const x = i*barW;
+        const y = h - bh;
+        ctx.fillStyle = `hsl(${(i/n)*240},70%,60%)`;
+        ctx.fillRect(x+1, y, Math.max(1, barW-2), bh);
+      }
+      requestAnimationFrame(drawSpectrum);
+    }
+    window.addEventListener('load', ()=>{ connect(); drawSpectrum(); });
+  </script>
+  </head>
+<body>
+  <div class="row" style="margin-bottom:12px;">
+    <div class="card" style="flex:2;">
+      <div id="final" style="font-size:22px;">—</div>
+      <div id="partial" style="font-size:18px; opacity:0.9;">—</div>
+    </div>
+    <div class="card" style="flex:1;">
+      <div style="font-size:16px; color:#9aa4d6;">TTS</div>
+      <div id="tts">—</div>
+    </div>
+  </div>
+  <div class="card">
+    <canvas id="spectrum"></canvas>
+  </div>
+</body>
+</html>
