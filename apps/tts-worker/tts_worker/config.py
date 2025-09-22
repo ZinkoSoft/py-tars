@@ -16,3 +16,7 @@ TTS_PIPELINE = int(getenv("TTS_PIPELINE", "1"))  # play sentence-by-sentence to 
 
 # Optional: play audio with simpleaudio instead of paplay/aplay subprocesses (0/1)
 TTS_SIMPLEAUDIO = int(getenv("TTS_SIMPLEAUDIO", "0"))
+
+# Optional: number of concurrent synthesis workers when pipeline mode is on (>=1)
+# When >1 and not streaming, sentences will be synthesized in parallel and played in order
+TTS_CONCURRENCY = int(getenv("TTS_CONCURRENCY", "1"))

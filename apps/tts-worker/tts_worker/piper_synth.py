@@ -9,6 +9,7 @@ import threading
 import time
 import re
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 logger = logging.getLogger("tts-worker.piper")
@@ -50,18 +51,37 @@ class PiperSynth:
         if not chunks:
             return 0.0
 
-        total = 0.0
-        for idx, chunk in enumerate(chunks):
-            if not chunk:
-                continue
-            if streaming:
+        # If streaming is enabled, we can't pre-synthesize and cache effectively; use existing path
+        if streaming:
+            total = 0.0
+            for idx, chunk in enumerate(chunks):
+                if not chunk:
+                    continue
                 try:
                     total += self._stream_to_player(chunk)
                 except Exception as e:
                     logger.warning(f"Streaming failed on chunk {idx+1}/{len(chunks)}: {e}; falling back to file playback for this chunk")
                     total += self._file_playback(chunk)
-            else:
-                total += self._file_playback(chunk)
+            return total
+
+        # Non-streaming: optionally synthesize multiple chunks concurrently, cache WAVs, and play in order
+        concurrency = 1
+        try:
+            # Late import to avoid circulars
+            from .config import TTS_CONCURRENCY  # type: ignore
+            concurrency = max(1, int(TTS_CONCURRENCY))
+        except Exception:
+            concurrency = 1
+
+        if pipeline and concurrency > 1 and len(chunks) > 1:
+            return self._file_playback_pipelined(chunks, concurrency=concurrency)
+
+        # Default sequential file playback
+        total = 0.0
+        for chunk in chunks:
+            if not chunk:
+                continue
+            total += self._file_playback(chunk)
         return total
 
     # ----- Internals -----
@@ -179,6 +199,79 @@ class PiperSynth:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as f:
             self._synth_to_wav(text, f.name)
             self._play_wav(f.name)
+        return time.time() - t0
+
+    def _file_playback_pipelined(self, chunks: list[str], concurrency: int = 2) -> float:
+        """Pre-synthesize chunks concurrently to WAV files, then play in-order from cache.
+
+        This reduces wait time between sentences. Uses a temporary directory for cache.
+        """
+        t0 = time.time()
+        # Guard against excessive workers
+        workers = max(1, min(concurrency, 8))
+        # Cache dir survives until method exit for stable file paths
+        with tempfile.TemporaryDirectory(prefix="piper_cache_") as cache_dir:
+            # Submit synthesis tasks
+            def _task(idx_and_text: tuple[int, str]) -> tuple[int, str]:
+                idx, txt = idx_and_text
+                out_path = os.path.join(cache_dir, f"chunk_{idx:03d}.wav")
+                try:
+                    self._synth_to_wav(txt, out_path)
+                except Exception as e:
+                    logger.warning(f"Synthesis failed for chunk {idx}: {e}; retrying via CLI fallback")
+                    # _synth_to_wav already falls back internally; in case of persistent failure, create empty file
+                    try:
+                        open(out_path, "wb").close()
+                    except Exception:
+                        pass
+                return idx, out_path
+
+            # Kick off synth jobs with limited parallelism
+            idx_texts = [(i, c) for i, c in enumerate(chunks) if c]
+            ready: dict[int, str] = {}
+            next_to_play = 0
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="piper-synth") as ex:
+                futures = {ex.submit(_task, it): it[0] for it in idx_texts}
+                # While there are pending futures or unplayed chunks
+                while futures or next_to_play < len(chunks):
+                    # Play any already-ready chunks in order
+                    played_any = False
+                    while next_to_play in ready:
+                        path = ready.pop(next_to_play)
+                        try:
+                            self._play_wav(path)
+                        finally:
+                            # Remove file after playback to keep cache small
+                            try:
+                                os.remove(path)
+                            except Exception:
+                                pass
+                        next_to_play += 1
+                        played_any = True
+                    if next_to_play >= len(chunks):
+                        break
+                    if played_any:
+                        # Loop back to check for more in-order ready items
+                        continue
+                    # Wait for at least one synth to complete
+                    if not futures:
+                        # Nothing to wait on; likely empty chunks ahead. Advance to end.
+                        next_to_play = len(chunks)
+                        break
+                    done, _pending = next(as_completed(futures)), None
+                    try:
+                        fut = done
+                        idx = futures.pop(fut)
+                        res_idx, out_path = fut.result()
+                        ready[res_idx] = out_path
+                    except Exception as e:
+                        logger.warning(f"Synthesis task error: {e}")
+                        # Mark this index as ready with an empty placeholder to avoid deadlock
+                        ready[idx] = os.path.join(cache_dir, f"chunk_{idx:03d}.wav")
+                        try:
+                            open(ready[idx], "wb").close()
+                        except Exception:
+                            pass
         return time.time() - t0
 
     def _stream_to_player(self, text: str) -> float:
