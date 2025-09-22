@@ -64,7 +64,7 @@ class STTWorker:
             logger.info("Streaming partial transcripts disabled")
 
     async def publish_health(self, ok: bool, message: str = ""):
-        await self.mqtt.safe_publish('system/health/stt', {"ok": ok, "event": message, "timestamp": time.time()})
+        await self.mqtt.safe_publish('system/health/stt', {"ok": ok, "event": message, "timestamp": time.time()}, retain=True)
 
     async def publish_transcript(self, text: str, confidence: float | None):
         payload = {"text": text, "lang": "en", "confidence": confidence, "timestamp": time.time(), "is_final": True}

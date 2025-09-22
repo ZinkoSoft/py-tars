@@ -30,7 +30,7 @@ class TTSService:
         try:
             async with mqtt.Client(hostname=host, port=port, username=username, password=password, client_id="tars-tts") as client:
                 logger.info(f"Connected to MQTT {host}:{port} as tars-tts")
-                await client.publish("system/health/tts", json.dumps({"ok": True, "event": "ready"}))
+                await client.publish("system/health/tts", json.dumps({"ok": True, "event": "ready"}), retain=True)
                 await client.subscribe("tts/say")
                 logger.info("Subscribed to tts/say, ready to process messages")
                 async with client.messages() as messages:
@@ -44,7 +44,7 @@ class TTSService:
                             await self._speak(client, text, stt_ts)
                         except Exception as e:
                             logger.error(f"Error processing message: {e}")
-                            await client.publish("system/health/tts", json.dumps({"ok": False, "err": str(e)}))
+                            await client.publish("system/health/tts", json.dumps({"ok": False, "err": str(e)}), retain=True)
         except MqttError as e:
             logger.info(f"MQTT disconnected: {e}; shutting down gracefully")
 

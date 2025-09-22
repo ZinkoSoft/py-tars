@@ -61,13 +61,13 @@ class MQTTClientWrapper:
             await self.disconnect()
             await self.connect()
 
-    async def safe_publish(self, topic: str, obj: dict, retries: int = 3):
+    async def safe_publish(self, topic: str, obj: dict, retries: int = 3, retain: bool = False):
         if not self.client:
             return
         data = orjson.dumps(obj)
         for attempt in range(1, retries + 1):
             try:
-                await self.client.publish(topic, data)
+                await self.client.publish(topic, data, retain=retain)
                 return
             except Exception as e:
                 logger.warning(f"Publish attempt {attempt} to '{topic}' failed: {e}")
