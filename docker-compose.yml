@@ -114,10 +114,18 @@ services:
       - MEMORY_TOP_K=${MEMORY_TOP_K:-5}
       - TOPIC_MEMORY_QUERY=${TOPIC_MEMORY_QUERY:-memory/query}
       - TOPIC_MEMORY_RESULTS=${TOPIC_MEMORY_RESULTS:-memory/results}
+      # Character config
+      - CHARACTER_NAME=${CHARACTER_NAME:-TARS}
+      - CHARACTER_DIR=${CHARACTER_DIR:-/config/characters}
+      - TOPIC_CHARACTER_GET=${TOPIC_CHARACTER_GET:-character/get}
+      - TOPIC_CHARACTER_RESULT=${TOPIC_CHARACTER_RESULT:-character/result}
+      - TOPIC_CHARACTER_CURRENT=${TOPIC_CHARACTER_CURRENT:-system/character/current}
     volumes:
       - ./data/memory:/data
       # Persist model cache to speed up rebuilds
       - ./data/model_cache:/data/model_cache
+      # Optional character TOML mount, if available
+      - ./apps/voice/characters:/config/characters:ro
     depends_on:
       - mqtt
     restart: unless-stopped

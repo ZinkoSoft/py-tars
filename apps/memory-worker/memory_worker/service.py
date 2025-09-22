@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging, os
 from urllib.parse import urlparse
+from typing import Any, Dict
+from pathlib import Path
 import asyncio_mqtt as mqtt
 import orjson as json
 from .config import (
@@ -10,10 +12,18 @@ from .config import (
     RAG_STRATEGY, TOP_K, EMBED_MODEL,
     TOPIC_STT_FINAL, TOPIC_TTS_SAY,
     TOPIC_QUERY, TOPIC_RESULTS, TOPIC_HEALTH,
+    # character topics/config
+    CHARACTER_NAME, CHARACTER_DIR,
+    TOPIC_CHAR_GET, TOPIC_CHAR_RESULT, TOPIC_CHAR_CURRENT,
 )
 from .hyperdb import HyperDB, HyperConfig
 import numpy as np
 from sentence_transformers import SentenceTransformer
+
+try:
+    import tomllib  # Python 3.11+
+except Exception:  # pragma: no cover
+    import tomli as tomllib  # type: ignore
 
 
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
@@ -70,6 +80,9 @@ class MemoryService:
                             pass
             except Exception as e:
                 logger.warning(f"Could not reconcile embedding dim: {e}")
+        # Character state
+        self.character = {}
+        self._load_character()
 
     async def run(self):
         host, port, user, pwd = parse_mqtt(MQTT_URL)
@@ -78,14 +91,21 @@ class MemoryService:
             async with mqtt.Client(hostname=host, port=port, username=user, password=pwd, client_id="tars-memory") as client:
                 logger.info(f"Connected to MQTT {host}:{port} as tars-memory")
                 await client.publish(TOPIC_HEALTH, json.dumps({"ok": True, "event": "ready"}), retain=True)
+                # Publish current character snapshot (retained)
+                if self.character:
+                    try:
+                        await client.publish(TOPIC_CHAR_CURRENT, json.dumps(self.character), retain=True)
+                    except Exception:
+                        logger.exception("Failed to publish character/current")
                 # Prepare message stream (unfiltered_messages is deprecated)
                 async with client.messages() as mstream:
-                    for t in [TOPIC_STT_FINAL, TOPIC_TTS_SAY, TOPIC_QUERY]:
+                    for t in [TOPIC_STT_FINAL, TOPIC_TTS_SAY, TOPIC_QUERY, TOPIC_CHAR_GET]:
                         await client.subscribe(t)
                         logger.info(f"Subscribed to {t}")
                     async for m in mstream:
                         try:
-                            topic = m.topic if isinstance(m.topic, str) else m.topic.decode("utf-8", "ignore")
+                            # Ensure topic is a plain string; some clients provide a Topic object
+                            topic = str(getattr(m, "topic", ""))
                             logger.info(f"MQTT msg on topic='{topic}' len={len(m.payload)}")
                             # Robust payload parsing: prefer JSON, but accept plain-text payloads
                             try:
@@ -108,6 +128,8 @@ class MemoryService:
                                 payload = {"query": q, "results": out, "k": k}
                                 logger.info(f"Publishing memory/results: {len(out)} hits")
                                 await client.publish(TOPIC_RESULTS, json.dumps(payload))
+                            elif topic == TOPIC_CHAR_GET:
+                                await self._handle_char_get(client, data)
                             elif topic in (TOPIC_STT_FINAL, TOPIC_TTS_SAY):
                                 # Record conversational pairings where possible
                                 text = (data.get("text") or "").strip()
@@ -128,3 +150,51 @@ class MemoryService:
                             await client.publish(TOPIC_HEALTH, json.dumps({"ok": False, "err": str(e)}), retain=True)
         except Exception as e:
             logger.info(f"MQTT disconnected or error: {e}; shutting down gracefully")
+
+    def _load_character(self) -> None:
+        """Load character TOML if available and seed in-memory snapshot.
+
+        Expected path: CHARACTER_DIR/CHARACTER_NAME/character.toml
+        Minimal schema: { info = { name, description? }, traits = { ... }, voice = { ... } }
+        """
+        try:
+            char_dir = Path(CHARACTER_DIR) / CHARACTER_NAME
+            toml_path = char_dir / "character.toml"
+            if not toml_path.exists():
+                logger.warning("Character file not found: %s", toml_path)
+                # Seed with defaults
+                self.character = {"name": CHARACTER_NAME, "traits": {}, "voice": {}}
+                return
+            with open(toml_path, "rb") as f:
+                data = tomllib.load(f)
+            name = data.get("info", {}).get("name") or CHARACTER_NAME
+            traits = data.get("traits", {}) or {}
+            voice = data.get("voice", {}) or {}
+            meta = data.get("meta", {}) or {}
+            self.character = {
+                "name": name,
+                "traits": traits,
+                "voice": voice,
+                "meta": meta,
+            }
+            logger.info("Loaded character '%s' with %d traits", name, len(traits))
+        except Exception:
+            logger.exception("Failed to load character config")
+            self.character = {"name": CHARACTER_NAME, "traits": {}, "voice": {}}
+
+    async def _handle_char_get(self, client, data: Dict[str, Any]) -> None:
+        """Respond to character/get with character/result containing current state.
+
+        Payload may specify a section filter: { section: "traits" | "voice" | "meta" }
+        or a path: { path: "traits.personality" }, but for now we support section only.
+        """
+        section = (data or {}).get("section")
+        result: Dict[str, Any]
+        if not section:
+            result = self.character
+        else:
+            if section in self.character:
+                result = {section: self.character.get(section)}
+            else:
+                result = {"error": f"unknown section '{section}'", "available": list(self.character.keys())}
+        await client.publish(TOPIC_CHAR_RESULT, json.dumps(result), qos=0, retain=False)
