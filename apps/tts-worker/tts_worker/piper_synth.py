@@ -1,0 +1,311 @@
+from __future__ import annotations
+
+import io
+import logging
+import os
+import subprocess
+import tempfile
+import threading
+import time
+import re
+from typing import Optional
+
+
+logger = logging.getLogger("tts-worker.piper")
+
+
+try:
+    from piper.voice import PiperVoice  # type: ignore
+    logger.info("Piper Python API is available")
+    _HAS_PIPER_API = True
+except Exception as e:  # pragma: no cover - environment dependent
+    logger.info(f"Piper Python API not available, will use CLI fallback: {e}")
+    PiperVoice = None  # type: ignore
+    _HAS_PIPER_API = False
+
+
+class PiperSynth:
+    """Piper text-to-speech wrapper.
+
+    - Keeps voice model loaded (when API available)
+    - Supports two playback modes: streaming to player or synth-to-file then play
+    - Provides robust fallbacks to ensure audible output
+    """
+
+    def __init__(self, voice_path: str):
+        self.voice_path = voice_path
+        self.voice: Optional[object] = None
+        if _HAS_PIPER_API:
+            self._load_voice()
+
+    # ----- Public API -----
+    def synth_and_play(self, text: str, streaming: bool = False, pipeline: bool = True) -> float:
+        """Synthesize `text` and play it.
+
+        Returns total elapsed seconds until playback finishes.
+        """
+        # Optionally split long text into sentence-sized chunks to reduce time-to-first-audio
+        chunks = self._split_sentences(text) if pipeline else [text]
+        # If the splitter produced no chunks (empty/whitespace), keep behavior predictable
+        if not chunks:
+            return 0.0
+
+        total = 0.0
+        for idx, chunk in enumerate(chunks):
+            if not chunk:
+                continue
+            if streaming:
+                try:
+                    total += self._stream_to_player(chunk)
+                except Exception as e:
+                    logger.warning(f"Streaming failed on chunk {idx+1}/{len(chunks)}: {e}; falling back to file playback for this chunk")
+                    total += self._file_playback(chunk)
+            else:
+                total += self._file_playback(chunk)
+        return total
+
+    # ----- Internals -----
+    def _load_voice(self) -> None:
+        assert PiperVoice is not None
+        try:
+            logger.info(f"Loading Piper voice model once: {self.voice_path}")
+            # Try both path and file-object forms; support optional config json
+            try:
+                self.voice = PiperVoice.load(self.voice_path)  # type: ignore[attr-defined]
+            except TypeError:
+                with open(self.voice_path, "rb") as mf:
+                    config_path = self.voice_path + ".json" if os.path.exists(self.voice_path + ".json") else None
+                    if config_path:
+                        try:
+                            self.voice = PiperVoice.load(mf, config_path=config_path)  # type: ignore
+                        except TypeError:
+                            self.voice = PiperVoice.load(mf)  # type: ignore
+                    else:
+                        self.voice = PiperVoice.load(mf)  # type: ignore
+            logger.info("Piper voice loaded and ready")
+        except Exception as e:
+            logger.warning(f"Failed to load Piper API model, will use CLI fallback: {e}")
+            self.voice = None
+
+    def _synth_to_wav(self, text: str, wav_path: str) -> None:
+        if self.voice is not None:
+            # API path: write to file (works across versions)
+            try:
+                with open(wav_path, "wb") as f:
+                    # Try known keyword variants first to write directly to file handle
+                    wrote_via_kw = False
+                    for kw in ("wav_file", "wavfile", "audio_out"):
+                        try:
+                            self.voice.synthesize(text, **{kw: f})  # type: ignore[arg-type]
+                            wrote_via_kw = True
+                            break
+                        except TypeError:
+                            continue
+
+                    if not wrote_via_kw:
+                        # Fall back to return-value style; support bytes, numpy-like, or generators/iterables
+                        audio_obj = self.voice.synthesize(text)  # type: ignore[call-arg]
+
+                        def _write_chunk(chunk) -> None:
+                            if chunk is None:
+                                return
+                            if isinstance(chunk, (bytes, bytearray)):
+                                f.write(chunk)
+                            elif isinstance(chunk, memoryview):
+                                f.write(chunk.tobytes())
+                            elif hasattr(chunk, "tobytes"):
+                                f.write(chunk.tobytes())  # type: ignore[attr-defined]
+                            else:
+                                # Let outer logic decide on unsupported chunk types
+                                raise TypeError(f"Unsupported chunk type: {type(chunk)!r}")
+
+                        if isinstance(audio_obj, (bytes, bytearray, memoryview)) or hasattr(audio_obj, "tobytes"):
+                            _write_chunk(audio_obj)
+                        elif hasattr(audio_obj, "__iter__") and not isinstance(audio_obj, (str, bytes, bytearray)):
+                            # Generator/iterable of chunks
+                            iterator = iter(audio_obj)
+                            try:
+                                first = next(iterator)
+                            except StopIteration:
+                                # Nothing produced; fall back to CLI silently
+                                f.close()
+                                self._cli_synth(text, wav_path)
+                                return
+
+                            # If chunks have samples+sample_rate, write a proper WAV via wave module
+                            if hasattr(first, "samples") and hasattr(first, "sample_rate"):
+                                import wave
+
+                                def _as_bytes(samples):
+                                    if isinstance(samples, (bytes, bytearray, memoryview)):
+                                        return bytes(samples)
+                                    if hasattr(samples, "tobytes"):
+                                        return samples.tobytes()  # type: ignore[attr-defined]
+                                    return bytes(samples)
+
+                                channels = getattr(first, "channels", getattr(first, "num_channels", 1))
+                                sampwidth = getattr(first, "sample_width", 2)  # default 16-bit
+                                framerate = getattr(first, "sample_rate", 22050)
+
+                                with wave.open(f, "wb") as wf:
+                                    wf.setnchannels(int(channels) or 1)
+                                    wf.setsampwidth(int(sampwidth) or 2)
+                                    wf.setframerate(int(framerate) or 22050)
+                                    wf.writeframes(_as_bytes(getattr(first, "samples")))
+                                    for ch in iterator:
+                                        if hasattr(ch, "samples"):
+                                            wf.writeframes(_as_bytes(getattr(ch, "samples")))
+                                        else:
+                                            # Mixed types; fallback for safety
+                                            raise TypeError(f"Mixed or unsupported chunk type: {type(ch)!r}")
+                            else:
+                                # Unsupported chunk structure; fall back to CLI silently
+                                f.close()
+                                self._cli_synth(text, wav_path)
+                                return
+                        else:
+                            # Unknown return type; fall back to CLI silently
+                            f.close()
+                            self._cli_synth(text, wav_path)
+                            return
+            except Exception as e:
+                logger.warning(f"Piper API synth failed: {e}; using CLI fallback")
+                self._cli_synth(text, wav_path)
+        else:
+            self._cli_synth(text, wav_path)
+
+    def _file_playback(self, text: str) -> float:
+        t0 = time.time()
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as f:
+            self._synth_to_wav(text, f.name)
+            self._play_wav(f.name)
+        return time.time() - t0
+
+    def _stream_to_player(self, text: str) -> float:
+        """Try API streaming if supported, else CLI streaming to paplay/aplay."""
+        t0 = time.time()
+        if self.voice is not None and _supports_wav_file(self.voice):
+            return self._api_stream(text, t0)
+        return self._cli_stream(text, t0)
+
+    def _api_stream(self, text: str, t0: float) -> float:
+        assert self.voice is not None
+        r_fd, w_fd = os.pipe()
+        r = os.fdopen(r_fd, "rb", buffering=0)
+        w = os.fdopen(w_fd, "wb", buffering=0)
+
+        class _PipeWriter(io.RawIOBase):
+            def __init__(self, fh):
+                self.fh = fh
+            def writable(self):
+                return True
+            def write(self, b):
+                return self.fh.write(b)
+            def flush(self):
+                try:
+                    self.fh.flush()
+                except Exception:
+                    pass
+
+        writer = _PipeWriter(w)
+
+        def _synth_thread():
+            try:
+                try:
+                    self.voice.synthesize(text, wav_file=writer)  # type: ignore[arg-type]
+                except TypeError:
+                    try:
+                        self.voice.synthesize(text, wavfile=writer)  # type: ignore
+                    except TypeError:
+                        self.voice.synthesize(text, audio_out=writer)  # type: ignore
+            finally:
+                try:
+                    writer.flush()
+                except Exception:
+                    pass
+                try:
+                    w.close()
+                except Exception:
+                    pass
+
+        th = threading.Thread(target=_synth_thread, daemon=True)
+        th.start()
+        p_play = _spawn_player(stdin=r)
+        rc = p_play.wait()
+        th.join(timeout=1.0)
+        try:
+            r.close()
+        except Exception:
+            pass
+        if rc != 0:
+            logger.warning(f"paplay/aplay exited with code {rc}; falling back to file playback")
+            return self._file_playback(text)
+        return time.time() - t0
+
+    def _cli_stream(self, text: str, t0: float) -> float:
+        cmd = ["piper", "-m", self.voice_path, "-f", "-"]
+        logger.debug(f"Streaming via Piper CLI -> player: {' '.join(cmd)} | paplay -")
+        p_piper = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=False)
+        p_play = _spawn_player(stdin=p_piper.stdout)
+        assert p_piper.stdin is not None
+        p_piper.stdin.write(text.encode("utf-8"))
+        p_piper.stdin.close()
+        rc = p_play.wait()
+        p_piper.wait()
+        if rc != 0:
+            logger.warning(f"paplay/aplay exited with code {rc} (CLI stream); falling back to file playback")
+            return self._file_playback(text)
+        return time.time() - t0
+
+    def _cli_synth(self, text: str, wav_path: str) -> None:
+        cmd = ["piper", "-m", self.voice_path, "-f", wav_path]
+        logger.debug(f"Synthesizing via Piper CLI: {' '.join(cmd)}")
+        subprocess.run(cmd, input=text, text=True, check=True)
+
+    def _play_wav(self, path: str) -> None:
+        p = _spawn_player(args=[path])
+        rc = p.wait()
+        if rc != 0:
+            # Try alternate player
+            alt = _spawn_player(args=[path], prefer_aplay=True)
+            alt.wait()
+
+    # ----- helpers -----
+    def _split_sentences(self, text: str) -> list[str]:
+        """Lightweight sentence splitter.
+
+        Splits on punctuation that typically ends sentences: . ! ?
+        Collapses extra whitespace and preserves punctuation with the chunk.
+        """
+        t = (text or "").strip()
+        if not t:
+            return []
+        # Split on whitespace following ., !, or ?
+        parts = re.split(r"(?<=[\.\!\?])\s+", t)
+        # If no sentence-ending punctuation, return as single chunk
+        chunks = [p.strip() for p in parts if p and p.strip()]
+        return chunks if chunks else [t]
+
+
+def _supports_wav_file(voice: object) -> bool:
+    import inspect
+    try:
+        sig = inspect.signature(voice.synthesize)  # type: ignore[attr-defined]
+    except Exception:
+        return False
+    return any(p.name in ("wav_file", "wavfile", "audio_out") for p in sig.parameters.values())
+
+
+def _spawn_player(stdin=None, args: Optional[list[str]] = None, prefer_aplay: bool = False):
+    """Start paplay/aplay with given stdin or path args."""
+    if args is None:
+        args = ["-"]
+    if prefer_aplay:
+        try:
+            return subprocess.Popen(["aplay", *args], stdin=stdin)
+        except FileNotFoundError:
+            return subprocess.Popen(["paplay", *args], stdin=stdin)
+    try:
+        return subprocess.Popen(["paplay", *args], stdin=stdin)
+    except FileNotFoundError:
+        return subprocess.Popen(["aplay", *args], stdin=stdin)

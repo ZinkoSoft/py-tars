@@ -3,7 +3,7 @@ import logging
 from urllib.parse import urlparse
 import asyncio_mqtt as mqtt
 import orjson
-from typing import Callable, Awaitable, Optional
+from typing import Callable, Awaitable, Optional, Dict
 
 logger = logging.getLogger("stt-worker.mqtt")
 
@@ -12,7 +12,9 @@ class MQTTClientWrapper:
         self.mqtt_url = mqtt_url
         self.client_id = client_id
         self.client: Optional[mqtt.Client] = None
-        self._listener_tasks = []
+        self._handlers: Dict[str, Callable[[bytes], Awaitable[None]]] = {}
+        self._dispatcher_task: Optional[asyncio.Task] = None
+        self._topics: set[str] = set()
         self._lock = asyncio.Lock()
 
     def parse(self):
@@ -22,9 +24,18 @@ class MQTTClientWrapper:
     async def connect(self):
         host, port, username, password = self.parse()
         logger.info(f"Connecting to MQTT {host}:{port}")
-        self.client = mqtt.Client(hostname=host, port=port, username=username, password=password, client_id=self.client_id)
+        # Use a slightly longer keepalive to avoid broker idle disconnects
+        self.client = mqtt.Client(hostname=host, port=port, username=username, password=password, client_id=self.client_id, keepalive=120)
         await self.client.__aenter__()
         logger.info("Connected to MQTT")
+        # Re-subscribe to registered topics on (re)connect
+        for t in list(self._topics):
+            try:
+                await self.client.subscribe(t)
+                logger.info(f"Subscribed to {t}")
+            except Exception as e:
+                logger.error(f"Subscribe failed for {t}: {e}")
+        self._ensure_dispatcher()
 
     async def disconnect(self):
         if self.client:
@@ -59,32 +70,46 @@ class MQTTClientWrapper:
                 await asyncio.sleep(0.5 * attempt)
 
     async def subscribe_stream(self, topic: str, handler: Callable[[bytes], Awaitable[None]]):
-        async def _runner():
-            backoff = 0.5
-            while True:
-                if not self.client:
-                    try:
-                        await self.reconnect()
-                    except Exception as e:
-                        logger.error(f"Reconnect in subscribe_stream failed: {e}")
-                        await asyncio.sleep(backoff)
-                        backoff = min(backoff * 2, 5)
-                        continue
+        # Register handler and ensure we're subscribed and dispatching
+        self._handlers[topic] = handler
+        self._topics.add(topic)
+        if self.client:
+            try:
+                await self.client.subscribe(topic)
+                logger.info(f"Subscribed to {topic}")
+            except Exception as e:
+                logger.error(f"Subscribe failed for {topic}: {e}")
+        self._ensure_dispatcher()
+        return None
+
+    def _ensure_dispatcher(self):
+        if self._dispatcher_task and not self._dispatcher_task.done():
+            return
+        self._dispatcher_task = asyncio.create_task(self._dispatch_loop())
+
+    async def _dispatch_loop(self):
+        backoff = 0.5
+        while True:
+            if not self.client:
                 try:
-                    async with self.client.filtered_messages(topic) as messages:
-                        await self.client.subscribe(topic)
-                        logger.info(f"Subscribed to {topic}")
-                        backoff = 0.5
-                        async for msg in messages:
-                            try:
-                                await handler(msg.payload)
-                            except Exception as e:
-                                logger.error(f"Handler error for topic {topic}: {e}")
+                    await self.reconnect()
                 except Exception as e:
-                    logger.error(f"Subscription loop error on {topic}: {e}")
+                    logger.error(f"Reconnect in dispatch loop failed: {e}")
                     await asyncio.sleep(backoff)
                     backoff = min(backoff * 2, 5)
                     continue
-        task = asyncio.create_task(_runner())
-        self._listener_tasks.append(task)
-        return task
+            try:
+                async with self.client.messages() as messages:
+                    backoff = 0.5
+                    async for msg in messages:
+                        try:
+                            h = self._handlers.get(msg.topic)
+                            if h:
+                                await h(msg.payload)
+                        except Exception as e:
+                            logger.error(f"Handler error for topic {msg.topic}: {e}")
+            except Exception as e:
+                logger.error(f"Dispatch loop error: {e}")
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 5)
+                continue

@@ -18,7 +18,8 @@ RUN pip install -r requirements.txt
 
 # Copy voice models from mounted read-only source to writable container location
 RUN mkdir -p /voices
-COPY main.py .
+COPY main.py ./
+COPY tts_worker ./tts_worker
 
 # At runtime, copy voice models with proper permissions
-ENTRYPOINT ["/bin/sh", "-c", "if [ -d /voice-models ]; then cp -r /voice-models/* /voices/ && chmod -R 644 /voices/*; fi && exec python main.py"]
+ENTRYPOINT ["/bin/sh", "-c", "if [ -d /voice-models ] && [ \"$(ls -A /voice-models 2>/dev/null)\" ]; then cp -r /voice-models/* /voices/ && chmod -R 644 /voices/*; else echo 'No voice models mounted at /voice-models'; fi; if [ ! -f /voices/TARS.onnx ]; then echo 'WARNING: /voices/TARS.onnx not found'; fi; exec python main.py"]

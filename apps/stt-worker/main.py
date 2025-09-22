@@ -8,7 +8,7 @@ import orjson
 from config import (
     LOG_LEVEL, MQTT_URL, POST_PUBLISH_COOLDOWN_MS, TTS_BASE_MUTE_MS, TTS_PER_CHAR_MS, TTS_MAX_MUTE_MS,
     STREAMING_PARTIALS, PARTIAL_INTERVAL_MS, PARTIAL_MIN_DURATION_MS, PARTIAL_MIN_CHARS, PARTIAL_MIN_NEW_CHARS,
-    PARTIAL_ALPHA_RATIO_MIN, STT_BACKEND,
+    PARTIAL_ALPHA_RATIO_MIN, STT_BACKEND, UNMUTE_GUARD_MS,
     FFT_PUBLISH, FFT_TOPIC, FFT_RATE_HZ, FFT_BINS, FFT_LOG_SCALE
 )
 from audio_capture import AudioCapture
@@ -48,6 +48,8 @@ class STTWorker:
         await self.mqtt.connect()
         await self.publish_health(True, "STT service ready")
         await self.mqtt.subscribe_stream('tts/status', self._handle_tts_status)
+        # Also listen to tts/say to preemptively mute and set echo context, in case we miss 'speaking_start'
+        await self.mqtt.subscribe_stream('tts/say', self._handle_tts_say)
         # For WS backend the current transcriber opens a new WS per call; avoid partials to reduce overhead
         self._enable_partials = STREAMING_PARTIALS and STT_BACKEND != "ws"
         if self._enable_partials:
@@ -84,6 +86,36 @@ class STTWorker:
         except Exception as e:
             logger.error(f"Error handling TTS status: {e}")
 
+    async def _handle_tts_say(self, payload: bytes):
+        """When a TTS request is published, proactively mute to avoid capturing the TTS audio.
+        Also reschedule a conservative fallback unmute based on the outgoing TTS text length.
+        """
+        try:
+            data = orjson.loads(payload)
+            txt = data.get('text', '')
+            if not txt:
+                return
+            self.state.last_tts_text = txt.strip()
+            self.pending_tts = True
+            self.audio_capture.mute("tts say")
+            # Reschedule fallback unmute based on the TTS text itself (more accurate than STT text)
+            if self.fallback_unmute_task and not self.fallback_unmute_task.done():
+                self.fallback_unmute_task.cancel()
+            # Use conservative cap; avoid underestimating TTS duration
+            async def fallback_unmute_tts():
+                try:
+                    await asyncio.sleep(TTS_MAX_MUTE_MS / 1000.0)
+                    # If we never saw speaking_end, fail safe by unmuting but clear pending flag
+                    if self.audio_capture.is_muted and self.pending_tts:
+                        self.pending_tts = False
+                        self.audio_capture.unmute("tts say fallback-timeout")
+                        self.recent_unmute_time = time.time()
+                except asyncio.CancelledError:
+                    pass
+            self.fallback_unmute_task = asyncio.create_task(fallback_unmute_tts())
+        except Exception as e:
+            logger.error(f"Error handling TTS say: {e}")
+
     async def process_audio_stream(self):
         logger.info("Starting audio processing loop")
         async for chunk in self.audio_capture.get_audio_chunks():
@@ -92,7 +124,7 @@ class STTWorker:
                 continue
             if self.pending_tts:
                 continue
-            if self.recent_unmute_time and (time.time() - self.recent_unmute_time) < 0.4:
+            if self.recent_unmute_time and (time.time() - self.recent_unmute_time) < (UNMUTE_GUARD_MS / 1000.0):
                 np_chunk = np.frombuffer(chunk, dtype=np.int16)
                 if np_chunk.size:
                     rms = float(np.sqrt(np.mean(np_chunk.astype(np.float32) ** 2)))
@@ -117,7 +149,8 @@ class STTWorker:
             # Publish accepted
             logger.info(f"Transcribed: '{text.strip()}'{f' (conf {confidence:.2f})' if confidence is not None else ''}")
             self.audio_capture.mute("post-transcription")
-            est_ms = int(min(TTS_MAX_MUTE_MS, TTS_BASE_MUTE_MS + len(text) * TTS_PER_CHAR_MS))
+            # Use conservative cap; per-char estimates can be too short
+            est_ms = int(TTS_MAX_MUTE_MS)
             unmute_at = time.time() + est_ms / 1000.0
             if self.fallback_unmute_task and not self.fallback_unmute_task.done():
                 self.fallback_unmute_task.cancel()
@@ -163,7 +196,7 @@ class STTWorker:
             if self.pending_tts or self.audio_capture.is_muted:
                 continue
             # Basic guard after unmute
-            if self.recent_unmute_time and (time.time() - self.recent_unmute_time) < 0.3:
+            if self.recent_unmute_time and (time.time() - self.recent_unmute_time) < (UNMUTE_GUARD_MS / 1000.0):
                 continue
             buf = self.vad_processor.get_active_buffer()
             if not buf:

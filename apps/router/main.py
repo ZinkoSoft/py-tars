@@ -70,7 +70,15 @@ async def handle_utterance(c: mqtt.Client, payload: bytes):
         logger.info("Using fallback response")
         resp = {"text": f"Roger that. {u.text}", "style": "neutral"}
     
-    out = {"text": resp["text"], "voice": "piper/en_US/amy", "lang": "en", "utt_id": u.utt_id, "style": resp["style"]}
+    # Include STT timestamp to track end-to-end latency on the TTS side
+    out = {
+        "text": resp["text"],
+        "voice": "piper/en_US/amy",
+        "lang": "en",
+        "utt_id": u.utt_id,
+        "style": resp["style"],
+        "stt_ts": u.timestamp
+    }
     logger.info(f"Sending TTS response: {resp['text'][:50]}{'...' if len(resp['text']) > 50 else ''}")
     await publish(c, "tts/say", out)
 

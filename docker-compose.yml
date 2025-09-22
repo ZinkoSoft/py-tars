@@ -46,6 +46,10 @@ services:
       - WS_URL=${WS_URL:-ws://127.0.0.1:9000/stt}
       - PULSE_RUNTIME_PATH=/run/user/1000/pulse
       - PULSE_SERVER=unix:/run/user/1000/pulse/native
+      - SILENCE_THRESHOLD_MS=${SILENCE_THRESHOLD_MS:-600}
+      - CHUNK_DURATION_MS=${CHUNK_DURATION_MS:-20}
+      - VAD_AGGRESSIVENESS=${VAD_AGGRESSIVENESS:-3}
+      - SAMPLE_RATE=${SAMPLE_RATE:-16000}
 
   router:
     build: ./apps/router
@@ -73,6 +77,8 @@ services:
       - PULSE_RUNTIME_PATH=/run/user/1000/pulse
       - PULSE_SERVER=unix:/run/user/1000/pulse/native
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TTS_STREAMING=${TTS_STREAMING:-0}
+      - TTS_PIPELINE=${TTS_PIPELINE:-1}
 
   ui:
     build: ./apps/ui
