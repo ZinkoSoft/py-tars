@@ -9,6 +9,7 @@ except Exception:
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 import asyncio_mqtt as mqtt
+from asyncio_mqtt import MqttError
 
 # Configure logging
 logging.basicConfig(
@@ -85,22 +86,25 @@ async def handle_utterance(c: mqtt.Client, payload: bytes):
 async def main():
     host, port, user, pwd = parse_mqtt(MQTT_URL)
     logger.info(f"Connecting to MQTT {host}:{port}")
-    async with mqtt.Client(hostname=host, port=port, username=user, password=pwd, client_id="tars-router") as client:
-        logger.info(f"Connected to MQTT {host}:{port} as tars-router")
-        await publish(client, "system/health/router", {"ok": True, "event": "ready"})
-        await client.subscribe("stt/final")
-        logger.info("Subscribed to stt/final, ready to process messages")
-        msgs = client.messages()
-        async with msgs as mstream:
-            # warm TTS
-            logger.info("Sending startup message to TTS")
-            await publish(client, "tts/say", {"text": "Systems ready.", "voice": "piper/en_US/amy", "lang": "en", "utt_id": "boot", "style": "neutral"})
-            async for m in mstream:
-                try:
-                    await handle_utterance(client, m.payload)
-                except Exception as e:
-                    logger.error(f"Error processing utterance: {e}")
-                    await publish(client, "system/health/router", {"ok": False, "err": str(e)})
+    try:
+        async with mqtt.Client(hostname=host, port=port, username=user, password=pwd, client_id="tars-router") as client:
+            logger.info(f"Connected to MQTT {host}:{port} as tars-router")
+            await publish(client, "system/health/router", {"ok": True, "event": "ready"})
+            await client.subscribe("stt/final")
+            logger.info("Subscribed to stt/final, ready to process messages")
+            msgs = client.messages()
+            async with msgs as mstream:
+                # warm TTS
+                logger.info("Sending startup message to TTS")
+                await publish(client, "tts/say", {"text": "Systems ready.", "voice": "piper/en_US/amy", "lang": "en", "utt_id": "boot", "style": "neutral"})
+                async for m in mstream:
+                    try:
+                        await handle_utterance(client, m.payload)
+                    except Exception as e:
+                        logger.error(f"Error processing utterance: {e}")
+                        await publish(client, "system/health/router", {"ok": False, "err": str(e)})
+    except MqttError as e:
+        logger.info(f"MQTT disconnected: {e}; shutting down gracefully")
 
 if __name__ == "__main__":
     asyncio.run(main())

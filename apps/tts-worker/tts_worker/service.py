@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from urllib.parse import urlparse
 
 import asyncio_mqtt as mqtt
 import orjson as json
+from asyncio_mqtt import MqttError
 
 from .config import MQTT_URL, TTS_STREAMING, TTS_PIPELINE
 from .piper_synth import PiperSynth
@@ -27,23 +27,26 @@ class TTSService:
     async def run(self):
         host, port, username, password = parse_mqtt(MQTT_URL)
         logger.info(f"Connecting to MQTT {host}:{port}")
-        async with mqtt.Client(hostname=host, port=port, username=username, password=password, client_id="tars-tts") as client:
-            logger.info(f"Connected to MQTT {host}:{port} as tars-tts")
-            await client.publish("system/health/tts", json.dumps({"ok": True, "event": "ready"}))
-            await client.subscribe("tts/say")
-            logger.info("Subscribed to tts/say, ready to process messages")
-            async with client.messages() as messages:
-                async for msg in messages:
-                    try:
-                        data = json.loads(msg.payload)
-                        text = data.get("text", "").strip()
-                        stt_ts = data.get("stt_ts") or data.get("timestamp")
-                        if not text:
-                            continue
-                        await self._speak(client, text, stt_ts)
-                    except Exception as e:
-                        logger.error(f"Error processing message: {e}")
-                        await client.publish("system/health/tts", json.dumps({"ok": False, "err": str(e)}))
+        try:
+            async with mqtt.Client(hostname=host, port=port, username=username, password=password, client_id="tars-tts") as client:
+                logger.info(f"Connected to MQTT {host}:{port} as tars-tts")
+                await client.publish("system/health/tts", json.dumps({"ok": True, "event": "ready"}))
+                await client.subscribe("tts/say")
+                logger.info("Subscribed to tts/say, ready to process messages")
+                async with client.messages() as messages:
+                    async for msg in messages:
+                        try:
+                            data = json.loads(msg.payload)
+                            text = data.get("text", "").strip()
+                            stt_ts = data.get("stt_ts") or data.get("timestamp")
+                            if not text:
+                                continue
+                            await self._speak(client, text, stt_ts)
+                        except Exception as e:
+                            logger.error(f"Error processing message: {e}")
+                            await client.publish("system/health/tts", json.dumps({"ok": False, "err": str(e)}))
+        except MqttError as e:
+            logger.info(f"MQTT disconnected: {e}; shutting down gracefully")
 
     async def _speak(self, mqtt_client: mqtt.Client, text: str, stt_ts: float | None):
         # Notify start
