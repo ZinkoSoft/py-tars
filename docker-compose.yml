@@ -5,28 +5,10 @@ services:
     network_mode: host
     env_file: .env
     volumes:
-      - ./ops:/ops:ro
       - ./ops/mosquitto-data:/mosquitto/data
       - ./ops/mosquitto-config:/mosquitto/config
-    entrypoint: ["/bin/sh","-c"]
-    command:
-      - >
-        set -e;
-        mkdir -p /mosquitto/data;
-        mkdir -p /mosquitto/config;
-        if [ ! -f /mosquitto/config/mosquitto.conf ]; then
-          cp /ops/mosquitto.conf /mosquitto/config/mosquitto.conf;
-        fi;
-        if [ ! -f /mosquitto/config/passwd ]; then
-          if [ -n "$MQTT_USER" ] && [ -n "$MQTT_PASS" ]; then
-            mosquitto_passwd -b -c /mosquitto/config/passwd "$MQTT_USER" "$MQTT_PASS";
-            echo 'Generated passwd file';
-          else
-            echo 'WARNING: MQTT_USER/PASS not set; creating anonymous passwd placeholder';
-            touch /mosquitto/config/passwd;
-          fi;
-        fi;
-        exec /docker-entrypoint.sh mosquitto -c /mosquitto/config/mosquitto.conf
+    # Use image default entrypoint to run mosquitto with the mounted config
+    restart: unless-stopped
 
   stt:
     build: ./apps/stt-worker
@@ -60,6 +42,7 @@ services:
       - MQTT_URL=mqtt://$MQTT_USER:$MQTT_PASS@$MQTT_HOST:$MQTT_PORT
       - PROFILE=offline_fast
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    restart: unless-stopped
 
   tts:
     build: ./apps/tts-worker
@@ -79,6 +62,7 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - TTS_STREAMING=${TTS_STREAMING:-0}
       - TTS_PIPELINE=${TTS_PIPELINE:-1}
+    restart: unless-stopped
 
   ui:
     build: ./apps/ui
