@@ -112,7 +112,11 @@ local/
 scratch/
 debug/
 
+# MQTT specific ignores
 ops/passwd
 ops/mosquitto-config/passwd
 ops/mosquitto-config/mosquitto.conf
 ops/mosquitto-data/*
+
+# Memory Worker data
+data/*

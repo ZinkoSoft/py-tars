@@ -99,3 +99,25 @@ services:
     depends_on:
       - mqtt
     restart: unless-stopped
+
+  memory:
+    build: ./apps/memory-worker
+    container_name: tars-memory
+    network_mode: host
+    env_file: .env
+    environment:
+      - MQTT_URL=mqtt://$MQTT_USER:$MQTT_PASS@$MQTT_HOST:$MQTT_PORT
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MEMORY_DIR=/data
+      - MEMORY_FILE=${MEMORY_FILE:-memory.pickle.gz}
+      - RAG_STRATEGY=${RAG_STRATEGY:-hybrid}
+      - MEMORY_TOP_K=${MEMORY_TOP_K:-5}
+      - TOPIC_MEMORY_QUERY=${TOPIC_MEMORY_QUERY:-memory/query}
+      - TOPIC_MEMORY_RESULTS=${TOPIC_MEMORY_RESULTS:-memory/results}
+    volumes:
+      - ./data/memory:/data
+      # Persist model cache to speed up rebuilds
+      - ./data/model_cache:/data/model_cache
+    depends_on:
+      - mqtt
+    restart: unless-stopped

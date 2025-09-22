@@ -1,0 +1,12 @@
+bm25s
+pystemmer
+hyperdb-python
+scikit-learn
+flashrank
+asyncio-mqtt==0.16.2
+paho-mqtt<2.0
+orjson==3.9.15
+numpy==1.24.4
+sentence-transformers==2.2.2
+huggingface_hub==0.16.4
+torch==2.1.2
