@@ -1,3 +1,10 @@
+from __future__ import annotations
+
+"""Async MQTT client wrapper for resilient publish/subscribe.
+
+Behavior unchanged; adds typing, small docstrings, and an explicit __all__.
+"""
+
 import asyncio
 import logging
 from urllib.parse import urlparse
@@ -7,7 +14,10 @@ from typing import Callable, Awaitable, Optional, Dict
 
 logger = logging.getLogger("stt-worker.mqtt")
 
+__all__ = ["MQTTClientWrapper"]
+
 class MQTTClientWrapper:
+    """Minimal wrapper around asyncio-mqtt with auto-reconnect and dispatch loop."""
     def __init__(self, mqtt_url: str, client_id: str = 'tars-stt'):
         self.mqtt_url = mqtt_url
         self.client_id = client_id
@@ -22,6 +32,7 @@ class MQTTClientWrapper:
         return u.hostname or '127.0.0.1', u.port or 1883, u.username, u.password
 
     async def connect(self):
+        """Connect to the broker and resume prior subscriptions."""
         host, port, username, password = self.parse()
         logger.info(f"Connecting to MQTT {host}:{port}")
         # Use a slightly longer keepalive to avoid broker idle disconnects

@@ -1,3 +1,11 @@
+from __future__ import annotations
+
+"""Microphone audio capture utilities.
+
+Wraps PyAudio to read fixed-size PCM16LE frames and supports a mute guard to
+avoid capturing TTS playback. Behavior unchanged; now includes types and docs.
+"""
+
 import logging
 import os
 import time
@@ -12,7 +20,7 @@ from config import CHUNK_DURATION_MS, UNMUTE_GUARD_MS, SAMPLE_RATE, VAD_AGGRESSI
 logger = logging.getLogger("stt-worker.audio")
 
 class AudioCapture:
-    """Handle microphone audio capture with VAD and half-duplex mute support"""
+    """Handle microphone audio capture with VAD and half-duplex mute support."""
 
     def __init__(self):
         self.audio = pyaudio.PyAudio()
@@ -23,7 +31,7 @@ class AudioCapture:
         self.is_muted = False
         self.post_unmute_guard_until: float = 0.0
 
-    def mute(self, reason: str = ""):
+    def mute(self, reason: str = "") -> None:
         if not self.is_muted:
             self.is_muted = True
             flushed = 0
@@ -35,13 +43,13 @@ class AudioCapture:
                     break
             logger.info(f"Microphone muted{f' ({reason})' if reason else ''}; flushed {flushed} frames")
 
-    def unmute(self, reason: str = ""):
+    def unmute(self, reason: str = "") -> None:
         if self.is_muted:
             self.is_muted = False
             self.post_unmute_guard_until = time.time() + (UNMUTE_GUARD_MS / 1000.0)
             logger.info(f"Microphone unmuted{f' ({reason})' if reason else ''}; guarding for {UNMUTE_GUARD_MS}ms")
 
-    def start_capture(self):
+    def start_capture(self) -> None:
         logger.info(f"Starting audio capture: target cfg {SAMPLE_RATE}Hz, {CHUNK_DURATION_MS}ms chunks")
         usb_device = None
         device_count = self.audio.get_device_count()
@@ -92,7 +100,7 @@ class AudioCapture:
         threading.Thread(target=self._capture_loop, daemon=True).start()
         logger.info("Audio capture started")
 
-    def _capture_loop(self):
+    def _capture_loop(self) -> None:
         while self.is_recording:
             try:
                 data = self.stream.read(self.frame_size, exception_on_overflow=False)
@@ -103,7 +111,7 @@ class AudioCapture:
                 logger.error(f"Audio capture error: {e}")
                 break
 
-    def stop_capture(self):
+    def stop_capture(self) -> None:
         self.is_recording = False
         if self.stream:
             self.stream.stop_stream()

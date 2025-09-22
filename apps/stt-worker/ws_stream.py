@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+"""WebSocket streaming client for partial and final STT results."""
+
 import asyncio
 import logging
 from typing import Callable, Optional, Awaitable
@@ -9,6 +13,10 @@ logger = logging.getLogger("stt-worker.ws-stream")
 
 
 class WebSocketStreamClient:
+    """Maintain a streaming WS session to send audio and receive partials.
+
+    Public methods: connect, send_audio, end, close.
+    """
     def __init__(
         self,
         ws_url: str,

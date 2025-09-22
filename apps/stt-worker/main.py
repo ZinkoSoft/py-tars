@@ -1,3 +1,9 @@
+from __future__ import annotations
+
+"""Main entry for the STT worker service.
+
+Coordinates audio capture, VAD, transcription, MQTT I/O, and optional FFT publishing.
+"""
 import asyncio
 import logging
 import os

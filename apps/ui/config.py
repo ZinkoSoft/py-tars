@@ -1,3 +1,7 @@
+"""Configuration loader for the pygame UI.
+
+Prefers TOML via Python 3.11+ tomllib, supports env overrides. Behavior unchanged.
+"""
 import os
 import copy
 from typing import Any, Dict

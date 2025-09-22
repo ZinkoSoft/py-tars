@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+"""Simple rule-based router that consumes STT and produces TTS requests via MQTT."""
 import asyncio, os, logging
 import orjson as json
 from urllib.parse import urlparse
@@ -55,10 +58,10 @@ def rule_route(text: str) -> dict | None:
     logger.debug("No rule matched, will use fallback")
     return None
 
-async def publish(c: mqtt.Client, topic: str, payload: dict):
+async def publish(c: mqtt.Client, topic: str, payload: dict) -> None:
     await c.publish(topic, json.dumps(payload))
 
-async def handle_utterance(c: mqtt.Client, payload: bytes):
+async def handle_utterance(c: mqtt.Client, payload: bytes) -> None:
     data = json.loads(payload)
     # Filter out any extra fields that Utterance doesn't expect
     utterance_fields = {k: v for k, v in data.items() if k in ['text', 'lang', 'utt_id', 'confidence', 'timestamp', 'is_final']}
@@ -83,7 +86,7 @@ async def handle_utterance(c: mqtt.Client, payload: bytes):
     logger.info(f"Sending TTS response: {resp['text'][:50]}{'...' if len(resp['text']) > 50 else ''}")
     await publish(c, "tts/say", out)
 
-async def main():
+async def main() -> None:
     host, port, user, pwd = parse_mqtt(MQTT_URL)
     logger.info(f"Connecting to MQTT {host}:{port}")
     try:

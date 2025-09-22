@@ -281,7 +281,7 @@ class PiperSynth:
         if not t:
             return []
         # Split on whitespace following ., !, or ?
-        parts = re.split(r"(?<=[\.\!\?])\s+", t)
+        parts = re.split(r"(?<=[.!?])\s+", t)
         # If no sentence-ending punctuation, return as single chunk
         chunks = [p.strip() for p in parts if p and p.strip()]
         return chunks if chunks else [t]

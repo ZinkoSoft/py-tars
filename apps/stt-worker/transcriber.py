@@ -1,3 +1,10 @@
+from __future__ import annotations
+
+"""STT transcription backends: local Whisper or WebSocket proxy.
+
+Public entry point is SpeechTranscriber; behavior unchanged. Added typing and docs.
+"""
+
 import logging
 import numpy as np
 import orjson
@@ -7,7 +14,10 @@ from config import WHISPER_MODEL, MODEL_PATH, STT_BACKEND, WS_URL
 
 logger = logging.getLogger("stt-worker.transcriber")
 
+__all__ = ["SpeechTranscriber"]
+
 class _LocalWhisperTranscriber:
+    """Local Faster-Whisper implementation (CPU only by default)."""
     def __init__(self):
         from faster_whisper import WhisperModel  # lazy import to avoid requiring package for WS backend
         logger.info(f"Loading Whisper model: {WHISPER_MODEL}")
@@ -60,6 +70,7 @@ class _LocalWhisperTranscriber:
 
 
 class _WebSocketTranscriber:
+    """Synchronous WebSocket client for offloaded STT service."""
     def __init__(self, ws_url: str):
         self.ws_url = ws_url
 
@@ -99,6 +110,10 @@ class _WebSocketTranscriber:
 
 
 class SpeechTranscriber:
+    """Facade selecting the configured STT backend.
+
+    Use transcribe(audio_data, input_sample_rate) to obtain (text, confidence, metrics).
+    """
     def __init__(self):
         if STT_BACKEND == "ws":
             logger.info(f"Using WebSocket STT backend: {WS_URL}")

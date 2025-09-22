@@ -1,8 +1,22 @@
+from __future__ import annotations
+
+"""Speech suppression heuristics.
+
+This module provides lightweight, rule-based suppression to filter out
+false-positive or low-quality transcriptions before publishing them.
+
+Behavior is unchanged; improvements include:
+- Dataclass for SuppressionState (slots for memory and attribute safety)
+- Type hints and docstrings for public surfaces
+- Minor readability tweaks (no logic changes)
+"""
+
 import time
 import re
 import logging
 from collections import deque
-from typing import List, Tuple, Dict, Optional
+from dataclasses import dataclass, field
+from typing import Deque, List, Tuple, Dict, Optional
 import numpy as np
 
 from config import (
@@ -15,24 +29,67 @@ from config import (
 
 logger = logging.getLogger("stt-worker.suppression")
 
+__all__ = [
+    "SuppressionState",
+    "SuppressionEngine",
+]
+
+
+@dataclass(slots=True)
 class SuppressionState:
-    def __init__(self):
-        self.recent_phrases = deque(maxlen=5)
-        self.last_published_text: str = ""
-        self.last_published_at: float = 0.0
-        self.cooldown_until: float = 0.0
-        self.last_tts_text: str = ""
+    """State tracked across suppression decisions.
+
+    Attributes:
+        recent_phrases: Rolling window of recent normalized phrases and timestamps.
+        last_published_text: Most recent published normalized text.
+        last_published_at: Timestamp of last publish.
+        cooldown_until: Do-not-publish-before timestamp.
+        last_tts_text: Last TTS text, used for echo suppression.
+    """
+
+    recent_phrases: Deque[Tuple[str, float]] = field(default_factory=lambda: deque(maxlen=5))
+    last_published_text: str = ""
+    last_published_at: float = 0.0
+    cooldown_until: float = 0.0
+    last_tts_text: str = ""
 
 class SuppressionEngine:
+    """Evaluate whether an utterance should be suppressed.
+
+    This class contains heuristic checks based on audio and text metrics. It does not
+    perform I/O and is deterministic given its inputs and state.
+    """
+
     def __init__(self, state: SuppressionState):
         self.state = state
         self.repeat_cooldown_sec = REPEAT_COOLDOWN_SEC
 
-    def evaluate(self, text: str, confidence: Optional[float], metrics: Dict[str, float], utterance: bytes,
-                 sample_rate: int, frame_size: int) -> Tuple[bool, Dict[str, any]]:
+    def evaluate(
+        self,
+        text: str,
+        confidence: Optional[float],
+        metrics: Dict[str, float],
+        utterance: bytes,
+        sample_rate: int,
+        frame_size: int,
+    ) -> Tuple[bool, Dict[str, object]]:
+        """Return (accepted, info) for a candidate transcription.
+
+        Args:
+            text: Candidate transcript string.
+            confidence: Optional model confidence metric.
+            metrics: Additional per-utterance metrics from the transcriber.
+            utterance: Raw PCM16LE bytes for the utterance.
+            sample_rate: PCM sample rate.
+            frame_size: Frame size (samples) used by VAD.
+
+        Returns:
+            Tuple where first element indicates acceptance, and second is a dict
+            with diagnostic details and/or rejection reasons.
+        """
         raw_text = text.strip()
         norm_text = raw_text.lower()
-        info = {"reasons": []}
+        info: Dict[str, object] = {"reasons": []}
         # Basic metrics
         duration_ms = (len(utterance) / 2) / sample_rate * 1000.0
         utt_np = np.frombuffer(utterance, dtype=np.int16)

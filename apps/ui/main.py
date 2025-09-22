@@ -1,3 +1,4 @@
+"""Pygame-based UI for TARS: displays spectrum, partials/finals, and TTS text."""
 import os
 import math
 import time

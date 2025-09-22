@@ -1,3 +1,11 @@
+from __future__ import annotations
+
+"""Voice activity detection utilities.
+
+This module wraps webrtcvad with additional gating via an adaptive noise floor.
+Behavior is unchanged; types and docstrings were added for clarity.
+"""
+
 import logging
 import webrtcvad
 from typing import Optional
@@ -17,7 +25,12 @@ from config import (
 logger = logging.getLogger("stt-worker.vad")
 
 class VADProcessor:
-    """Voice Activity Detection processor"""
+    """Voice Activity Detection processor.
+
+    Args:
+        sample_rate: PCM sample rate in Hz.
+        frame_size: Frame size in samples (16-bit mono) per chunk.
+    """
 
     def __init__(self, sample_rate: int, frame_size: int):
         self.vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)
@@ -32,6 +45,10 @@ class VADProcessor:
         self.last_rms = 0.0
 
     def process_chunk(self, audio_chunk: bytes) -> Optional[bytes]:
+        """Process a single PCM16LE chunk and return a completed utterance if detected.
+
+        Returns None if speech has not ended yet or the frame is discarded.
+        """
         if len(audio_chunk) != self.frame_size * 2:
             return None
 
@@ -81,7 +98,10 @@ class VADProcessor:
         return None
 
     def get_active_buffer(self) -> bytes:
-        """Return current buffered speech bytes (excluding trailing silence) if speech ongoing."""
+        """Return current buffered speech bytes if speech is ongoing.
+
+        Trailing silence may be included while actively speaking to maintain continuity.
+        """
         if self.is_speech and self.speech_buffer:
             return b''.join(self.speech_buffer)
         return b''

@@ -24,7 +24,7 @@ class TTSService:
     def __init__(self, synth: PiperSynth):
         self.synth = synth
 
-    async def run(self):
+    async def run(self) -> None:
         host, port, username, password = parse_mqtt(MQTT_URL)
         logger.info(f"Connecting to MQTT {host}:{port}")
         try:
@@ -48,7 +48,7 @@ class TTSService:
         except MqttError as e:
             logger.info(f"MQTT disconnected: {e}; shutting down gracefully")
 
-    async def _speak(self, mqtt_client: mqtt.Client, text: str, stt_ts: float | None):
+    async def _speak(self, mqtt_client: mqtt.Client, text: str, stt_ts: float | None) -> None:
         # Notify start
         start_msg = json.dumps({"event": "speaking_start", "text": text, "timestamp": time.time()})
         await mqtt_client.publish("tts/status", start_msg)

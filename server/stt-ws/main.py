@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+"""FastAPI WebSocket STT service for offloading whisper transcription."""
 import asyncio
 import logging
 import os
