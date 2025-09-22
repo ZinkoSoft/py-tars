@@ -66,6 +66,22 @@ Non-functional refactors focused on clarity, types, and class design. No behavio
 - Evaluate logging verbosity and add structured logger if desired.
 - Consider `@final` annotations for classes not intended for inheritance.
 
+## Optional quality upgrades (added)
+
+These are opt-in via environment variables; defaults preserve current behavior.
+
+- Suppression heuristics
+	- SUPPRESS_USE_SYLLAPY=1 enables syllable counting via syllapy for better accuracy.
+	- SUPPRESS_USE_RAPIDFUZZ=1 enables fuzzy echo suppression using rapidfuzz.ratio.
+	- ECHO_FUZZ_MIN_RATIO sets the similarity threshold (default 0.85).
+	- Dependencies (apps/stt-worker/requirements.txt): syllapy, rapidfuzz.
+
+- TTS playback
+	- TTS_SIMPLEAUDIO=1 makes PiperSynth play WAVs using simpleaudio in-process instead of paplay/aplay.
+	- Note: simpleaudio is NOT installed by default to keep images minimal and avoid build toolchain on aarch64. If desired, add `simpleaudio` to `apps/tts-worker/requirements.txt` or install it in a derived image.
+
+- Resampling (not enabled): we kept numpy.interp for minimal footprint. If higher-quality resampling is desired, consider adding resampy/librosa and gating via config.
+
 ## Validation
 - Behavioral changes none expected. Docker-compose build/run should verify end-to-end.
 - Note: Editor may flag imports that are installed only in containers; this is expected.

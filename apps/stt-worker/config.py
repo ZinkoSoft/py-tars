@@ -35,6 +35,14 @@ AVG_LOGPROB_MIN = float(os.getenv("AVG_LOGPROB_MIN", "-1.20"))
 DICT_MATCH_MIN_RATIO = float(os.getenv("DICT_MATCH_MIN_RATIO", "0.40"))
 REPEAT_COOLDOWN_SEC = float(os.getenv("REPEAT_COOLDOWN_SEC", "8"))
 
+# Optional quality upgrades (opt-in)
+# Use syllapy for better syllable counting in suppression (0/1)
+SUPPRESS_USE_SYLLAPY = int(os.getenv("SUPPRESS_USE_SYLLAPY", "0"))
+# Use rapidfuzz for fuzzy echo matching in suppression (0/1)
+SUPPRESS_USE_RAPIDFUZZ = int(os.getenv("SUPPRESS_USE_RAPIDFUZZ", "0"))
+# Minimum similarity ratio (0..1) for echo fuzzy match when enabled
+ECHO_FUZZ_MIN_RATIO = float(os.getenv("ECHO_FUZZ_MIN_RATIO", "0.85"))
+
 # Streaming partial transcription options
 STREAMING_PARTIALS = int(os.getenv("STREAMING_PARTIALS", "1"))  # 1 to enable live partial transcripts
 PARTIAL_INTERVAL_MS = int(os.getenv("PARTIAL_INTERVAL_MS", "600"))  # how often to attempt partial decode during active speech

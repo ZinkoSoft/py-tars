@@ -21,13 +21,17 @@ services:
       - /run/user/1000/pulse:/run/user/1000/pulse:ro
       - ./models/whisper:/host-models
     environment:
+      # Broker URL assembled from global creds/host/port
       - MQTT_URL=mqtt://$MQTT_USER:$MQTT_PASS@$MQTT_HOST:$MQTT_PORT
+      # Whisper model and logging
       - WHISPER_MODEL=${WHISPER_MODEL:-small}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # Backend selection and remote WS URL (if STT_BACKEND=ws)
       - STT_BACKEND=${STT_BACKEND:-whisper}
       - WS_URL=${WS_URL:-ws://127.0.0.1:9000/stt}
       - PULSE_RUNTIME_PATH=/run/user/1000/pulse
       - PULSE_SERVER=unix:/run/user/1000/pulse/native
+      # Audio/VAD
       - SILENCE_THRESHOLD_MS=${SILENCE_THRESHOLD_MS:-600}
       - CHUNK_DURATION_MS=${CHUNK_DURATION_MS:-20}
       - VAD_AGGRESSIVENESS=${VAD_AGGRESSIVENESS:-3}
@@ -39,7 +43,9 @@ services:
     network_mode: host
     env_file: .env
     environment:
+      # Broker URL assembled from global creds/host/port
       - MQTT_URL=mqtt://$MQTT_USER:$MQTT_PASS@$MQTT_HOST:$MQTT_PORT
+      # Optional label for runtime profile
       - PROFILE=offline_fast
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     restart: unless-stopped
@@ -55,11 +61,14 @@ services:
       - ./apps/tts-worker/voices:/voice-models:ro
       - /run/user/1000/pulse:/run/user/1000/pulse:ro
     environment:
+      # Broker URL assembled from global creds/host/port
       - MQTT_URL=mqtt://$MQTT_USER:$MQTT_PASS@$MQTT_HOST:$MQTT_PORT
+      # Piper voice selection
       - PIPER_VOICE=/voices/TARS.onnx
       - PULSE_RUNTIME_PATH=/run/user/1000/pulse
       - PULSE_SERVER=unix:/run/user/1000/pulse/native
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # Streaming/pipeline controls for TTS
       - TTS_STREAMING=${TTS_STREAMING:-0}
       - TTS_PIPELINE=${TTS_PIPELINE:-1}
     restart: unless-stopped
@@ -70,7 +79,9 @@ services:
     network_mode: host
     profiles: ["pygame"]
     environment:
+      # Broker URL assembled from global creds/host/port
       - MQTT_URL=mqtt://$MQTT_USER:$MQTT_PASS@$MQTT_HOST:$MQTT_PORT
+      # Optional TOML config mount path
       - UI_CONFIG=/config/ui.toml
       - DISPLAY=${DISPLAY}
       - SDL_VIDEODRIVER=x11
@@ -83,6 +94,7 @@ services:
     container_name: tars-ui-web
     network_mode: host
     environment:
+      # Broker URL assembled from global creds/host/port
       - MQTT_URL=mqtt://$MQTT_USER:$MQTT_PASS@$MQTT_HOST:$MQTT_PORT
     depends_on:
       - mqtt

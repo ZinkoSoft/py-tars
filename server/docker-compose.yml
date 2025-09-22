@@ -7,9 +7,11 @@ services:
     network_mode: host
     env_file: .env
     environment:
+      # Faster-Whisper model & device selection
       - WHISPER_MODEL=${WHISPER_MODEL:-small}
       - DEVICE=${DEVICE:-auto}
       - COMPUTE_TYPE=${COMPUTE_TYPE:-auto}
+      # Partial emission cadence and model cache dir
       - PARTIAL_INTERVAL_MS=${PARTIAL_INTERVAL_MS:-300}
       - MODELS_DIR=/models
       - NVIDIA_VISIBLE_DEVICES=all

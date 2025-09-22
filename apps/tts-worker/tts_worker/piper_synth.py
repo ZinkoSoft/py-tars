@@ -263,6 +263,29 @@ class PiperSynth:
         subprocess.run(cmd, input=text, text=True, check=True)
 
     def _play_wav(self, path: str) -> None:
+        # If configured and available, use simpleaudio to play in-process
+        try:
+            from .config import TTS_SIMPLEAUDIO  # local import to avoid circulars at module import
+        except Exception:
+            TTS_SIMPLEAUDIO = 0  # type: ignore
+
+        if TTS_SIMPLEAUDIO:
+            try:
+                import simpleaudio as sa  # type: ignore
+                import wave
+                with wave.open(path, 'rb') as wf:
+                    audio_data = wf.readframes(wf.getnframes())
+                    sample_rate = wf.getframerate()
+                    num_channels = wf.getnchannels()
+                    sample_width = wf.getsampwidth()
+                # simpleaudio expects raw PCM parameters
+                play_obj = sa.play_buffer(audio_data, num_channels=num_channels, bytes_per_sample=sample_width, sample_rate=sample_rate)
+                play_obj.wait_done()
+                return
+            except Exception as e:
+                logger.warning(f"simpleaudio playback failed, falling back to system player: {e}")
+
+        # Fallback: system player via paplay/aplay
         p = _spawn_player(args=[path])
         rc = p.wait()
         if rc != 0:

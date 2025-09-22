@@ -24,7 +24,8 @@ from config import (
     NOISE_MAX_PUNCT_RATIO, COUGH_SUSPICIOUS_PHRASES, COUGH_MIN_DURATION_MS, COUGH_ACTIVE_MIN_RATIO,
     COUGH_MIN_SYLLABLES, NO_SPEECH_MAX, AVG_LOGPROB_MIN, DICT_MATCH_MIN_RATIO,
     ECHO_SUPPRESS_MATCH, TTS_BASE_MUTE_MS, TTS_PER_CHAR_MS, TTS_MAX_MUTE_MS, POST_PUBLISH_COOLDOWN_MS,
-    REPEAT_COOLDOWN_SEC, COMMON_WORDS
+    REPEAT_COOLDOWN_SEC, COMMON_WORDS,
+    SUPPRESS_USE_SYLLAPY, SUPPRESS_USE_RAPIDFUZZ, ECHO_FUZZ_MIN_RATIO,
 )
 
 logger = logging.getLogger("stt-worker.suppression")
@@ -112,15 +113,30 @@ class SuppressionEngine:
                         active_frames += 1
         active_ratio = active_frames / float(total_frames)
 
-        # Syllable heuristic
+        # Syllable heuristic (optionally use syllapy if enabled)
         lowered = norm_text
         syllables = 0
-        prev_vowel = False
-        for ch in lowered:
-            is_vowel = ch in 'aeiou'
-            if is_vowel and not prev_vowel:
-                syllables += 1
-            prev_vowel = is_vowel
+        if SUPPRESS_USE_SYLLAPY:
+            try:
+                import syllapy  # type: ignore
+                # Count over tokens to avoid punctuation effects
+                tokens_for_syll = [t for t in re.split(r"\s+", lowered) if t]
+                syllables = sum(syllapy.count(t) for t in tokens_for_syll)
+            except Exception:
+                # Fallback to simple vowel-run heuristic
+                prev_vowel = False
+                for ch in lowered:
+                    is_vowel = ch in 'aeiou'
+                    if is_vowel and not prev_vowel:
+                        syllables += 1
+                    prev_vowel = is_vowel
+        else:
+            prev_vowel = False
+            for ch in lowered:
+                is_vowel = ch in 'aeiou'
+                if is_vowel and not prev_vowel:
+                    syllables += 1
+                prev_vowel = is_vowel
 
         # Accumulate reasons
         if duration_ms < NOISE_MIN_DURATION_MS:
@@ -193,13 +209,24 @@ class SuppressionEngine:
             if norm_text == last_norm:
                 info["reasons"].append("exact_echo")
                 return False, info
-            min_len = min(len(norm_text), len(last_norm))
-            if min_len > 4:
-                matches = sum(1 for a, b in zip(norm_text, last_norm) if a == b)
-                ratio = matches / float(min_len)
-                if ratio >= 0.85:
-                    info["reasons"].append(f"fuzzy_echo {ratio:.2f}")
-                    return False, info
+            # Optional rapidfuzz fuzzy match for echo suppression
+            if SUPPRESS_USE_RAPIDFUZZ:
+                try:
+                    from rapidfuzz.fuzz import ratio as fuzz_ratio  # type: ignore
+                    sim = float(fuzz_ratio(norm_text, last_norm)) / 100.0
+                    if sim >= ECHO_FUZZ_MIN_RATIO:
+                        info["reasons"].append(f"fuzzy_echo {sim:.2f}")
+                        return False, info
+                except Exception:
+                    pass
+            else:
+                min_len = min(len(norm_text), len(last_norm))
+                if min_len > 4:
+                    matches = sum(1 for a, b in zip(norm_text, last_norm) if a == b)
+                    ratio = matches / float(min_len)
+                    if ratio >= 0.85:
+                        info["reasons"].append(f"fuzzy_echo {ratio:.2f}")
+                        return False, info
 
         # Rolling repeated phrases list
         now = time.time()
