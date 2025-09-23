@@ -167,12 +167,17 @@ class MemoryService:
                 return
             with open(toml_path, "rb") as f:
                 data = tomllib.load(f)
-            name = data.get("info", {}).get("name") or CHARACTER_NAME
+            info = data.get("info", {}) or {}
+            name = info.get("name") or CHARACTER_NAME
+            description = info.get("description") or ""
+            systemprompt = info.get("systemprompt") or ""
             traits = data.get("traits", {}) or {}
             voice = data.get("voice", {}) or {}
             meta = data.get("meta", {}) or {}
             self.character = {
                 "name": name,
+                "description": description,
+                "systemprompt": systemprompt,
                 "traits": traits,
                 "voice": voice,
                 "meta": meta,

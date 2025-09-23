@@ -6,6 +6,7 @@ Behavior unchanged; adds typing, small docstrings, and an explicit __all__.
 """
 
 import asyncio
+import time
 import logging
 from urllib.parse import urlparse
 import asyncio_mqtt as mqtt
@@ -26,6 +27,9 @@ class MQTTClientWrapper:
         self._dispatcher_task: Optional[asyncio.Task] = None
         self._topics: set[str] = set()
         self._lock = asyncio.Lock()
+        # App-level keepalive heartbeat
+        self._keepalive_task: Optional[asyncio.Task] = None
+        self._keepalive_interval: float = 30.0  # seconds
 
     def parse(self):
         u = urlparse(self.mqtt_url)
@@ -35,8 +39,15 @@ class MQTTClientWrapper:
         """Connect to the broker and resume prior subscriptions."""
         host, port, username, password = self.parse()
         logger.info(f"Connecting to MQTT {host}:{port}")
-        # Use a slightly longer keepalive to avoid broker idle disconnects
-        self.client = mqtt.Client(hostname=host, port=port, username=username, password=password, client_id=self.client_id, keepalive=120)
+        # Use a moderate MQTT keepalive so broker pings occur frequently
+        self.client = mqtt.Client(
+            hostname=host,
+            port=port,
+            username=username,
+            password=password,
+            client_id=self.client_id,
+            keepalive=60,
+        )
         await self.client.__aenter__()
         logger.info("Connected to MQTT")
         # Re-subscribe to registered topics on (re)connect
@@ -47,6 +58,7 @@ class MQTTClientWrapper:
             except Exception as e:
                 logger.error(f"Subscribe failed for {t}: {e}")
         self._ensure_dispatcher()
+        self._ensure_keepalive()
 
     async def disconnect(self):
         if self.client:
@@ -55,6 +67,10 @@ class MQTTClientWrapper:
             except Exception:
                 pass
             self.client = None
+        # Stop heartbeat
+        if self._keepalive_task and not self._keepalive_task.done():
+            self._keepalive_task.cancel()
+        self._keepalive_task = None
 
     async def reconnect(self):
         async with self._lock:
@@ -97,6 +113,28 @@ class MQTTClientWrapper:
         if self._dispatcher_task and not self._dispatcher_task.done():
             return
         self._dispatcher_task = asyncio.create_task(self._dispatch_loop())
+
+    def _ensure_keepalive(self):
+        if self._keepalive_task and not self._keepalive_task.done():
+            return
+        self._keepalive_task = asyncio.create_task(self._keepalive_loop())
+
+    async def _keepalive_loop(self):
+        """Application-level heartbeat publish to keep the connection active and observable."""
+        topic = f"system/keepalive/{self.client_id}"
+        while True:
+            try:
+                await asyncio.sleep(self._keepalive_interval)
+                if not self.client:
+                    continue
+                payload = orjson.dumps({"ok": True, "event": "hb", "ts": time.time()})
+                await self.client.publish(topic, payload, retain=False)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"Heartbeat publish failed: {e}")
+                # Trigger reconnect on next dispatch iteration
+                continue
 
     async def _dispatch_loop(self):
         backoff = 0.5

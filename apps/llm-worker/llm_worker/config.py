@@ -30,7 +30,7 @@ def env_bool(key: str, default: bool = False) -> bool:
 
 
 MQTT_URL = env_str("MQTT_URL", "mqtt://127.0.0.1:1883")
-LOG_LEVEL = env_str("LOG_LEVEL", "INFO")
+LOG_LEVEL = env_str("LLM_LOG_LEVEL", "INFO")
 
 # Provider selection
 LLM_PROVIDER = env_str("LLM_PROVIDER", "openai")
@@ -67,6 +67,11 @@ TOPIC_LLM_CANCEL = env_str("TOPIC_LLM_CANCEL", "llm/cancel")
 TOPIC_HEALTH = env_str("TOPIC_HEALTH", "system/health/llm")
 TOPIC_MEMORY_QUERY = env_str("TOPIC_MEMORY_QUERY", "memory/query")
 TOPIC_MEMORY_RESULTS = env_str("TOPIC_MEMORY_RESULTS", "memory/results")
+
+# Character (persona) topic
+TOPIC_CHARACTER_CURRENT = env_str("TOPIC_CHARACTER_CURRENT", "system/character/current")
+TOPIC_CHARACTER_GET = env_str("TOPIC_CHARACTER_GET", "character/get")
+TOPIC_CHARACTER_RESULT = env_str("TOPIC_CHARACTER_RESULT", "character/result")
 
 # Optional: forward streaming chunks to TTS as sentences (now disabled; router bridges LLM->TTS)
 LLM_TTS_STREAM = env_bool("LLM_TTS_STREAM", False)

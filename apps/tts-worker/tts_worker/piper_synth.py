@@ -73,7 +73,8 @@ class PiperSynth:
         except Exception:
             concurrency = 1
 
-        if pipeline and concurrency > 1 and len(chunks) > 1:
+        if pipeline and len(chunks) > 1:
+            # Use pipelined pre-synthesis and sequential playback to minimize gaps
             return self._file_playback_pipelined(chunks, concurrency=concurrency)
 
         # Default sequential file playback

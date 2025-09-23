@@ -28,6 +28,9 @@ from .config import (
     TOPIC_HEALTH,
     TOPIC_MEMORY_QUERY,
     TOPIC_MEMORY_RESULTS,
+    TOPIC_CHARACTER_CURRENT,
+    TOPIC_CHARACTER_GET,
+    TOPIC_CHARACTER_RESULT,
     # TTS streaming config
     LLM_TTS_STREAM,
     TOPIC_TTS_SAY,
@@ -60,6 +63,57 @@ class LLMService:
         else:
             logger.warning("Unsupported provider '%s', defaulting to openai", provider)
             self.provider = OpenAIProvider(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL or None)
+        # Character/persona state (loaded via MQTT retained message)
+        self.character: Dict[str, Any] = {}
+
+    def _build_system_prompt(self, base_system: str | None = None) -> str | None:
+        """Combine character persona and optional base system prompt.
+
+        Expected character snapshot schema:
+        { name, description, systemprompt, traits: { ... }, voice: { ... }, meta: { ... } }
+        Priority:
+        1) If character.systemprompt is provided, use it, and also append a compact traits line when traits exist.
+        2) Otherwise, render compact persona from traits and description.
+        Then append any base_system provided by the caller.
+        """
+        persona = None
+        try:
+            logger.debug("Building system prompt from character/current: %s", self.character or "<none>")
+            if self.character:
+                logger.info("Building system prompt from character/current: name=%s", self.character.get("name"))
+                name = self.character.get("name") or "Assistant"
+                sys_prompt = (self.character.get("systemprompt") or "").strip()
+                traits = self.character.get("traits") or {}
+                desc = self.character.get("description") or (self.character.get("meta") or {}).get("description")
+
+                parts: list[str] = []
+                if sys_prompt:
+                    parts.append(sys_prompt)
+
+                # Always append traits line if traits exist
+                if traits:
+                    trait_pairs = [f"{k}: {v}" for k, v in traits.items()]
+                    trait_line = f"You are {name}. Traits: " + "; ".join(trait_pairs) + "."
+                    if desc:
+                        trait_line = (trait_line + " " + str(desc)).strip()
+                    parts.append(trait_line)
+                elif not sys_prompt:
+                    # No systemprompt and no traits: fallback minimal persona (optionally with description)
+                    fallback = f"You are {name}."
+                    if desc:
+                        fallback = (fallback + " " + str(desc)).strip()
+                    parts.append(fallback)
+
+                persona = "\n".join(p for p in parts if p).strip() or None
+        except Exception:
+            logger.warning("Failed to build system prompt from character/current")
+            persona = None
+        logger.debug("Built system prompt from character: %s", persona or "<none>")
+        if base_system and persona:
+            logger.debug("Combining with base system prompt of length %d", len(base_system or ""))
+            return persona + "\n\n" + base_system
+        logger.debug("Final system prompt set to %s", base_system or persona or "<none>")
+        return base_system or persona
 
     def _should_flush(self, buf: str, incoming: str) -> bool:
         # Flush when boundary punctuation present (no min length),
@@ -107,10 +161,41 @@ class LLMService:
             async with mqtt.Client(hostname=host, port=port, username=user, password=pwd, client_id="tars-llm") as client:
                 await client.publish(TOPIC_HEALTH, json.dumps({"ok": True, "event": "ready"}), retain=True)
                 async with client.messages() as mstream:
+                    # Subscribe to LLM requests and character/current (retained)
                     await client.subscribe(TOPIC_LLM_REQUEST)
-                    logger.info("Subscribed to %s", TOPIC_LLM_REQUEST)
+                    await client.subscribe(TOPIC_CHARACTER_CURRENT)
+                    await client.subscribe(TOPIC_CHARACTER_RESULT)
+                    logger.info("Subscribed to %s, %s and %s", TOPIC_LLM_REQUEST, TOPIC_CHARACTER_CURRENT, TOPIC_CHARACTER_RESULT)
+                    # Request the current character snapshot once (memory-worker should respond or retained current will arrive)
+                    try:
+                        await client.publish(TOPIC_CHARACTER_GET, json.dumps({"section": None}))
+                        logger.info("Requested character/get on startup")
+                    except Exception:
+                        logger.debug("character/get publish failed (may be offline)")
                     async for m in mstream:
                         topic = str(getattr(m, "topic", ""))
+                        if topic == TOPIC_CHARACTER_CURRENT:
+                            # Update persona from retained/current payload
+                            try:
+                                self.character = json.loads(m.payload)
+                                logger.info("character/current updated: name=%s", self.character.get("name"))
+                            except Exception:
+                                logger.warning("Failed to parse character/current")
+                            continue
+                        if topic == TOPIC_CHARACTER_RESULT:
+                            try:
+                                data = json.loads(m.payload)
+                            except Exception:
+                                data = {}
+                            if data:
+                                # Accept either full snapshot or a subsection
+                                if "name" in data:
+                                    self.character = data
+                                else:
+                                    # Merge into existing snapshot
+                                    self.character.update(data)
+                                logger.info("character/result received: name=%s", self.character.get("name"))
+                            continue
                         if topic != TOPIC_LLM_REQUEST:
                             continue
                         try:
@@ -133,6 +218,9 @@ class LLMService:
                         temperature = float(params.get("temperature", LLM_TEMPERATURE))
                         top_p = float(params.get("top_p", LLM_TOP_P))
 
+                        # Merge character persona into system prompt
+                        system = self._build_system_prompt(system)
+
                         context = ""
                         if use_rag:
                             context = await self._do_rag(client, text)
@@ -152,7 +240,7 @@ class LLMService:
                         try:
                             if want_stream and getattr(self.provider, "name", "") == "openai":
                                 seq = 0
-                                logger.info("Starting streaming for id=%s via provider=%s", req_id, self.provider.name)
+                                logger.info("Starting streaming for id=%s via provider=%s (system_len=%s)", req_id, self.provider.name, len(system or ""))
                                 tts_buf = ""
                                 async for ch in self.provider.stream(
                                     prompt,

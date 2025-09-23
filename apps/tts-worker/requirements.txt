@@ -2,3 +2,5 @@ asyncio-mqtt>=0.16.2
 orjson>=3.10.7
 # Pin paho-mqtt below 2.0 because asyncio-mqtt depends on pre-2.x APIs (message_retry_set)
 paho-mqtt<2.0
+markdown>=3.6
+beautifulsoup4>=4.12.3
