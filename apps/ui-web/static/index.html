@@ -11,11 +11,13 @@
     }
     * { box-sizing: border-box; }
     body { background:var(--bg); color:var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:0; height:100vh; display:flex; flex-direction:column; }
-    header { padding:12px 16px; border-bottom:1px solid var(--border); background:#0c1020; }
+    header { padding:12px 16px; border-bottom:1px solid var(--border); background:#0c1020; display:flex; align-items:center; justify-content:space-between; gap:12px; }
     header h1 { margin:0; font-size:16px; color:var(--muted); font-weight:600; }
+    .toolbar { display:flex; gap:8px; }
+    .btn { background:transparent; color:var(--muted); border:1px solid var(--border); padding:6px 10px; border-radius:8px; cursor:pointer; font-weight:600; }
+    .btn:hover { color:#fff; border-color:#2a3469; background:#0b132e; }
     #container { display:flex; gap:16px; padding:16px; height:100%; }
-    #left { flex:2; display:flex; flex-direction:column; gap:12px; }
-    #right { flex:1; display:flex; flex-direction:column; gap:12px; }
+    #left { flex:1; display:flex; flex-direction:column; gap:12px; }
     .panel { background:var(--panel); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
     #chat { flex:1; display:flex; flex-direction:column; }
     #log { padding:12px; overflow:auto; height:100%; scroll-behavior:smooth; }
@@ -44,6 +46,17 @@
     .mem-head { display:flex; gap:8px; align-items:center; font-size:12px; color:var(--muted); margin-bottom:6px; }
     .mem-score { background:#15204a; border:1px solid #22306b; color:#a9b5ea; padding:2px 6px; border-radius:6px; font-weight:600; }
     .mem-text { white-space:pre-wrap; word-wrap:break-word; line-height:1.35; }
+
+    /* Slide-out drawers */
+    .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 92vw); background: var(--panel); border-left:1px solid var(--border); transform: translateX(100%); transition: transform .28s ease; z-index: 40; display:flex; flex-direction:column; }
+    .drawer.open { transform: translateX(0); }
+    .drawer header { display:flex; align-items:center; justify-content:space-between; background:#0c1020; border-bottom:1px solid var(--border); padding:12px; }
+    .drawer header h2 { margin:0; font-size:14px; color:var(--muted); }
+    .drawer .content { overflow:auto; padding:10px 12px; }
+    .drawer .close { background:transparent; border:1px solid var(--border); color:var(--muted); padding:6px 10px; border-radius:8px; cursor:pointer; }
+    .drawer .close:hover { color:#fff; border-color:#2a3469; background:#0b132e; }
+    .backdrop { position: fixed; inset:0; background: rgba(0,0,0,.4); opacity:0; pointer-events:none; transition: opacity .2s ease; z-index: 30; }
+    .backdrop.show { opacity:1; pointer-events:auto; }
   </style>
   <script>
     let ws;
@@ -313,12 +326,43 @@
       }
     }
 
+    // Drawer controls
+    let currentDrawer = null; // 'mic' | 'memory' | null
+    function openDrawer(which) {
+      if (currentDrawer === which) { return closeDrawer(); }
+      closeDrawer(false);
+      const el = document.getElementById(`drawer-${which}`);
+      if (!el) return;
+      el.classList.add('open');
+      const bd = document.getElementById('backdrop');
+      bd?.classList.add('show');
+      currentDrawer = which;
+    }
+    function closeDrawer(toggleBackdrop=true) {
+      if (currentDrawer) {
+        const el = document.getElementById(`drawer-${currentDrawer}`);
+        el?.classList.remove('open');
+      }
+      if (toggleBackdrop) {
+        document.getElementById('backdrop')?.classList.remove('show');
+      }
+      currentDrawer = null;
+    }
+
+    window.addEventListener('keydown', (e)=>{
+      if (e.key === 'Escape') closeDrawer();
+    });
+
     window.addEventListener('load', ()=>{ connect(); drawSpectrum(); setStatus(); refreshMemory(); });
   </script>
   </head>
 <body>
   <header>
     <h1>TARS Chat</h1>
+    <div class="toolbar">
+      <button class="btn" onclick="openDrawer('mic')">Microphone</button>
+      <button class="btn" onclick="openDrawer('memory')">Memory</button>
+    </div>
   </header>
   <div id="container">
     <div id="left">
@@ -335,27 +379,38 @@
         </div>
       </div>
     </div>
-    <div id="right">
-      <div class="panel">
-        <div class="status" style="border-bottom:1px solid var(--border);">Microphone</div>
-        <div style="padding:10px 12px;">
-          <div id="mic-text" style="color:var(--muted); min-height:20px;">&nbsp;</div>
-        </div>
-        <canvas id="spectrum"></canvas>
-      </div>
-      <div class="panel">
-        <div class="status" style="border-bottom:1px solid var(--border);">Memory</div>
-        <div style="padding:10px 12px; display:flex; flex-direction:column; gap:8px;">
-          <div style="display:flex; gap:8px;">
-            <input id="mem-query" placeholder="Query (e.g., *)" value="*" style="flex:1; background:#0c1020; color:var(--text); border:1px solid var(--border); padding:8px; border-radius:6px;" />
-            <input id="mem-k" type="number" min="1" max="200" value="25" title="Top-K" style="width:80px; background:#0c1020; color:var(--text); border:1px solid var(--border); padding:8px; border-radius:6px;" />
-            <button onclick="refreshMemory()" style="background:#0c7bdc; color:#fff; border:none; padding:8px 10px; font-weight:600; border-radius:6px; cursor:pointer;">Refresh</button>
-          </div>
-          <div id="mem-summary" class="meta">&nbsp;</div>
-        </div>
-        <div id="memory-list" style="padding:10px 12px; border-top:1px solid var(--border);"></div>
-      </div>
-    </div>
   </div>
+
+  <!-- Backdrop for drawers -->
+  <div id="backdrop" class="backdrop" onclick="closeDrawer()"></div>
+
+  <!-- Microphone Drawer -->
+  <aside id="drawer-mic" class="drawer" aria-hidden="true">
+    <header>
+      <h2>Microphone</h2>
+      <button class="close" onclick="closeDrawer()">Close</button>
+    </header>
+    <div class="content">
+      <div id="mic-text" style="color:var(--muted); min-height:20px; margin-bottom:8px;">&nbsp;</div>
+      <canvas id="spectrum"></canvas>
+    </div>
+  </aside>
+
+  <!-- Memory Drawer -->
+  <aside id="drawer-memory" class="drawer" aria-hidden="true">
+    <header>
+      <h2>Memory</h2>
+      <button class="close" onclick="closeDrawer()">Close</button>
+    </header>
+    <div class="content" style="display:flex; flex-direction:column; gap:8px;">
+      <div style="display:flex; gap:8px;">
+        <input id="mem-query" placeholder="Query (e.g., *)" value="*" style="flex:1; background:#0c1020; color:var(--text); border:1px solid var(--border); padding:8px; border-radius:6px;" />
+        <input id="mem-k" type="number" min="1" max="200" value="25" title="Top-K" style="width:80px; background:#0c1020; color:var(--text); border:1px solid var(--border); padding:8px; border-radius:6px;" />
+        <button onclick="refreshMemory()" style="background:#0c7bdc; color:#fff; border:none; padding:8px 10px; font-weight:600; border-radius:6px; cursor:pointer;">Refresh</button>
+      </div>
+      <div id="mem-summary" class="meta">&nbsp;</div>
+      <div id="memory-list" style="border-top:1px solid var(--border); padding-top:10px;"></div>
+    </div>
+  </aside>
 </body>
 </html>
