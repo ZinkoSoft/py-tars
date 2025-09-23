@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""STT transcription backends: local Whisper or WebSocket proxy.
+"""STT transcription backends: local Whisper, WebSocket proxy, or OpenAI API.
 
 Public entry point is SpeechTranscriber; behavior unchanged. Added typing and docs.
 """
@@ -9,8 +9,19 @@ import logging
 import numpy as np
 import orjson
 from typing import Tuple, Dict, Any
+import io
+import wave
 
-from config import WHISPER_MODEL, MODEL_PATH, STT_BACKEND, WS_URL
+from config import (
+    WHISPER_MODEL,
+    MODEL_PATH,
+    STT_BACKEND,
+    WS_URL,
+    OPENAI_API_KEY,
+    OPENAI_BASE_URL,
+    OPENAI_STT_MODEL,
+    OPENAI_TIMEOUT_S,
+)
 
 logger = logging.getLogger("stt-worker.transcriber")
 
@@ -109,6 +120,61 @@ class _WebSocketTranscriber:
         return text_out, conf_out, {"backend": "ws"}
 
 
+class _OpenAITranscriber:
+    """Synchronous HTTP client for OpenAI-compatible audio transcription.
+
+    Sends a short WAV built from PCM16 to the /audio/transcriptions endpoint.
+    This is called from a worker thread by the main loop; keep it blocking here.
+    """
+
+    def __init__(self, base_url: str, api_key: str, model: str, timeout_s: float = 30.0):
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY is required for STT_BACKEND=openai")
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self.model = model
+        self.timeout_s = timeout_s
+
+    @staticmethod
+    def _pcm_to_wav_bytes(pcm_bytes: bytes, sample_rate: int) -> bytes:
+        buf = io.BytesIO()
+        with wave.open(buf, 'wb') as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)  # 16-bit
+            wf.setframerate(sample_rate)
+            wf.writeframes(pcm_bytes)
+        return buf.getvalue()
+
+    def transcribe(self, audio_data: bytes, input_sample_rate: int) -> Tuple[str, float, Dict[str, Any]]:
+        import httpx
+
+        # Prefer sending native sample rate; OpenAI server handles resampling; keep file concise
+        wav_bytes = self._pcm_to_wav_bytes(audio_data, input_sample_rate)
+        url = f"{self.base_url}/audio/transcriptions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+        }
+        # Multipart form; 'file' must look like a file upload
+        files = {
+            "file": ("audio.wav", wav_bytes, "audio/wav"),
+        }
+        data = {
+            "model": self.model,
+            "response_format": "json",
+            "temperature": "0",
+            "language": "en",
+        }
+        # Use a short-lived client per call to avoid shared state; keep timeouts conservative
+        with httpx.Client(timeout=self.timeout_s) as client:
+            resp = client.post(url, headers=headers, data=data, files=files)
+            resp.raise_for_status()
+            j = resp.json()
+        # OpenAI whisper returns { text: "..." }. Some providers include confidence; default None
+        text = j.get("text") or j.get("transcript") or ""
+        conf = j.get("confidence")
+        return text, conf, {"backend": "openai", "provider": "openai", "model": self.model}
+
+
 class SpeechTranscriber:
     """Facade selecting the configured STT backend.
 
@@ -118,6 +184,17 @@ class SpeechTranscriber:
         if STT_BACKEND == "ws":
             logger.info(f"Using WebSocket STT backend: {WS_URL}")
             self._impl = _WebSocketTranscriber(WS_URL)
+        elif STT_BACKEND == "openai":
+            logger.info(
+                f"Using OpenAI STT backend: base={OPENAI_BASE_URL}, model={OPENAI_STT_MODEL}"
+            )
+            # Do not log the API key
+            self._impl = _OpenAITranscriber(
+                base_url=OPENAI_BASE_URL,
+                api_key=OPENAI_API_KEY,
+                model=OPENAI_STT_MODEL,
+                timeout_s=OPENAI_TIMEOUT_S,
+            )
         else:
             self._impl = _LocalWhisperTranscriber()
 

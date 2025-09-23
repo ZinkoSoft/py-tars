@@ -62,7 +62,7 @@
     let ws;
     let spectrum = new Array(64).fill(0);
     const logEl = () => document.getElementById('log');
-  const states = { listening:false, processing:false, llmWriting:false };
+    const states = { listening:false, processing:false, llmWriting:false };
     const streamBuffers = new Map(); // id -> { node, text }
     const ttsBuffers = new Map();    // id -> { node, text }
     let lastMemory = { query: '*', k: 25, results: [] };

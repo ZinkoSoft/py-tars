@@ -56,8 +56,8 @@ class STTWorker:
         await self.mqtt.subscribe_stream('tts/status', self._handle_tts_status)
         # Also listen to tts/say to preemptively mute and set echo context, in case we miss 'speaking_start'
         await self.mqtt.subscribe_stream('tts/say', self._handle_tts_say)
-        # For WS backend the current transcriber opens a new WS per call; avoid partials to reduce overhead
-        self._enable_partials = STREAMING_PARTIALS and STT_BACKEND != "ws"
+        # For WS/OpenAI backends we open a network call per utterance; avoid partials to reduce overhead
+        self._enable_partials = STREAMING_PARTIALS and STT_BACKEND not in {"ws", "openai"}
         if self._enable_partials:
             logger.info(f"Streaming partial transcripts enabled (interval={PARTIAL_INTERVAL_MS}ms)")
         else:

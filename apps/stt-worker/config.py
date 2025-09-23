@@ -5,7 +5,7 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 MQTT_URL = os.getenv("MQTT_URL", "mqtt://tars:pass@127.0.0.1:1883")
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
 MODEL_PATH = "/app/models"
-STT_BACKEND = os.getenv("STT_BACKEND", "whisper")  # whisper | ws
+STT_BACKEND = os.getenv("STT_BACKEND", "whisper")  # whisper | ws | openai
 WS_URL = os.getenv("WS_URL", "ws://127.0.0.1:9000/stt")
 SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", "16000"))
 CHUNK_DURATION_MS = int(os.getenv("CHUNK_DURATION_MS", "30"))
@@ -64,3 +64,11 @@ FFT_LOG_SCALE = int(os.getenv("FFT_LOG_SCALE", "1"))  # 1 to use log magnitude s
 COMMON_WORDS: Set[str] = set(
     "the a an and of to you i it is that in we for on with this my your yes no thanks thank hello hi ok okay please what who where when why how can do are was were have has had just really sure right time date day weather play stop start open close tell give set make turn off on up down volume name today now current temperature".split()
 )
+
+# OpenAI STT offload (optional)
+# When STT_BACKEND=="openai", raw PCM chunks are assembled into WAV and sent to OpenAI-compatible API
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")  # do not log
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+# Default to Whisper API; allow gpt-4o(-mini)-transcribe or other compatible models via env
+OPENAI_STT_MODEL = os.getenv("OPENAI_STT_MODEL", "whisper-1")
+OPENAI_TIMEOUT_S = float(os.getenv("OPENAI_TIMEOUT_S", "30"))
