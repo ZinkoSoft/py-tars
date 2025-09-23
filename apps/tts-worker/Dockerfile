@@ -20,6 +20,7 @@ RUN pip install -r requirements.txt
 RUN mkdir -p /voices
 COPY main.py ./
 COPY tts_worker ./tts_worker
+COPY external_services ./external_services
 
 # At runtime, copy voice models with proper permissions
 ENTRYPOINT ["/bin/sh", "-c", "if [ -d /voice-models ] && [ \"$(ls -A /voice-models 2>/dev/null)\" ]; then cp -r /voice-models/* /voices/ && chmod -R 644 /voices/*; else echo 'No voice models mounted at /voice-models'; fi; if [ ! -f /voices/TARS.onnx ]; then echo 'WARNING: /voices/TARS.onnx not found'; fi; exec python main.py"]

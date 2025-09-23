@@ -22,6 +22,8 @@ from vad import VADProcessor
 from transcriber import SpeechTranscriber
 from mqtt_utils import MQTTClientWrapper
 from suppression import SuppressionState, SuppressionEngine
+from audio_preproc import preprocess_pcm
+from config import PREPROCESS_ENABLE, PREPROCESS_MIN_MS
 
 logging.basicConfig(
     level=LOG_LEVEL,
@@ -143,6 +145,15 @@ class STTWorker:
             if not utterance:
                 continue
             try:
+                # Optional FFmpeg preprocessing before transcription
+                if PREPROCESS_ENABLE:
+                    # Avoid spending cycles on tiny clips
+                    utt_ms = (len(utterance) / 2) / self.audio_capture.sample_rate * 1000.0
+                    if utt_ms >= PREPROCESS_MIN_MS:
+                        pre_len = len(utterance)
+                        utterance = await asyncio.to_thread(preprocess_pcm, utterance, self.audio_capture.sample_rate)
+                        if len(utterance) != pre_len:
+                            logger.debug("Preprocessed utterance size %d -> %d bytes", pre_len, len(utterance))
                 # Offload blocking transcription to a worker thread to avoid blocking the event loop
                 text, confidence, metrics = await asyncio.to_thread(self.transcriber.transcribe, utterance, self.audio_capture.sample_rate)
             except Exception as e:

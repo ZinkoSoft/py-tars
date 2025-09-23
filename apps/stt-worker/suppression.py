@@ -169,10 +169,37 @@ class SuppressionEngine:
         else:
             dict_ratio = 0.0
         if dict_ratio < DICT_MATCH_MIN_RATIO and len(raw_text) >= NOISE_MIN_LENGTH:
+            matched_words = [w for w in word_tokens if w in COMMON_WORDS]
+            info["dict_ratio"] = round(dict_ratio, 3)
+            info["dict_tokens"] = len(word_tokens)
+            info["dict_matches"] = len(matched_words)
+            if matched_words:
+                info["dict_matched_words"] = matched_words[:8]
+            logger.debug(
+                "Suppression: dict_ratio gate ratio=%.2f<th=%.2f tokens=%d matches=%d matched=%s text='%s'",
+                dict_ratio,
+                DICT_MATCH_MIN_RATIO,
+                len(word_tokens),
+                len(matched_words),
+                matched_words[:8],
+                raw_text,
+            )
             info["reasons"].append(f"dict_ratio {dict_ratio:.2f} < {DICT_MATCH_MIN_RATIO}")
         if avg_no_speech is not None and avg_no_speech > NO_SPEECH_MAX:
+            logger.debug(
+                "Suppression: no_speech gate prob=%.2f>th=%.2f text='%s'",
+                avg_no_speech,
+                NO_SPEECH_MAX,
+                raw_text,
+            )
             info["reasons"].append(f"no_speech {avg_no_speech:.2f} > {NO_SPEECH_MAX}")
         if avg_logprob is not None and avg_logprob < AVG_LOGPROB_MIN:
+            logger.debug(
+                "Suppression: avg_logprob gate avg=%.2f<th=%.2f text='%s'",
+                avg_logprob,
+                AVG_LOGPROB_MIN,
+                raw_text,
+            )
             info["reasons"].append(f"avg_logprob {avg_logprob:.2f} < {AVG_LOGPROB_MIN}")
 
         high_conf = confidence is not None and confidence > 0.95 and (avg_no_speech is None or avg_no_speech < NO_SPEECH_MAX)

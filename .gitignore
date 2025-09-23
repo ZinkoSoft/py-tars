@@ -120,3 +120,5 @@ ops/mosquitto-data/*
 
 # Memory Worker data
 data/*
+
+.github

@@ -26,3 +26,14 @@ TTS_AGGREGATE = int(getenv("TTS_AGGREGATE", "1"))
 TTS_AGGREGATE_DEBOUNCE_MS = int(getenv("TTS_AGGREGATE_DEBOUNCE_MS", "150"))
 # When aggregating, synthesize as a single WAV (pipeline disabled) to avoid playback gaps
 TTS_AGGREGATE_SINGLE_WAV = int(getenv("TTS_AGGREGATE_SINGLE_WAV", "1"))
+
+# External TTS provider selection and settings
+# Options: "piper" (default), "elevenlabs"
+TTS_PROVIDER = getenv("TTS_PROVIDER", "piper").lower()
+
+# ElevenLabs configuration
+ELEVEN_API_BASE = getenv("ELEVEN_API_BASE", "https://api.elevenlabs.io/v1")
+ELEVEN_API_KEY = getenv("ELEVEN_API_KEY", "")
+ELEVEN_VOICE_ID = getenv("ELEVEN_VOICE_ID", "")  # required when TTS_PROVIDER=elevenlabs
+ELEVEN_MODEL_ID = getenv("ELEVEN_MODEL_ID", "eleven_multilingual_v2")
+ELEVEN_OPTIMIZE_STREAMING = int(getenv("ELEVEN_OPTIMIZE_STREAMING", "0"))  # 0/1/2/3 per ElevenLabs docs

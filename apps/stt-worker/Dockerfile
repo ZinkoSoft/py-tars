@@ -18,7 +18,7 @@ RUN pip install --upgrade pip && \
     pip install -r requirements.txt
 
 # Copy application modules
-COPY main.py config.py audio_capture.py vad.py transcriber.py mqtt_utils.py suppression.py ./
+COPY main.py config.py audio_capture.py vad.py transcriber.py mqtt_utils.py suppression.py audio_preproc.py ./
 
 # Create directories for models
 RUN mkdir -p /app/models /host-models

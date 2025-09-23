@@ -12,8 +12,11 @@ from markdown import markdown as md_render
 from bs4 import BeautifulSoup
 from html import unescape
 
+import tempfile
+from typing import Any
+
 from .config import MQTT_URL, TTS_STREAMING, TTS_PIPELINE, TTS_AGGREGATE, TTS_AGGREGATE_DEBOUNCE_MS, TTS_AGGREGATE_SINGLE_WAV
-from .piper_synth import PiperSynth
+from .piper_synth import PiperSynth, _spawn_player
 
 
 logger = logging.getLogger("tts-worker")
@@ -25,12 +28,14 @@ def parse_mqtt(url: str):
 
 
 class TTSService:
-    def __init__(self, synth: PiperSynth):
+    def __init__(self, synth: Any):
         self.synth = synth
         # Aggregation state
         self._agg_id: str | None = None
         self._agg_texts: list[str] = []
         self._agg_timer: asyncio.TimerHandle | None = None
+        # Ensure only one playback happens at a time to avoid overlapping audio
+        self._play_lock = asyncio.Lock()
 
     def _cancel_timer(self):
         try:
@@ -53,6 +58,7 @@ class TTSService:
         self._cancel_timer()
         if not self._agg_texts:
             return
+        logger.debug("Flushing TTS aggregate: count=%d single_wav=%s", len(self._agg_texts), bool(TTS_AGGREGATE_SINGLE_WAV))
         if TTS_AGGREGATE_SINGLE_WAV:
             text = " ".join(t.strip() for t in self._agg_texts if t and t.strip())
             self._agg_texts.clear()
@@ -123,22 +129,45 @@ class TTSService:
             logger.info(f"MQTT disconnected: {e}; shutting down gracefully")
 
     async def _speak(self, mqtt_client: mqtt.Client, text: str, stt_ts: float | None, *, streaming_override: bool | None = None, pipeline_override: bool | None = None) -> None:
-        # Notify start
-        start_msg = json.dumps({"event": "speaking_start", "text": text, "timestamp": time.time()})
-        await mqtt_client.publish("tts/status", start_msg)
-        logger.info(f"Published TTS start status: {start_msg}")
+        if self._play_lock.locked():
+            logger.debug("Playback busy; queuing next utterance (len=%d)", len(text or ""))
+        async with self._play_lock:
+            logger.debug("Playback start (len=%d)", len(text or ""))
+            # Notify start (emit when we actually start speaking to match playback timing)
+            start_msg = json.dumps({"event": "speaking_start", "text": text, "timestamp": time.time()})
+            await mqtt_client.publish("tts/status", start_msg)
+            logger.info(f"Published TTS start status: {start_msg}")
 
+            t0 = time.time()
+            streaming = bool(TTS_STREAMING) if streaming_override is None else bool(streaming_override)
+            pipeline = bool(TTS_PIPELINE) if pipeline_override is None else bool(pipeline_override)
+            # Offload blocking synthesis/playback to a thread to keep event loop responsive
+            elapsed = await asyncio.to_thread(self._do_synth_and_play_blocking, text, streaming, pipeline)
+            t1 = time.time()
+            if stt_ts is not None:
+                logger.info(f"TTS time: {(t1 - stt_ts):.3f}s from STT final to playback-finished; time-to-first-audio ~{(elapsed if TTS_STREAMING else 0.0):.3f}s")
+            else:
+                logger.info(f"TTS playback finished in {(t1 - t0):.3f}s")
+
+            # Notify end
+            end_msg = json.dumps({"event": "speaking_end", "text": text, "timestamp": time.time()})
+            await mqtt_client.publish("tts/status", end_msg)
+            logger.info(f"Published TTS end status: {end_msg}")
+            logger.debug("Playback end (len=%d)", len(text or ""))
+
+    # ----- blocking helper (runs in thread) -----
+    def _do_synth_and_play_blocking(self, text: str, streaming: bool, pipeline: bool) -> float:
         t0 = time.time()
-        streaming = bool(TTS_STREAMING) if streaming_override is None else bool(streaming_override)
-        pipeline = bool(TTS_PIPELINE) if pipeline_override is None else bool(pipeline_override)
-        elapsed = self.synth.synth_and_play(text, streaming=streaming, pipeline=pipeline)
-        t1 = time.time()
-        if stt_ts is not None:
-            logger.info(f"TTS time: {(t1 - stt_ts):.3f}s from STT final to playback-finished; time-to-first-audio ~{(elapsed if TTS_STREAMING else 0.0):.3f}s")
-        else:
-            logger.info(f"TTS playback finished in {(t1 - t0):.3f}s")
-
-        # Notify end
-        end_msg = json.dumps({"event": "speaking_end", "text": text, "timestamp": time.time()})
-        await mqtt_client.publish("tts/status", end_msg)
-        logger.info(f"Published TTS end status: {end_msg}")
+        # If the synthesizer supports explicit single-WAV synthesis and streaming is disabled,
+        # honor the "single WAV" path (used by aggregation) even for external providers.
+        if not streaming and hasattr(self.synth, "synth_to_wav"):
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as f:
+                self.synth.synth_to_wav(text, f.name)
+                p = _spawn_player(args=[f.name])
+                p.wait()
+            return time.time() - t0
+        # Otherwise use provider's synth_and_play API
+        try:
+            return self.synth.synth_and_play(text, streaming=streaming, pipeline=pipeline)
+        except TypeError:
+            return self.synth.synth_and_play(text)

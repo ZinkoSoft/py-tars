@@ -64,6 +64,14 @@ FFT_LOG_SCALE = int(os.getenv("FFT_LOG_SCALE", "1"))  # 1 to use log magnitude s
 COMMON_WORDS: Set[str] = set(
     "the a an and of to you i it is that in we for on with this my your yes no thanks thank hello hi ok okay please what who where when why how can do are was were have has had just really sure right time date day weather play stop start open close tell give set make turn off on up down volume name today now current temperature".split()
 )
+# Optional: extend common words from env to improve domain acceptance in dict_ratio heuristic
+_COMMON_WORDS_EXTRA = os.getenv("COMMON_WORDS_EXTRA", "")
+if _COMMON_WORDS_EXTRA:
+    try:
+        extra_tokens = [w.strip().lower() for w in _COMMON_WORDS_EXTRA.split(",")]
+        COMMON_WORDS.update(w for w in extra_tokens if w)
+    except Exception:
+        pass
 
 # OpenAI STT offload (optional)
 # When STT_BACKEND=="openai", raw PCM chunks are assembled into WAV and sent to OpenAI-compatible API
@@ -72,3 +80,21 @@ OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
 # Default to Whisper API; allow gpt-4o(-mini)-transcribe or other compatible models via env
 OPENAI_STT_MODEL = os.getenv("OPENAI_STT_MODEL", "whisper-1")
 OPENAI_TIMEOUT_S = float(os.getenv("OPENAI_TIMEOUT_S", "30"))
+
+# Optional FFmpeg preprocessing (disabled by default)
+# Enable to trim silence, reduce noise, and normalize audio before STT.
+# Filters default explanation:
+# - silenceremove: trim leading/trailing silence (at least 2s, threshold -35dB)
+# - arnndn (if available at runtime) or afftdn: gentle denoise
+# - loudnorm: EBU R128 loudness normalization to -18 LUFS (single pass)
+PREPROCESS_ENABLE = int(os.getenv("PREPROCESS_ENABLE", "0"))
+PREPROCESS_MIN_MS = int(os.getenv("PREPROCESS_MIN_MS", "600"))  # skip very short clips
+PREPROCESS_TIMEOUT_S = float(os.getenv("PREPROCESS_TIMEOUT_S", "6"))
+# Note: arnndn requires rnnoise model not present by default on slim images; fallback to afftdn
+_DEFAULT_FILTERS = (
+    "silenceremove=start_periods=1:start_silence=2:start_threshold=-35dB:"
+    "detection=peak,"
+    "afftdn=nf=-25,"
+    "loudnorm=I=-18:TP=-2:LRA=11"
+)
+PREPROCESS_FILTERS = os.getenv("PREPROCESS_FILTERS", _DEFAULT_FILTERS)
