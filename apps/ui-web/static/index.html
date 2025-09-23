@@ -38,6 +38,12 @@
     #composer button { background:#0c7bdc; color:#fff; border:none; padding:12px 14px; font-weight:600; cursor:pointer; }
     #composer button:hover { background:#0965b3; }
     code { color: var(--accent); }
+    /* Memory panel */
+    #memory-list { max-height: 320px; overflow: auto; }
+    .mem-item { border-bottom:1px solid var(--border); padding:8px 0; }
+    .mem-head { display:flex; gap:8px; align-items:center; font-size:12px; color:var(--muted); margin-bottom:6px; }
+    .mem-score { background:#15204a; border:1px solid #22306b; color:#a9b5ea; padding:2px 6px; border-radius:6px; font-weight:600; }
+    .mem-text { white-space:pre-wrap; word-wrap:break-word; line-height:1.35; }
   </style>
   <script>
     let ws;
@@ -46,6 +52,8 @@
   const states = { listening:false, processing:false, llmWriting:false };
     const streamBuffers = new Map(); // id -> { node, text }
     const ttsBuffers = new Map();    // id -> { node, text }
+    let lastMemory = { query: '*', k: 25, results: [] };
+    const memoryListEl = () => document.getElementById('memory-list');
 
     function joinParts(prev, next) {
       const a = (prev || '').trimEnd();
@@ -169,6 +177,18 @@
             }
             return;
           }
+          if (topic.endsWith('memory/results')) {
+            // payload: { query, results: [{document|text, score, ...}], k }
+            try {
+              lastMemory = {
+                query: p.query ?? lastMemory.query ?? '*',
+                k: p.k ?? p.top_k ?? lastMemory.k ?? 25,
+                results: Array.isArray(p.results) ? p.results : []
+              };
+              renderMemory(lastMemory);
+            } catch (e) { /* ignore */ }
+            return;
+          }
         } catch(e) { /* ignore parse errors */ }
       };
       ws.onclose = () => setTimeout(connect, 1000);
@@ -197,7 +217,103 @@
       requestAnimationFrame(drawSpectrum);
     }
 
-    window.addEventListener('load', ()=>{ connect(); drawSpectrum(); setStatus(); });
+    function renderMemory(payload) {
+      const list = memoryListEl();
+      if (!list) return;
+      list.innerHTML = '';
+      const q = payload.query ?? '*';
+      const k = payload.k ?? 25;
+      const results = Array.isArray(payload.results) ? payload.results : [];
+      const summary = document.getElementById('mem-summary');
+      if (summary) summary.textContent = `${results.length} results for “${q}” (k=${k})`;
+      if (!results.length) {
+        const empty = document.createElement('div');
+        empty.className = 'meta';
+        empty.textContent = 'No results';
+        list.appendChild(empty);
+        return;
+      }
+      results.forEach((r, idx) => {
+        const item = document.createElement('div');
+        item.className = 'mem-item';
+        const head = document.createElement('div');
+        head.className = 'mem-head';
+        const ix = document.createElement('div');
+        ix.textContent = `#${idx+1}`;
+        const score = document.createElement('div');
+        score.className = 'mem-score';
+        const s = typeof r.score === 'number' ? r.score : (typeof r.similarity === 'number' ? r.similarity : null);
+        score.textContent = s != null ? `score ${s.toFixed(3)}` : 'score —';
+        head.appendChild(ix);
+        head.appendChild(score);
+        const text = document.createElement('div');
+        text.className = 'mem-text';
+        const rawDoc = r.document ?? r.text ?? r.content ?? r.doc ?? null;
+        let docText = '';
+        let auxLabel = '';
+        if (typeof rawDoc === 'string') {
+          docText = rawDoc;
+        } else if (rawDoc && typeof rawDoc === 'object') {
+          // Try common fields from our memory documents
+          docText = rawDoc.text ?? rawDoc.content ?? rawDoc.message ?? (rawDoc.document?.text ?? '');
+          // Provide a small label if we have topic/source
+          const topic = rawDoc.topic || rawDoc.source || '';
+          if (topic) auxLabel = String(topic);
+        }
+        if (!docText) {
+          // Last resort: pretty-print JSON (truncated)
+          try {
+            const pretty = JSON.stringify(rawDoc ?? r, null, 2);
+            docText = pretty.length > 2000 ? pretty.slice(0, 2000) + "\n… (truncated)" : pretty;
+          } catch (_) {
+            docText = String(rawDoc ?? r);
+          }
+        }
+        if (auxLabel) {
+          const lbl = document.createElement('div');
+          lbl.className = 'meta';
+          lbl.textContent = auxLabel;
+          item.appendChild(lbl);
+        }
+        text.textContent = docText;
+        item.appendChild(head);
+        item.appendChild(text);
+        // Collapsible details with full JSON
+        try {
+          const details = document.createElement('details');
+          const summaryEl = document.createElement('summary');
+          summaryEl.textContent = 'Details';
+          const pre = document.createElement('pre');
+          pre.style.margin = '6px 0 0 0';
+          pre.style.whiteSpace = 'pre-wrap';
+          pre.style.wordBreak = 'break-word';
+          pre.textContent = JSON.stringify(r, null, 2);
+          details.appendChild(summaryEl);
+          details.appendChild(pre);
+          item.appendChild(details);
+        } catch(_) { /* ignore */ }
+        list.appendChild(item);
+      });
+    }
+
+    async function refreshMemory() {
+      const qEl = document.getElementById('mem-query');
+      const kEl = document.getElementById('mem-k');
+      const q = (qEl?.value || '*').trim() || '*';
+      const k = Math.max(1, Math.min(200, parseInt(kEl?.value || '25', 10) || 25));
+      const summary = document.getElementById('mem-summary');
+      if (summary) summary.textContent = `Querying…`;
+      try {
+        const res = await fetch(`/api/memory?q=${encodeURIComponent(q)}&k=${k}`);
+        const data = await res.json();
+        lastMemory = { query: data.query ?? q, k: data.k ?? k, results: data.results ?? [] };
+        renderMemory(lastMemory);
+      } catch (e) {
+        if (summary) summary.textContent = `Error: ${e}`;
+      }
+    }
+
+    window.addEventListener('load', ()=>{ connect(); drawSpectrum(); setStatus(); refreshMemory(); });
   </script>
   </head>
 <body>
@@ -226,6 +342,18 @@
           <div id="mic-text" style="color:var(--muted); min-height:20px;">&nbsp;</div>
         </div>
         <canvas id="spectrum"></canvas>
+      </div>
+      <div class="panel">
+        <div class="status" style="border-bottom:1px solid var(--border);">Memory</div>
+        <div style="padding:10px 12px; display:flex; flex-direction:column; gap:8px;">
+          <div style="display:flex; gap:8px;">
+            <input id="mem-query" placeholder="Query (e.g., *)" value="*" style="flex:1; background:#0c1020; color:var(--text); border:1px solid var(--border); padding:8px; border-radius:6px;" />
+            <input id="mem-k" type="number" min="1" max="200" value="25" title="Top-K" style="width:80px; background:#0c1020; color:var(--text); border:1px solid var(--border); padding:8px; border-radius:6px;" />
+            <button onclick="refreshMemory()" style="background:#0c7bdc; color:#fff; border:none; padding:8px 10px; font-weight:600; border-radius:6px; cursor:pointer;">Refresh</button>
+          </div>
+          <div id="mem-summary" class="meta">&nbsp;</div>
+        </div>
+        <div id="memory-list" style="padding:10px 12px; border-top:1px solid var(--border);"></div>
       </div>
     </div>
   </div>
