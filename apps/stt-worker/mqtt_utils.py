@@ -29,7 +29,9 @@ class MQTTClientWrapper:
         self._lock = asyncio.Lock()
         # App-level keepalive heartbeat
         self._keepalive_task: Optional[asyncio.Task] = None
-        self._keepalive_interval: float = 30.0  # seconds
+        # Send a lightweight app heartbeat frequently to keep the connection active
+        self._keepalive_interval = 5.0  # seconds
+        self._last_hb = 0.0
 
     def parse(self):
         u = urlparse(self.mqtt_url)
@@ -39,14 +41,14 @@ class MQTTClientWrapper:
         """Connect to the broker and resume prior subscriptions."""
         host, port, username, password = self.parse()
         logger.info(f"Connecting to MQTT {host}:{port}")
-        # Use a moderate MQTT keepalive so broker pings occur frequently
+        # Use a short MQTT keepalive so broker pings occur frequently
         self.client = mqtt.Client(
             hostname=host,
             port=port,
             username=username,
             password=password,
             client_id=self.client_id,
-            keepalive=60,
+            keepalive=15,
         )
         await self.client.__aenter__()
         logger.info("Connected to MQTT")
@@ -124,16 +126,41 @@ class MQTTClientWrapper:
         topic = f"system/keepalive/{self.client_id}"
         while True:
             try:
+                # Publish first, then sleep so we send an immediate heartbeat on startup
+                if self.client:
+                    # Watchdog: if we've failed to publish heartbeats for too long, force reconnect
+                    now = time.time()
+                    if self._last_hb and (now - self._last_hb) > (self._keepalive_interval * 3):
+                        logger.debug("Heartbeat watchdog triggering reconnect")
+                        try:
+                            await self.reconnect()
+                        except Exception as re:
+                            logger.debug(f"Watchdog reconnect failed: {re}")
+                    payload = orjson.dumps({"ok": True, "event": "hb", "ts": now})
+                    try:
+                        await asyncio.wait_for(self.client.publish(topic, payload, retain=False), timeout=2.0)
+                    except asyncio.TimeoutError:
+                        logger.warning("Heartbeat publish timeout; forcing reconnect")
+                        try:
+                            await self.reconnect()
+                        except Exception as re:
+                            logger.debug(f"Reconnect after heartbeat timeout failed: {re}")
+                        # Skip sleep to attempt immediate next heartbeat on reconnect
+                        continue
+                    self._last_hb = now
+                    logger.debug(f"stt heartbeat sent every {self._keepalive_interval}s")
                 await asyncio.sleep(self._keepalive_interval)
                 if not self.client:
                     continue
-                payload = orjson.dumps({"ok": True, "event": "hb", "ts": time.time()})
-                await self.client.publish(topic, payload, retain=False)
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.debug(f"Heartbeat publish failed: {e}")
-                # Trigger reconnect on next dispatch iteration
+                # Try to reconnect if we fell behind on heartbeats
+                try:
+                    await self.reconnect()
+                except Exception as re:
+                    logger.debug(f"Heartbeat reconnect failed: {re}")
                 continue
 
     async def _dispatch_loop(self):

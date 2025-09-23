@@ -15,6 +15,8 @@ services:
     container_name: tars-stt
     network_mode: host
     env_file: .env
+    depends_on:
+      - mqtt
     devices:
       - /dev/snd:/dev/snd
     volumes:
@@ -42,6 +44,8 @@ services:
     container_name: tars-router
     network_mode: host
     env_file: .env
+    depends_on:
+      - mqtt
     environment:
       # Broker URL assembled from global creds/host/port
       - MQTT_URL=mqtt://$MQTT_USER:$MQTT_PASS@$MQTT_HOST:$MQTT_PORT
@@ -66,6 +70,8 @@ services:
     env_file: .env
     devices:
       - /dev/snd:/dev/snd
+    depends_on:
+      - mqtt
     volumes:
       - ./apps/tts-worker/voices:/voice-models:ro
       - /run/user/1000/pulse:/run/user/1000/pulse:ro

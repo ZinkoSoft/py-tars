@@ -123,8 +123,10 @@ class STTWorker:
             logger.error(f"Error handling TTS say: {e}")
 
     async def process_audio_stream(self):
-        logger.info("Starting audio processing loop")
+        logger.debug("Starting audio processing loop")
         async for chunk in self.audio_capture.get_audio_chunks():
+            # Always yield control so MQTT pings/heartbeats and other tasks can run
+            await asyncio.sleep(0)
             # Cooldown gating
             if self.state.cooldown_until and time.time() < self.state.cooldown_until:
                 continue
@@ -136,11 +138,13 @@ class STTWorker:
                     rms = float(np.sqrt(np.mean(np_chunk.astype(np.float32) ** 2)))
                     if rms < 120:
                         continue
-            utterance = self.vad_processor.process_chunk(chunk) if self.vad_processor else None
+            # Offload CPU-bound VAD to a thread to avoid blocking the event loop
+            utterance = await asyncio.to_thread(self.vad_processor.process_chunk, chunk) if self.vad_processor else None
             if not utterance:
                 continue
             try:
-                text, confidence, metrics = self.transcriber.transcribe(utterance, self.audio_capture.sample_rate)
+                # Offload blocking transcription to a worker thread to avoid blocking the event loop
+                text, confidence, metrics = await asyncio.to_thread(self.transcriber.transcribe, utterance, self.audio_capture.sample_rate)
             except Exception as e:
                 logger.error(f"Transcription error: {e}")
                 await self.publish_health(False, f"Transcription error: {e}")
@@ -211,7 +215,8 @@ class STTWorker:
             if duration_ms < PARTIAL_MIN_DURATION_MS:
                 continue
             try:
-                text, confidence, metrics = self.transcriber.transcribe(buf, self.audio_capture.sample_rate)
+                # Offload blocking transcription to a worker thread to avoid blocking the event loop
+                text, confidence, metrics = await asyncio.to_thread(self.transcriber.transcribe, buf, self.audio_capture.sample_rate)
             except Exception as e:
                 logger.debug(f"Partial transcription error: {e}")
                 continue

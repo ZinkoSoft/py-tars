@@ -3,19 +3,90 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>TARS Web UI</title>
+  <title>TARS Chat</title>
   <style>
-    body { background:#0a0a12; color:#eaeaea; font-family: system-ui, sans-serif; margin:0; padding:16px; }
-    .row { display:flex; gap:16px; align-items:center; }
-    .card { background:#111422; border:1px solid #1f2440; border-radius:8px; padding:12px; }
-    #spectrum { width:100%; height:200px; background:#0f1220; border-radius:6px; }
-    #partial { color:#cfe7ff; }
-    #final { color:#fff; font-weight:600; }
-    #tts { color:#a6f3b5; }
+    :root {
+      --bg: #0a0a12; --panel: #0f1324; --border: #1e2545; --text: #e8ecff;
+      --tars: #1d2b56; --user: #1d5637; --muted: #9aa4d6; --accent: #5ac8fa;
+    }
+    * { box-sizing: border-box; }
+    body { background:var(--bg); color:var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:0; height:100vh; display:flex; flex-direction:column; }
+    header { padding:12px 16px; border-bottom:1px solid var(--border); background:#0c1020; }
+    header h1 { margin:0; font-size:16px; color:var(--muted); font-weight:600; }
+    #container { display:flex; gap:16px; padding:16px; height:100%; }
+    #left { flex:2; display:flex; flex-direction:column; gap:12px; }
+    #right { flex:1; display:flex; flex-direction:column; gap:12px; }
+    .panel { background:var(--panel); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+    #chat { flex:1; display:flex; flex-direction:column; }
+    #log { padding:12px; overflow:auto; height:100%; scroll-behavior:smooth; }
+    .row { display:flex; margin:8px 0; }
+    .bubble { max-width:72%; padding:10px 12px; border-radius:12px; line-height:1.3; }
+    .tars { background:var(--tars); border:1px solid #2e3c78; border-top-left-radius:4px; }
+    .user { background:var(--user); border:1px solid #2c7a51; margin-left:auto; border-top-right-radius:4px; }
+    .meta { font-size:12px; color:var(--muted); margin:6px 2px 0 2px; }
+    .status { padding:10px 12px; font-size:13px; color:var(--muted); display:flex; align-items:center; gap:8px; }
+    .dot { width:8px; height:8px; border-radius:50%; background:var(--muted); opacity:0.7; }
+    .typing { display:inline-flex; gap:4px; align-items:center; }
+    .typing .dot { animation: blink 1.2s infinite; }
+    .typing .dot:nth-child(2) { animation-delay: .2s; }
+    .typing .dot:nth-child(3) { animation-delay: .4s; }
+    @keyframes blink { 0%, 80%, 100% { opacity:.2 } 40% { opacity: 1 } }
+    #spectrum { width:100%; height:160px; background:#0b1022; }
+    #states { padding:10px 12px; }
+    #composer { display:flex; border-top:1px solid var(--border); }
+    #composer input { flex:1; background:#0c1020; color:var(--text); border:none; padding:12px; outline:none; }
+    #composer button { background:#0c7bdc; color:#fff; border:none; padding:12px 14px; font-weight:600; cursor:pointer; }
+    #composer button:hover { background:#0965b3; }
+    code { color: var(--accent); }
   </style>
   <script>
     let ws;
     let spectrum = new Array(64).fill(0);
+    const logEl = () => document.getElementById('log');
+  const states = { listening:false, processing:false, llmWriting:false };
+    const streamBuffers = new Map(); // id -> { node, text }
+    const ttsBuffers = new Map();    // id -> { node, text }
+
+    function joinParts(prev, next) {
+      const a = (prev || '').trimEnd();
+      const b = (next || '').trimStart();
+      if (!a) return b;
+      if (!b) return a;
+      const needSpace = !/[\s]$/.test(a) && !/^[\s.,!?;:]/.test(b);
+      return a + (needSpace ? ' ' : '') + b;
+    }
+
+    function addBubble(role, text, meta='') {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const col = document.createElement('div');
+      col.style.display = 'flex';
+      col.style.flexDirection = 'column';
+      col.style.maxWidth = '72%';
+      if (role === 'user') col.style.marginLeft = 'auto';
+      const b = document.createElement('div');
+      b.className = `bubble ${role}`;
+      b.textContent = text;
+      col.appendChild(b);
+      if (meta) {
+        const m = document.createElement('div');
+        m.className = 'meta'; m.textContent = meta;
+        col.appendChild(m);
+      }
+      row.appendChild(col);
+      logEl().appendChild(row);
+      logEl().scrollTop = logEl().scrollHeight;
+      return b;
+    }
+
+    function setStatus() {
+      const s = [];
+      if (states.listening) s.push('Listening…');
+      if (states.processing) s.push('Processing audio…');
+      if (states.llmWriting) s.push('TARS is writing…');
+      document.getElementById('status-line').innerHTML = s.length ? `<span class="dot"></span> ${s.join(' • ')}` : 'Idle';
+    }
+
     function connect() {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       ws = new WebSocket(`${proto}://${location.host}/ws`);
@@ -24,23 +95,89 @@
           const msg = JSON.parse(ev.data);
           if (!msg.topic) return;
           const topic = typeof msg.topic === 'string' ? msg.topic : (msg.topic.value || String(msg.topic));
-          if (topic.endsWith('stt/partial')) {
-            document.getElementById('partial').textContent = msg.payload.text || '';
-          } else if (topic.endsWith('stt/final')) {
-            document.getElementById('final').textContent = msg.payload.text || '';
-            document.getElementById('partial').textContent = '';
-          } else if (topic.endsWith('tts/status')) {
-            if ((msg.payload.event||'') === 'speaking_start') {
-              document.getElementById('tts').textContent = msg.payload.text || '';
-            }
-          } else if (topic.endsWith('stt/audio_fft')) {
-            const a = msg.payload.fft || [];
-            spectrum = a;
+          const p = msg.payload || {};
+          if (topic.endsWith('stt/audio_fft')) {
+            spectrum = p.fft || [];
+            return;
           }
-        } catch(e) {}
+          if (topic.endsWith('stt/partial')) {
+            states.listening = true; setStatus();
+            updateMicText(p.text || '');
+            return;
+          }
+          if (topic.endsWith('stt/final')) {
+            states.listening = false;
+            states.processing = true; // audio processed, dispatching to LLM/router
+            setStatus();
+            updateMicText('');
+            if (p.text) addBubble('user', p.text, 'You');
+            return;
+          }
+          if (topic.endsWith('llm/stream')) {
+            const id = p.id || 'default';
+            const cur = streamBuffers.get(id) || { node: addBubble('tars', '', 'TARS'), text:'' };
+            if (p.delta) {
+              cur.text += p.delta;
+              cur.node.textContent = cur.text;
+              streamBuffers.set(id, cur);
+            }
+            states.llmWriting = !p.done;
+            // Once LLM is writing, we are past audio processing step
+            states.processing = states.llmWriting ? false : states.processing;
+            setStatus();
+            return;
+          }
+          if (topic.endsWith('llm/response')) {
+            // Update the existing stream bubble text if present, but don't create new bubbles.
+            const id = p.id || 'default';
+            const cur = streamBuffers.get(id);
+            if (cur && (p.reply || '').trim()) {
+              cur.text = (p.reply || '').trim();
+              cur.node.textContent = cur.text;
+            }
+            states.llmWriting = false; setStatus();
+            return;
+          }
+          if (topic.endsWith('tts/say')) {
+            const id = p.utt_id || 'default';
+            const chunk = (p.text || '').trim();
+            if (!chunk) { return; }
+            // Ensure we have a target bubble: prefer existing stream bubble node
+            let entry = ttsBuffers.get(id);
+            if (!entry) {
+              let node;
+              const stream = streamBuffers.get(id);
+              if (stream) {
+                node = stream.node;
+                stream.text = ''; // reset stream text so TTS controls content
+                node.textContent = '';
+              } else {
+                node = addBubble('tars', '', 'TARS');
+              }
+              entry = { node, text: '' };
+              ttsBuffers.set(id, entry);
+            }
+            entry.text = joinParts(entry.text, chunk);
+            entry.node.textContent = entry.text;
+            states.llmWriting = false; setStatus();
+            return;
+          }
+          if (topic.endsWith('tts/status')) {
+            // Only update statuses; avoid adding duplicate bubbles here since we render from tts/say
+            if ((p.event||'') === 'speaking_start') {
+              states.processing = false; states.llmWriting = false; setStatus();
+            }
+            return;
+          }
+        } catch(e) { /* ignore parse errors */ }
       };
       ws.onclose = () => setTimeout(connect, 1000);
     }
+
+    function updateMicText(t) {
+      document.getElementById('mic-text').textContent = t;
+    }
+
     function drawSpectrum() {
       const canvas = document.getElementById('spectrum');
       const ctx = canvas.getContext('2d');
@@ -59,22 +196,38 @@
       }
       requestAnimationFrame(drawSpectrum);
     }
-    window.addEventListener('load', ()=>{ connect(); drawSpectrum(); });
+
+    window.addEventListener('load', ()=>{ connect(); drawSpectrum(); setStatus(); });
   </script>
   </head>
 <body>
-  <div class="row" style="margin-bottom:12px;">
-    <div class="card" style="flex:2;">
-      <div id="final" style="font-size:22px;">—</div>
-      <div id="partial" style="font-size:18px; opacity:0.9;">—</div>
+  <header>
+    <h1>TARS Chat</h1>
+  </header>
+  <div id="container">
+    <div id="left">
+      <div id="chat" class="panel">
+        <div id="log"></div>
+        <div id="composer">
+          <input id="input" placeholder="Type to add a user message (UI-only demo)…" onkeydown="if(event.key==='Enter'){ if(this.value){ addBubble('user', this.value, 'You'); this.value=''; }}" />
+          <button onclick="const i=document.getElementById('input'); if(i.value){ addBubble('user', i.value, 'You'); i.value=''; }">Send</button>
+        </div>
+      </div>
+      <div class="panel">
+        <div id="states">
+          <div id="status-line" class="status">Idle</div>
+        </div>
+      </div>
     </div>
-    <div class="card" style="flex:1;">
-      <div style="font-size:16px; color:#9aa4d6;">TTS</div>
-      <div id="tts">—</div>
+    <div id="right">
+      <div class="panel">
+        <div class="status" style="border-bottom:1px solid var(--border);">Microphone</div>
+        <div style="padding:10px 12px;">
+          <div id="mic-text" style="color:var(--muted); min-height:20px;">&nbsp;</div>
+        </div>
+        <canvas id="spectrum"></canvas>
+      </div>
     </div>
-  </div>
-  <div class="card">
-    <canvas id="spectrum"></canvas>
   </div>
 </body>
 </html>

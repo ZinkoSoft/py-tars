@@ -70,7 +70,7 @@ class VADProcessor:
         # Adaptive gate: require rms above floor * offset OR above absolute minimum
         gate = max(NOISE_MIN_RMS, self.noise_floor * NOISE_GATE_OFFSET)
         if not self.is_speech and rms < gate:
-            logger.debug(f"Dropping frame: rms={rms:.1f} < gate={gate:.1f} (floor={self.noise_floor:.1f})")
+            # logger.debug(f"Dropping frame: rms={rms:.1f} < gate={gate:.1f} (floor={self.noise_floor:.1f})")
             return None
 
         try:

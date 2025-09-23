@@ -10,10 +10,16 @@ import orjson
 from urllib.parse import urlparse
 
 MQTT_URL = os.getenv("MQTT_URL", "mqtt://tars:pass@127.0.0.1:1883")
+# STT topics
 PARTIAL_TOPIC = os.getenv("UI_PARTIAL_TOPIC", "stt/partial")
 FINAL_TOPIC = os.getenv("UI_FINAL_TOPIC", "stt/final")
-TTS_TOPIC = os.getenv("UI_TTS_TOPIC", "tts/status")
 FFT_TOPIC = os.getenv("UI_AUDIO_TOPIC", "stt/audio_fft")
+# TTS topics
+TTS_TOPIC = os.getenv("UI_TTS_TOPIC", "tts/status")
+TTS_SAY_TOPIC = os.getenv("UI_TTS_SAY_TOPIC", "tts/say")
+# LLM topics
+LLM_STREAM_TOPIC = os.getenv("UI_LLM_STREAM_TOPIC", "llm/stream")
+LLM_RESPONSE_TOPIC = os.getenv("UI_LLM_RESPONSE_TOPIC", "llm/response")
 
 app = FastAPI()
 logger = logging.getLogger("ui-web")
@@ -56,7 +62,15 @@ def parse_mqtt(url: str):
 
 async def mqtt_bridge_task():
     host, port, username, password = parse_mqtt(MQTT_URL)
-    topics = [PARTIAL_TOPIC, FINAL_TOPIC, TTS_TOPIC, FFT_TOPIC]
+    topics = [
+        PARTIAL_TOPIC,
+        FINAL_TOPIC,
+        FFT_TOPIC,
+        TTS_TOPIC,
+        TTS_SAY_TOPIC,
+        LLM_STREAM_TOPIC,
+        LLM_RESPONSE_TOPIC,
+    ]
     while True:
         try:
             logger.info(f"Connecting to MQTT {host}:{port}")
