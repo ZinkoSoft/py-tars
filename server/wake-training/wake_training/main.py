@@ -40,10 +40,32 @@ app.state.event_hub = EventHub()
 app.state.job_runner = None
 
 
-def get_settings() -> Settings:
+def _load_and_configure_settings() -> Settings:
     settings = load_settings()
     settings.ensure_directories()
     logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
+    return settings
+
+
+app.state.settings = _load_and_configure_settings()
+
+if app.state.settings.cors_allow_origins:
+    origins = app.state.settings.cors_allow_origins
+    allow_credentials = origins != ["*"]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=allow_credentials,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+
+def get_settings() -> Settings:
+    settings = getattr(app.state, "settings", None)
+    if settings is None:
+        settings = _load_and_configure_settings()
+        app.state.settings = settings
     return settings
 
 
@@ -72,22 +94,6 @@ async def get_job_runner(
     else:
         runner.update_handles(storage=storage, job_storage=job_storage, event_hub=event_hub)
     return runner
-
-
-@app.on_event("startup")
-async def configure_cors() -> None:
-    settings = get_settings()
-    origins = settings.cors_allow_origins
-    if not origins:
-        return
-    allow_credentials = origins != ["*"]
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=allow_credentials,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
 
 
 @app.get("/health", response_model=HealthResponse)
