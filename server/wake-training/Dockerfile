@@ -17,9 +17,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Optional requirements file; installing is skipped when the file is empty.
 COPY requirements.txt ./requirements.txt
-RUN python -m pip install --upgrade pip && \
+RUN python3 -m pip install --upgrade pip && \
     if [ -s requirements.txt ]; then \
-        python -m pip install -r requirements.txt; \
+        python3 -m pip install -r requirements.txt; \
     fi
 
 # Copy application code
