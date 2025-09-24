@@ -27,11 +27,4 @@ COPY wake_training ./wake_training
 
 ENV PYTHONPATH=/opt/wake-training
 
-CMD [
-    "uvicorn",
-    "wake_training.main:app",
-    "--host",
-    "0.0.0.0",
-    "--port",
-    "8080"
-]
+CMD ["uvicorn", "wake_training.main:app", "--host", "0.0.0.0", "--port", "8080"]

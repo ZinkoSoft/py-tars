@@ -70,17 +70,20 @@ Repo note: `data/wake-training/` (with `.gitkeep`) seeds the host directory for 
 - Notification area for success/failure with download link to artifacts.
 
 ## 6) API Surface (initial draft)
-- `GET /datasets` → summary metrics.
-- `POST /datasets` → create dataset (default `tars-default`).
-- `GET /datasets/{id}` → detailed stats + last job summary.
-- `POST /datasets/{id}/recordings` (multipart audio + metadata JSON).
-- `DELETE /recordings/{clip_id}` → soft delete (flag in metadata).
-- `PATCH /recordings/{clip_id}` → update label/notes.
-- `POST /train` → `{ dataset_id, config_overrides? }` returns job id.
-- `GET /jobs/{job_id}` → status snapshot.
-- `GET /jobs/{job_id}/logs` → streaming log tail.
-- `POST /deploy` → `{ job_id | artifact_path }` triggers transfer to Orange Pi.
-- WebSocket `ws://.../status` → emits dataset updates, job stage transitions, transfer results.
+- `GET /datasets` → summary metrics. (Implemented)
+- `POST /datasets` → create dataset (default `tars-default`). (Implemented)
+- `GET /datasets/{id}` → detailed stats + last job summary. (Implemented)
+- `POST /datasets/{id}/recordings` (multipart audio + metadata JSON). (Implemented)
+- `DELETE /datasets/{id}/recordings/{clip_id}` → soft delete (move to trash, mark in labels). (Implemented; returns 200 with `{ "status": "ok" }`)
+- `POST /datasets/{id}/recordings/{clip_id}/restore` → undo soft delete. (Implemented; returns 200 with `{ "status": "ok" }`)
+- `PATCH /datasets/{id}/recordings/{clip_id}` → update label/notes. (Implemented)
+- `POST /train` → `{ dataset_id, config_overrides? }` returns job id. (Implemented)
+- `GET /jobs/{job_id}` → status snapshot. (Implemented)
+- `GET /jobs/{job_id}/logs` → streaming log tail. (Planned)
+- `POST /deploy` → `{ job_id | artifact_path }` triggers transfer to Orange Pi. (Planned)
+- WebSocket `ws://.../status` → emits dataset updates, job stage transitions, transfer results. (Planned)
+
+Note on responses: For delete/restore we use HTTP 200 with a tiny JSON body instead of 204 to avoid FastAPI constraints on 204-with-body across versions.
 
 ## 7) Training Pipeline (GPU focus)
 1. **Pre-flight checks**: ensure dataset balance, compute class weights, run VAD to prune silence.
@@ -133,6 +136,35 @@ Repo note: `data/wake-training/` (with `.gitkeep`) seeds the host directory for 
 5. **STT Integration**: Update TARS STT worker to consume exported model, smoke test on Orange Pi.
 6. **Polish**: Metrics, authentication, auto-cleanup of scratch space, multi-dataset support.
 
+## 12b) Status Update (2025-09-24)
+
+Completed (MVP slice):
+- Training API scaffolded under `server/wake-training/` with health and dataset endpoints.
+- Filesystem storage adapters: datasets directory layout, `clips/` folder, `labels.json` as authoritative metadata index.
+- Recording ingestion endpoint (`POST /datasets/{id}/recordings`) with WAV + metadata validation.
+- Curation endpoints: soft delete, restore, and metadata patch; implemented as:
+  - `DELETE /datasets/{id}/recordings/{clip_id}` → moves file to `trash/`, sets `deleted_at`.
+  - `POST /datasets/{id}/recordings/{clip_id}/restore` → moves back to `clips/`, clears `deleted_at`.
+  - `PATCH /datasets/{id}/recordings/{clip_id}` → updates `label`/`speaker`/`notes`, sets `updated_at`.
+- Unified repo test runner wired to include wake-training tests; service-level tests cover happy paths and error cases; current suite is green.
+- Dataset metrics model and recomputation pipeline (`metrics.json`) with `/datasets/{id}/metrics` endpoint and coverage tests.
+- Real-time dataset event hub (`/ws/events`) broadcasting create/upload/delete/restore/patch actions with WebSocket integration tests.
+- Training job queue endpoints (`POST /train`, `GET /jobs/{job_id}`) with filesystem-backed persistence, WebSocket `job.queued` events, and API/WS test coverage.
+- Training job runner error handling and failure path have been fully hardened and validated. All tests pass using the unified test runner (`run.tests.sh`). The runner now emits `job_failed` events with error context, and file corruption issues have been resolved. This closes the runner robustness milestone.
+- Job log persistence API (`GET /jobs/{job_id}/logs`) now returns structured chunks with offsets/limits, and `job.log` WebSocket events stream live updates to the UI. Tests cover pagination and event payloads.
+
+Out-of-scope/implementation deviations (documented):
+- Standardized curation endpoints to return HTTP 200 `{ "status": "ok" }` (instead of 204) to maintain compatibility with FastAPI’s no-body-on-204 rule.
+- Added an explicit restore endpoint in API surface (UI had Restore concept; API now matches it explicitly).
+- Added unified `run.tests.sh` integration to automatically execute wake-training tests in CI/local runs.
+
+Pending (near-term):
+- Surface metrics & event stream in the UI (cards, clip table, notifications) and gate Train button via dataset health.
+- Training job execution worker (GPU fine-tune) and deployment bridge to Orange Pi.
+- **NEXT: Wake training frontend (Vue) consuming REST + WebSocket APIs for datasets, jobs, and logs.**
+- Job progress WebSocket channel covering queued → running → completed/failed transitions with log tail support.
+- UI wiring for job queue: Train button state, job list, progress modal consuming new endpoints/events.
+
 ## 13) Open Questions / Risks
 - Do we need multi-speaker labeling (tag by user) for future personalization? (Impacts schema.)
 - Is Orange Pi resource-constrained for TensorRT inference, or do we fallback to ONNXRuntime CPU?
@@ -149,19 +181,19 @@ Repo note: `data/wake-training/` (with `.gitkeep`) seeds the host directory for 
 - [X] Commit container scaffolding under `server/wake-training/` (Dockerfile, compose, README) with host RW volume mapping.
 
 ### Sprint 1 – Dataset service foundation
-- [ ] Scaffold `training-api` FastAPI project with health endpoint, dataset CRUD using local filesystem.
-- [ ] Implement storage adapters (datasets/, clips/, labels.json) and background metrics worker.
-- [ ] Add WebSocket broadcaster for dataset change events.
-- [ ] Stand up minimal React/Vite UI with dataset list + clip counter display.
+- [X] Scaffold `training-api` FastAPI project with health endpoint, dataset list/create/detail using local filesystem. *(Dataset delete not implemented yet.)*
+- [X] Implement storage adapters (datasets/, clips/, labels.json). *(Background metrics worker pending.)*
+- [x] Add WebSocket broadcaster for dataset change events. *(Training API now exposes `/ws/events` via `EventHub`; tests verify broadcasts.)*
+- [ ] Stand up minimal Vite UI with dataset list + clip counter display.
 
 ### Sprint 2 – Recording ingestion & curation
-- [ ] Add WebAudio/drag-drop upload flow with metadata tagging.
-- [ ] Implement clip review table with delete/restore + waveform preview.
-- [ ] Introduce validation jobs (duration bounds, RMS/SNR scoring) and surface warnings in UI.
+- [ ] Add WebAudio/drag-drop upload flow with metadata tagging. *(API ingestion endpoint implemented; UI flow pending.)*
+- [ ] Implement clip review table with delete/restore + waveform preview. *(API curation endpoints implemented: delete, restore, patch; UI pending.)*
+- [ ] Introduce validation jobs (duration bounds, RMS/SNR scoring) and surface warnings in UI. *(Planned.)*
 
 ### Sprint 3 – GPU training pipeline
 - [ ] Containerize `training-worker` with CUDA base image and NeMo dependencies.
-- [ ] Build job queue bridge (e.g., Redis + RQ or FastAPI background TaskGroup) between API and worker.
+- [ ] Build job queue bridge (e.g., Redis + RQ or FastAPI TaskGroup) between API and worker. *(API now queues jobs in `/train`; worker + consumer pending.)*
 - [ ] Implement training job: dataset split, augmentation, MarbleNet fine-tune, evaluation metrics.
 - [ ] Export ONNX + metadata, persist logs/artifacts under `/data/wake-training/jobs/<job_id>/`.
 - [ ] Emit real-time job progress events (Pub/Sub channel consumed by UI progress modal).
@@ -184,4 +216,5 @@ Repo note: `data/wake-training/` (with `.gitkeep`) seeds the host directory for 
 2. Decide on job queue technology (RQ vs Celery vs FastAPI background tasks) and reflect in requirements.
 3. Draft interface contract for STT worker hotword loader so training artifacts match expected format.
 4. Finalize Jetson host storage mount for `/data/wake-training`, add rsync backup job, and record the path in infra docs.
-5. Start remaining Sprint 0 tasks; capture status updates in this plan file.
+5. **Scaffold dedicated wake-training Vue UI under `apps/`, document API base URL env, and consume dataset/job/log endpoints.**
+6. Start remaining Sprint 0 tasks; capture status updates in this plan file.

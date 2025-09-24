@@ -20,6 +20,21 @@ class DatasetDetail(DatasetSummary):
     deleted_clips: int = 0
 
 
+class DatasetMetrics(BaseModel):
+    """Aggregate dataset metrics.
+
+    Counts reflect only active clips (in clips/, not trash/).
+    Durations are summed over active clips and may be 0.0 when audio
+    parsing is unavailable.
+    """
+    name: str
+    clip_count: int = 0
+    total_duration_sec: float = 0.0
+    positives: int = 0
+    negatives: int = 0
+    noise: int = 0
+
+
 class DatasetCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     description: Optional[str] = None

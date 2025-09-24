@@ -1,0 +1,63 @@
+export type DatasetEventType =
+  | "dataset.created"
+  | "recording.uploaded"
+  | "recording.deleted"
+  | "recording.restored"
+  | "recording.updated"
+  | "job.queued"
+  | "job.running"
+  | "job.completed"
+  | "job.failed"
+  | "job.log";
+
+export interface DatasetSummary {
+  name: string;
+  created_at: string;
+  clip_count: number;
+  total_duration_sec: number;
+  deleted_clips?: number;
+}
+
+export interface DatasetMetrics {
+  name: string;
+  clip_count: number;
+  total_duration_sec: number;
+  positives: number;
+  negatives: number;
+  noise: number;
+}
+
+export interface TrainingJob {
+  id: string;
+  dataset: string;
+  status: "queued" | "running" | "completed" | "failed";
+  created_at: string;
+  updated_at: string;
+  config: Record<string, unknown>;
+  error?: string | null;
+}
+
+export interface JobLogEntry {
+  timestamp: string;
+  message: string;
+  raw: string;
+}
+
+export interface JobLogChunk {
+  job_id: string;
+  offset: number;
+  next_offset: number;
+  total_size: number;
+  has_more: boolean;
+  entries: JobLogEntry[];
+}
+
+export interface DatasetEvent {
+  type: DatasetEventType;
+  dataset: string;
+  metrics: DatasetMetrics;
+  timestamp: string;
+  clip_id?: string;
+  job_id?: string;
+  log_chunk?: JobLogChunk;
+}

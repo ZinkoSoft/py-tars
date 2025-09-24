@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 import uuid
-from .models import RecordingMetadata, RecordingResponse, RecordingUpdate
+from .models import RecordingMetadata, RecordingResponse, RecordingUpdate, DatasetMetrics
 
 from .models import DatasetCreateRequest, DatasetDetail, DatasetSummary
 
@@ -45,6 +45,7 @@ class DatasetStorage:
         meta_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         (dataset_dir / "clips").mkdir(parents=True, exist_ok=True)
         (dataset_dir / "trash").mkdir(parents=True, exist_ok=True)
+        self._recompute_metrics(dataset_dir)
         return self._build_detail(dataset_dir)
 
     def save_recording(
@@ -84,6 +85,8 @@ class DatasetStorage:
             "created_at": datetime.utcnow().isoformat(),
         }
         labels_path.write_text(json.dumps(labels, indent=2), encoding="utf-8")
+        # recompute metrics after mutation
+        self._recompute_metrics(dataset_dir)
 
         return RecordingResponse(
             clip_id=clip_id,
@@ -119,6 +122,8 @@ class DatasetStorage:
         if clip_id in labels:
             labels[clip_id]["deleted_at"] = datetime.utcnow().isoformat()
             labels_path.write_text(json.dumps(labels, indent=2), encoding="utf-8")
+        # recompute metrics after mutation
+        self._recompute_metrics(dataset_dir)
 
     def restore_recording(self, dataset_name: str, clip_id: str) -> None:
         """Restore a soft-deleted recording from trash back to clips.
@@ -144,6 +149,8 @@ class DatasetStorage:
         if clip_id in labels and "deleted_at" in labels[clip_id]:
             labels[clip_id].pop("deleted_at", None)
             labels_path.write_text(json.dumps(labels, indent=2), encoding="utf-8")
+        # recompute metrics after mutation
+        self._recompute_metrics(dataset_dir)
 
     def update_recording(self, dataset_name: str, clip_id: str, patch: RecordingUpdate) -> None:
         """Update recording metadata fields present in patch.
@@ -167,6 +174,66 @@ class DatasetStorage:
             data["notes"] = patch.notes
         data["updated_at"] = datetime.utcnow().isoformat()
         labels_path.write_text(json.dumps(labels, indent=2), encoding="utf-8")
+        # recompute metrics after mutation
+        self._recompute_metrics(dataset_dir)
+
+    def get_metrics(self, dataset_name: str) -> DatasetMetrics:
+        dataset_dir = self.datasets_root / dataset_name
+        if not dataset_dir.exists():
+            raise FileNotFoundError(dataset_name)
+        metrics_path = dataset_dir / "metrics.json"
+        if metrics_path.exists():
+            try:
+                data = json.loads(metrics_path.read_text(encoding="utf-8"))
+                return DatasetMetrics(**data)
+            except Exception:
+                pass
+        # compute on the fly if missing/corrupt
+        return self._recompute_metrics(dataset_dir)
+
+    def _recompute_metrics(self, dataset_dir: Path) -> DatasetMetrics:
+        """Recompute aggregate metrics from labels.json and clips/trash.
+
+        Only counts clips present in clips/ and not marked deleted in labels.
+        """
+        name = dataset_dir.name
+        clips_dir = dataset_dir / "clips"
+        trash_dir = dataset_dir / "trash"
+        labels_path = dataset_dir / "labels.json"
+        labels = self._read_labels(labels_path)
+
+        active_ids: set[str] = set()
+        if clips_dir.exists():
+            for p in clips_dir.glob("*.wav"):
+                active_ids.add(p.stem)
+
+        # remove any ids that are actually in trash (source of truth is FS)
+        if trash_dir.exists():
+            for p in trash_dir.glob("*.wav"):
+                active_ids.discard(p.stem)
+
+        positives = negatives = noise = 0
+        for cid in active_ids:
+            meta = labels.get(cid, {})
+            if meta.get("label") == "positive":
+                positives += 1
+            elif meta.get("label") == "negative":
+                negatives += 1
+            elif meta.get("label") == "noise":
+                noise += 1
+
+        # For now duration is 0.0 until audio parsing lands.
+        metrics = DatasetMetrics(
+            name=name,
+            clip_count=len(active_ids),
+            total_duration_sec=0.0,
+            positives=positives,
+            negatives=negatives,
+            noise=noise,
+        )
+        metrics_path = dataset_dir / "metrics.json"
+        metrics_path.write_text(json.dumps(metrics.model_dump(), indent=2), encoding="utf-8")
+        return metrics
 
     @staticmethod
     def _read_labels(labels_path: Path) -> dict:
