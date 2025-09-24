@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import os
+import logging
 from pathlib import Path
 from typing import Any, Mapping
 
 from pydantic import BaseModel, Field, field_validator
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseModel):
@@ -48,4 +51,6 @@ def load_settings(env: Mapping[str, Any] | None = None) -> Settings:
     """
     source: Mapping[str, Any] = env or os.environ
     # Pydantic will match aliases from this mapping when populate_by_name is enabled
-    return Settings.model_validate(dict(source))
+    settings = Settings.model_validate(dict(source))
+    logger.info("Resolved CORS origins: %s", settings.cors_allow_origins)
+    return settings
