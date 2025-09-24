@@ -48,6 +48,12 @@ def _load_and_configure_settings() -> Settings:
 
 
 app.state.settings = _load_and_configure_settings()
+logger.info(
+    "Wake Training settings loaded data_root=%s log_level=%s cors_allow_origins=%s",
+    app.state.settings.data_root,
+    app.state.settings.log_level,
+    app.state.settings.cors_allow_origins,
+)
 
 if app.state.settings.cors_allow_origins:
     origins = app.state.settings.cors_allow_origins
