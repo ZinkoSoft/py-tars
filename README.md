@@ -105,7 +105,6 @@ The TTS service requires proper audio configuration to output speech. The setup 
 - **3.5mm Headphone Jack** (headphones/speakers)
 - **USB Audio Devices** (USB speakers/DACs)
 
-### Configure Audio Output
 
 1. **Check available audio devices:**
    ```bash
@@ -116,10 +115,6 @@ The TTS service requires proper audio configuration to output speech. The setup 
 2. **Set default audio output:**
    ```bash
    # For HDMI0 output
-   pactl set-default-sink alsa_output.platform-hdmi0-sound.stereo-fallback
-   
-   # For HDMI1 output  
-   pactl set-default-sink alsa_output.platform-hdmi1-sound.stereo-fallback
    
    # For 3.5mm headphone jack (ES8388)
    pactl set-default-sink alsa_output.platform-es8388-sound.stereo-fallback

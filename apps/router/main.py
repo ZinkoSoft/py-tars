@@ -5,6 +5,7 @@ from __future__ import annotations
 Responsibilities:
 - Aggregate retained health and announce system online once STT+TTS are ready.
 - Handle STT final utterances: rule-based local responses or forward to LLM.
+- Enforce wake-word/live-mode gating so we only contact the LLM when explicitly requested.
 - Bridge LLM outputs (streaming and non-streaming) to TTS with sentence chunking.
 
 Data contracts (JSON over MQTT):
@@ -15,10 +16,10 @@ Data contracts (JSON over MQTT):
 - LLM stream (topic: llm/stream): { id, seq, delta, done }
 """
 
-import asyncio, os, logging, uuid, re
+import asyncio, os, logging, uuid, re, time
 import orjson as json
 from urllib.parse import urlparse
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Tuple, Dict
 
 try:
@@ -63,6 +64,25 @@ class Config:
     stream_boundary_only: bool = os.getenv("ROUTER_STREAM_BOUNDARY_ONLY", "1").lower() in ("1", "true", "yes", "on")
     # Safety cap to avoid unbounded buffer growth when boundary never appears
     stream_hard_max_chars: int = int(os.getenv("ROUTER_STREAM_HARD_MAX_CHARS", "2000"))
+    # Wake word + live mode gating
+    wake_phrases_raw: str = os.getenv("ROUTER_WAKE_PHRASES", os.getenv("WAKE_PHRASES", "hey tars"))
+    wake_window_sec: float = float(os.getenv("ROUTER_WAKE_WINDOW_SEC", "8"))
+    wake_ack_text: str = os.getenv("ROUTER_WAKE_ACK_TEXT", "Yes?")
+    wake_reprompt_text: str = os.getenv("ROUTER_WAKE_REPROMPT_TEXT", "")
+    live_mode_default: bool = os.getenv("ROUTER_LIVE_MODE_DEFAULT", "0").lower() in ("1", "true", "yes", "on")
+    live_mode_enter_phrase: str = os.getenv("ROUTER_LIVE_MODE_ENTER_PHRASE", "enter live mode")
+    live_mode_exit_phrase: str = os.getenv("ROUTER_LIVE_MODE_EXIT_PHRASE", "exit live mode")
+    live_mode_enter_ack: str = os.getenv("ROUTER_LIVE_MODE_ENTER_ACK", "Live mode enabled.")
+    live_mode_exit_ack: str = os.getenv("ROUTER_LIVE_MODE_EXIT_ACK", "Live mode disabled.")
+    live_mode_active_hint: str = os.getenv("ROUTER_LIVE_MODE_ACTIVE_HINT", "Live mode is already active.")
+    live_mode_inactive_hint: str = os.getenv("ROUTER_LIVE_MODE_INACTIVE_HINT", "Live mode is already off.")
+    wake_phrases: Tuple[str, ...] = field(init=False)
+
+    def __post_init__(self) -> None:
+        phrases = [p.strip().lower() for p in self.wake_phrases_raw.split("|") if p.strip()]
+        self.wake_phrases = tuple(phrases) if phrases else ("hey tars",)
+        self.live_mode_enter_phrase = self.live_mode_enter_phrase.strip().lower()
+        self.live_mode_exit_phrase = self.live_mode_exit_phrase.strip().lower()
 
 
 @dataclass
@@ -91,6 +111,10 @@ class RouterService:
         self.ready = {"tts": False, "stt": False}
         self.announced = False
         self.llm_buf: Dict[str, str] = {}
+        self.live_mode: bool = cfg.live_mode_default
+        self.wake_active_until: float = 0.0
+        wake_pattern = "|".join(re.escape(phrase) for phrase in self.cfg.wake_phrases)
+        self.wake_regex = re.compile(rf"^\s*(?:{wake_pattern})\b[\s,]*", re.IGNORECASE)
 
     @staticmethod
     def parse_mqtt(url: str):
@@ -99,6 +123,24 @@ class RouterService:
 
     async def publish(self, client: mqtt.Client, topic: str, payload: dict) -> None:
         await client.publish(topic, json.dumps(payload))
+
+    async def _speak(self, client: mqtt.Client, text: str, style: str = "neutral", utt_id: Optional[str] = None) -> None:
+        if not text:
+            return
+        say = TtsSay(text=text, voice="piper/en_US/amy", lang="en", utt_id=utt_id, style=style)
+        await self.publish(client, self.cfg.topic_tts_say, say.__dict__)
+
+    @staticmethod
+    def _normalize_command(text: str) -> str:
+        cleaned = re.sub(r"[^a-z0-9\s]", "", text.lower())
+        return re.sub(r"\s+", " ", cleaned).strip()
+
+    def _strip_wake_phrase(self, text: str) -> Optional[str]:
+        match = self.wake_regex.match(text)
+        if not match:
+            return None
+        remainder = text[match.end():].strip()
+        return remainder
 
     # ---------- Rule routing ----------
     @staticmethod
@@ -196,7 +238,73 @@ class RouterService:
         u = Utterance(**fields)
         logger.info("Received utterance: %s", (u.text[:80] + ("..." if len(u.text) > 80 else "")))
 
-        resp = self.rule_route(u.text)
+        if not u.text or not u.text.strip():
+            return
+
+        raw_text = u.text.strip()
+        now = time.monotonic()
+        candidate_text = raw_text
+        gating_reason: Optional[str] = "live-mode" if self.live_mode else None
+        wake_triggered = False
+
+        if not self.live_mode:
+            remainder = self._strip_wake_phrase(raw_text)
+            if remainder is not None:
+                if remainder:
+                    candidate_text = remainder
+                    wake_triggered = True
+                    gating_reason = "wake-query"
+                    self.wake_active_until = 0.0
+                    logger.info("Wake phrase with inline query detected; routing remainder")
+                else:
+                    self.wake_active_until = now + self.cfg.wake_window_sec
+                    logger.info("Wake phrase detected; opening window %.1fs", self.cfg.wake_window_sec)
+                    await self._speak(client, self.cfg.wake_ack_text, utt_id=u.utt_id)
+                    if self.cfg.wake_reprompt_text:
+                        await self._speak(client, self.cfg.wake_reprompt_text, utt_id=u.utt_id)
+                    return
+            elif now < self.wake_active_until:
+                wake_triggered = True
+                gating_reason = "wake-window"
+                logger.info("Within wake window (%.1fs remaining); routing", self.wake_active_until - now)
+                self.wake_active_until = 0.0
+            else:
+                gating_reason = None
+
+        norm_candidate = self._normalize_command(candidate_text)
+        command_allowed = self.live_mode or wake_triggered
+
+        if norm_candidate == self.cfg.live_mode_enter_phrase:
+            if self.live_mode:
+                logger.info("Live mode already active")
+                await self._speak(client, self.cfg.live_mode_active_hint, utt_id=u.utt_id)
+            elif command_allowed:
+                logger.info("Enabling live mode via command")
+                self.live_mode = True
+                self.wake_active_until = 0.0
+                await self._speak(client, self.cfg.live_mode_enter_ack, utt_id=u.utt_id)
+            else:
+                logger.info("Ignoring live mode enable outside wake window")
+            return
+
+        if norm_candidate == self.cfg.live_mode_exit_phrase:
+            if not self.live_mode:
+                logger.info("Live mode already inactive")
+                await self._speak(client, self.cfg.live_mode_inactive_hint, utt_id=u.utt_id)
+            else:
+                logger.info("Disabling live mode via command")
+                self.live_mode = False
+                self.wake_active_until = 0.0
+                await self._speak(client, self.cfg.live_mode_exit_ack, utt_id=u.utt_id)
+            return
+
+        if not self.live_mode and not wake_triggered:
+            logger.info("Dropping utterance outside wake window: %s", candidate_text)
+            return
+
+        logger.debug("Routing utterance via %s", gating_reason or "wake")
+
+        resp = self.rule_route(candidate_text)
         if resp is not None:
             say = TtsSay(text=resp["text"], voice="piper/en_US/amy", lang="en", utt_id=u.utt_id, style=resp["style"], stt_ts=u.timestamp)
             logger.info("Sending TTS response (rule): %s", (resp["text"][:50] + ("..." if len(resp["text"]) > 50 else "")))
@@ -205,8 +313,8 @@ class RouterService:
 
         # Fallback to LLM (streaming); router will bridge output -> TTS
         req_id = u.utt_id or f"rt-{uuid.uuid4().hex[:8]}"
-        llm_req = {"id": req_id, "text": u.text, "stream": True}
-        logger.info("Routing to LLM: id=%s len=%d", req_id, len(u.text or ""))
+        llm_req = {"id": req_id, "text": candidate_text, "stream": True}
+        logger.info("Routing to LLM (%s): id=%s len=%d", gating_reason, req_id, len(candidate_text or ""))
         await self.publish(client, self.cfg.topic_llm_req, llm_req)
 
     async def handle_llm_cancel(self, _client: mqtt.Client, payload: bytes) -> None:
