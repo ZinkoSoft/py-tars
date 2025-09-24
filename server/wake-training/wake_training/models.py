@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
@@ -27,3 +28,33 @@ class DatasetCreateRequest(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "ok"
     data_root: Path
+
+
+class RecordingLabel(StrEnum):
+    positive = "positive"
+    negative = "negative"
+    noise = "noise"
+
+
+class RecordingMetadata(BaseModel):
+    label: RecordingLabel = RecordingLabel.positive
+    speaker: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class RecordingResponse(BaseModel):
+    clip_id: str
+    filename: str
+    dataset: str
+    label: RecordingLabel
+    path: Path
+
+
+class RecordingUpdate(BaseModel):
+    """Partial update for a recording's metadata.
+
+    All fields are optional; only provided fields will be updated.
+    """
+    label: Optional[RecordingLabel] = None
+    speaker: Optional[str] = None
+    notes: Optional[str] = None

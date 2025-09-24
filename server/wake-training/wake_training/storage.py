@@ -4,6 +4,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
+import uuid
+from .models import RecordingMetadata, RecordingResponse, RecordingUpdate
 
 from .models import DatasetCreateRequest, DatasetDetail, DatasetSummary
 
@@ -44,6 +46,136 @@ class DatasetStorage:
         (dataset_dir / "clips").mkdir(parents=True, exist_ok=True)
         (dataset_dir / "trash").mkdir(parents=True, exist_ok=True)
         return self._build_detail(dataset_dir)
+
+    def save_recording(
+        self,
+        dataset_name: str,
+        content: bytes,
+        filename: str | None,
+        meta: RecordingMetadata | None = None,
+    ) -> RecordingResponse:
+        dataset_dir = self.datasets_root / dataset_name
+        if not dataset_dir.exists():
+            raise FileNotFoundError(dataset_name)
+        clips_dir = dataset_dir / "clips"
+        clips_dir.mkdir(parents=True, exist_ok=True)
+
+        clip_id = uuid.uuid4().hex
+        out_name = f"{clip_id}.wav"
+        if filename and filename.lower().endswith(".wav"):
+            # keep .wav suffix but use our id to avoid collisions
+            out_name = f"{clip_id}.wav"
+        out_path = clips_dir / out_name
+        out_path.write_bytes(content)
+
+        # update labels.json
+        labels_path = dataset_dir / "labels.json"
+        labels: dict[str, dict] = {}
+        if labels_path.exists():
+            try:
+                labels = json.loads(labels_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                labels = {}
+        labels[clip_id] = {
+            "filename": out_name,
+            "label": (meta.label if meta else None) or "positive",
+            "speaker": getattr(meta, "speaker", None),
+            "notes": getattr(meta, "notes", None),
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        labels_path.write_text(json.dumps(labels, indent=2), encoding="utf-8")
+
+        return RecordingResponse(
+            clip_id=clip_id,
+            filename=out_name,
+            dataset=dataset_name,
+            label=(meta.label if meta else None) or "positive",
+            path=out_path,
+        )
+
+    def delete_recording(self, dataset_name: str, clip_id: str) -> None:
+        """Soft-delete a recording by moving it to the dataset's trash directory.
+
+        Also marks the item as deleted in labels.json by adding a deleted_at timestamp.
+        If the clip is already in trash, this is a no-op.
+        Raises FileNotFoundError if dataset or clip not found.
+        """
+        dataset_dir = self.datasets_root / dataset_name
+        if not dataset_dir.exists():
+            raise FileNotFoundError(dataset_name)
+        clips_dir = dataset_dir / "clips"
+        trash_dir = dataset_dir / "trash"
+        trash_dir.mkdir(parents=True, exist_ok=True)
+
+        src = clips_dir / f"{clip_id}.wav"
+        dst = trash_dir / f"{clip_id}.wav"
+        if not src.exists() and not dst.exists():
+            raise FileNotFoundError(clip_id)
+        if src.exists():
+            src.replace(dst)
+
+        labels_path = dataset_dir / "labels.json"
+        labels = self._read_labels(labels_path)
+        if clip_id in labels:
+            labels[clip_id]["deleted_at"] = datetime.utcnow().isoformat()
+            labels_path.write_text(json.dumps(labels, indent=2), encoding="utf-8")
+
+    def restore_recording(self, dataset_name: str, clip_id: str) -> None:
+        """Restore a soft-deleted recording from trash back to clips.
+
+        Clears the deleted_at marker in labels.json.
+        Raises FileNotFoundError if dataset or clip not found in trash.
+        """
+        dataset_dir = self.datasets_root / dataset_name
+        if not dataset_dir.exists():
+            raise FileNotFoundError(dataset_name)
+        clips_dir = dataset_dir / "clips"
+        trash_dir = dataset_dir / "trash"
+        clips_dir.mkdir(parents=True, exist_ok=True)
+
+        src = trash_dir / f"{clip_id}.wav"
+        dst = clips_dir / f"{clip_id}.wav"
+        if not src.exists():
+            raise FileNotFoundError(clip_id)
+        src.replace(dst)
+
+        labels_path = dataset_dir / "labels.json"
+        labels = self._read_labels(labels_path)
+        if clip_id in labels and "deleted_at" in labels[clip_id]:
+            labels[clip_id].pop("deleted_at", None)
+            labels_path.write_text(json.dumps(labels, indent=2), encoding="utf-8")
+
+    def update_recording(self, dataset_name: str, clip_id: str, patch: RecordingUpdate) -> None:
+        """Update recording metadata fields present in patch.
+
+        Raises FileNotFoundError if dataset or clip not found in labels.
+        """
+        dataset_dir = self.datasets_root / dataset_name
+        if not dataset_dir.exists():
+            raise FileNotFoundError(dataset_name)
+        labels_path = dataset_dir / "labels.json"
+        labels = self._read_labels(labels_path)
+        if clip_id not in labels:
+            # Require existing metadata to update
+            raise FileNotFoundError(clip_id)
+        data = labels[clip_id]
+        if patch.label is not None:
+            data["label"] = patch.label
+        if patch.speaker is not None:
+            data["speaker"] = patch.speaker
+        if patch.notes is not None:
+            data["notes"] = patch.notes
+        data["updated_at"] = datetime.utcnow().isoformat()
+        labels_path.write_text(json.dumps(labels, indent=2), encoding="utf-8")
+
+    @staticmethod
+    def _read_labels(labels_path: Path) -> dict:
+        if not labels_path.exists():
+            return {}
+        try:
+            return json.loads(labels_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return {}
 
     def _build_summary(self, dataset_dir: Path) -> DatasetSummary:
         manifest = self._read_manifest(dataset_dir)
