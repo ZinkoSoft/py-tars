@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timezone
-from enum import StrEnum
 from pathlib import Path
 from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from .compat import StrEnum
 
 
 class TrainingJobStatus(StrEnum):

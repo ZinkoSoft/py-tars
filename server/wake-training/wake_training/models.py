@@ -3,15 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from enum import Enum
 
-try:
-    from enum import StrEnum
-except ImportError:
-    class StrEnum(str, Enum):  # type: ignore[misc]
-        """Backport of Python 3.11's StrEnum for compatibility."""
-
-        pass
+from .compat import StrEnum
 
 from pydantic import BaseModel, Field
 

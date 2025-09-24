@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
-from enum import StrEnum
 from typing import Iterable, Optional
 
 from fastapi import WebSocket
@@ -11,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .models import DatasetMetrics
 from .jobs import JobLogChunk
+from .compat import StrEnum
 
 
 class DatasetEventType(StrEnum):
