@@ -1,66 +1,69 @@
 # Wake Training UI (Vue)
 
-Single-page Vue application for managing datasets, jobs, and logs in the wake-word training workflow. The UI
-consumes the FastAPI service exposed under `server/wake-training` and listens to WebSocket events for live
-updates.
+Single-page Vue app for curating wake-word datasets, monitoring training jobs, and tailing log streams. It targets the wake-training FastAPI backend over REST + WebSockets.
 
-## Getting started
+## Quick start (Docker Compose)
 
-# Wake Training UI (Vue)
-
-Single-page Vue application for managing datasets, jobs, and logs in the wake-word training workflow. The UI consumes the FastAPI service exposed under `server/wake-training` and listens to WebSocket events for live updates.
-
-## Getting started (Docker-first)
-
-Launch the dev server without installing Node locally:
+Run the UI directly in Docker without installing Node:
 
 ```bash
-npm run preview
+API_HOST=jetson-host API_PORT=8000 docker compose up --build
 ```
 
-The container mounts the project directory and runs Vite on <http://localhost:5173>. To target a remote Jetson API, export the base URL before launching:
+The compose file mounts the source tree, installs dependencies, and runs `npm run dev` inside the container. The Vue dev server binds to the internal port `5173`; the companion HTTPS proxy (described below) terminates TLS and forwards `/api` + `/ws` calls to the backend defined by `API_HOST` / `API_PORT`.
 
-```bash
-export VITE_API_BASE_URL=http://jetson-host:8000
-```
-```
+## Local Node workflow
 
-### Production image
-
-Build and serve the production bundle entirely in Docker:
-
-```bash
-
-A development-friendly multi-stage Dockerfile is provided. To build and serve the production bundle:
-```
-
-The preview container exposes port `4173`.
-
-## Local Node workflow (optional)
-
-If you prefer a local toolchain:
+Prefer a local toolchain? Install dependencies and start Vite yourself:
 
 ```bash
 npm install
-npm run dev
+npm run dev -- --host 0.0.0.0 --port 5173
 ```
 
-Configure the backend origin via `.env.local`:
+Set the backend origin in `.env.local` or your shell:
 
 ```
 VITE_API_BASE_URL=http://jetson-host:8000
 ```
 
-To inspect a production build locally:
+To inspect a production-style bundle:
 
 ```bash
 npm run build
 npm run preview
 ```
 
+## Production image
+
+A multi-stage Dockerfile is provided for hardened builds:
+
 ```bash
 docker build -t wake-training-ui .
 docker run --rm -p 4173:4173 wake-training-ui
 ```
 
-The container runs `npm run preview` on port `4173` by default.
+The container runs `npm run preview` and exposes port `4173` by default.
+
+## HTTPS via self-signed proxy
+
+Browsers only unlock `getUserMedia` on secure origins. The supplied `docker-compose.yml` includes a `wake-training-proxy` service based on nginx that generates a self-signed certificate and forwards HTTPS traffic to the Vite dev server.
+
+Launch both services with subject-alternative-names that match your Jetson IP. The proxy can also forward API/WebSocket traffic to the backend so the UI talks to the server through the same HTTPS origin:
+
+```bash
+HTTPS_PORT=5173 \
+TLS_SAN="DNS:localhost,IP:192.168.7.134" \
+API_HOST=192.168.7.134 \
+API_PORT=8080 \
+docker compose up --build
+```
+
+Key details:
+
+- `HTTPS_PORT` controls the host port that nginx listens on (defaults to `5173`).
+- `TLS_SAN` must list every hostname or IP you will hit in the browser. Add `IP:your.jetson.ip` so Chrome/Firefox grant mic access.
+- `API_HOST` / `API_PORT` point at the wake-training FastAPI instance; tweak `API_SCHEME=https` if the API already uses TLS.
+- Certificates live in the named `certs` volume. Delete the volume to regenerate.
+
+Trust the generated certificate once (e.g. Keychain Access on macOS, `certmgr.msc` on Windows, or `update-ca-trust` on Linux). Afterwards, load `https://<host>:<HTTPS_PORT>`, allow microphone permissions, and the proxy will relay traffic (including `/api/*` and `/ws/*`) to the backend while serving the Vue dev server.

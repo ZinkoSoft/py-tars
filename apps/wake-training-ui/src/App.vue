@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, computed } from "vue";
 import DatasetList from "@/components/DatasetList.vue";
 import JobStatusCards from "@/components/JobStatusCards.vue";
 import JobLogViewer from "@/components/JobLogViewer.vue";
+import RecorderPanel from "@/components/RecorderPanel.vue";
 import { useWakeTrainingStore } from "@/stores/wakeTraining";
 
 const store = useWakeTrainingStore();
@@ -46,6 +47,7 @@ onUnmounted(() => {
     </header>
 
     <main class="grid">
+      <RecorderPanel :datasets="store.datasetList" :loading="store.loadingDatasets" />
       <DatasetList :datasets="store.datasetList" :loading="store.loadingDatasets" />
       <JobStatusCards :jobs="store.jobList" :status="store.connectionStatus" :error="store.lastError" />
       <JobLogViewer :logs="store.jobLogsList" />

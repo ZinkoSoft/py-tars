@@ -51,6 +51,8 @@ export const useWakeTrainingStore = defineStore("wakeTraining", () => {
   const connectionStatus = ref<ConnectionStatus>("disconnected");
   const loadingDatasets = ref<boolean>(false);
   const lastError = ref<string | null>(null);
+  const lastUploadError = ref<string | null>(null);
+  const uploadingRecording = ref<boolean>(false);
 
   let socket: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -79,6 +81,47 @@ export const useWakeTrainingStore = defineStore("wakeTraining", () => {
     } catch (error) {
       lastError.value = parseError(error);
       return null;
+    }
+  }
+
+  async function uploadRecording(
+    dataset: string,
+    blob: Blob,
+    options: {
+      label: string;
+      speaker?: string;
+      notes?: string;
+    },
+  ): Promise<void> {
+    uploadingRecording.value = true;
+    lastUploadError.value = null;
+    try {
+      const filename = `${dataset}-${Date.now()}.wav`;
+      const formData = new FormData();
+      formData.append("file", blob, filename);
+      formData.append("label", options.label);
+      if (options.speaker) {
+        formData.append("speaker", options.speaker);
+      }
+      if (options.notes) {
+        formData.append("notes", options.notes);
+      }
+
+      await http.post(`/datasets/${dataset}/recordings`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+
+      const metrics = await fetchMetrics(dataset);
+      if (metrics) {
+        applyMetrics(metrics);
+      }
+    } catch (error) {
+      const message = parseError(error);
+      lastUploadError.value = message;
+      lastError.value = message;
+      throw error;
+    } finally {
+      uploadingRecording.value = false;
     }
   }
 
@@ -160,8 +203,8 @@ export const useWakeTrainingStore = defineStore("wakeTraining", () => {
       // duplicate delivery; skip
       return;
     }
-  const existing = jobLogs.value[chunk.job_id] ?? [];
-  const merged: JobLogEntry[] = [...existing, ...chunk.entries];
+    const existing = jobLogs.value[chunk.job_id] ?? [];
+    const merged: JobLogEntry[] = [...existing, ...chunk.entries];
     jobLogs.value[chunk.job_id] = merged.slice(-200);
     jobLogOffsets.value[chunk.job_id] = chunk.next_offset;
   }
@@ -304,7 +347,10 @@ export const useWakeTrainingStore = defineStore("wakeTraining", () => {
     connectionStatus,
     loadingDatasets,
     lastError,
+    lastUploadError,
+    uploadingRecording,
     loadDatasets,
+    uploadRecording,
     connectEvents,
     disconnectEvents,
   };

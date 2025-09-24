@@ -191,6 +191,24 @@ Pending (near-term):
 - [ ] Implement clip review table with delete/restore + waveform preview. *(API curation endpoints implemented: delete, restore, patch; UI pending.)*
 - [ ] Introduce validation jobs (duration bounds, RMS/SNR scoring) and surface warnings in UI. *(Planned.)*
 
+#### Guided wake-phrase recording flow (added 2025-09-24)
+- **User story**: An operator wants the UI to walk them through capturing a wake phrase (e.g., "HELLO TARS") multiple times with countdown prompts so fresh WAV clips land directly in the dataset.
+- **Experience outline**
+  1. Select dataset + speaker context, confirm canonical phrase, choose positive/negative/noise target counts.
+  2. Microphone permission check with live VU meter; show quick capture tips.
+  3. Guided loop per take: display prompt ("Take N of M – Say 'HELLO TARS'"), 3→2→1 countdown, auto-record for configured window, playback & retry before keeping.
+  4. After keeping, immediately POST WAV + metadata; advance to next take until targets satisfied, then prompt for negatives/noise or move to training.
+  5. Session summary card tracks progress (positives recorded, retries, warnings) and links to dataset table for review.
+- **Backend updates**
+  - Extend `RecordingMetadata` to capture `phrase`, `attempt`, `session_id`, and `source` (`web_recorder` vs upload) while keeping label/speaker/notes intact.
+  - Persist new metadata fields in `labels.json` and include them in dataset metrics/events; add tests covering serialization.
+  - Optional QC: enforce clip duration bounds, compute RMS/clipping heuristic, return warnings in response to surface in UI.
+- **Frontend work**
+  - WebAudio recorder utility (16 kHz mono PCM → WAV blob) with countdown UI + waveform preview (wavesurfer.js or canvas).
+  - Session controller storing target counts, progress, retries, and generating metadata payloads for `/datasets/{name}/recordings`.
+  - Status toasts + progress panel; integrate with existing store so metrics update via WebSocket in real time.
+  - Accessibility: keyboard shortcuts for retry/keep, visual cues for countdown, fallbacks if mic permission denied (show manual upload path).
+
 ### Sprint 3 – GPU training pipeline
 - [ ] Containerize `training-worker` with CUDA base image and NeMo dependencies.
 - [ ] Build job queue bridge (e.g., Redis + RQ or FastAPI TaskGroup) between API and worker. *(API now queues jobs in `/train`; worker + consumer pending.)*
