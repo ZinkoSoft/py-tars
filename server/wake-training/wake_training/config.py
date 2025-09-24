@@ -4,12 +4,17 @@ import os
 from pathlib import Path
 from typing import Any, Mapping
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class Settings(BaseModel):
     data_root: Path = Field(default=Path("/data/wake-training"), alias="WAKE_TRAINING_DATA_DIR")
     log_level: str = Field(default="INFO", alias="WAKE_TRAINING_LOG_LEVEL")
+    cors_allow_origins: list[str] = Field(
+        default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"],
+        alias="WAKE_TRAINING_CORS_ORIGINS",
+        description="Comma-separated list of origins allowed to access the API",
+    )
 
     model_config = {
         "populate_by_name": True,
@@ -22,6 +27,18 @@ class Settings(BaseModel):
         (self.data_root / "jobs").mkdir(parents=True, exist_ok=True)
         (self.data_root / "scratch").mkdir(parents=True, exist_ok=True)
         (self.data_root / "transfers").mkdir(parents=True, exist_ok=True)
+
+    @field_validator("cors_allow_origins", mode="before")
+    @classmethod
+    def _coerce_origins(cls, value: Any) -> list[str]:
+        if value in (None, ""):
+            return []
+        if isinstance(value, str):
+            parts = [part.strip() for part in value.split(",")]
+            return [part for part in parts if part]
+        if isinstance(value, (list, tuple, set)):
+            return [str(part) for part in value if str(part)]
+        return []
 
 
 def load_settings(env: Mapping[str, Any] | None = None) -> Settings:

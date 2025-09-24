@@ -39,8 +39,8 @@ share/python-wheels/
 MANIFEST
 
 # Allow checked-in UI library assets
-!apps/wake-training-ui/lib/
-!apps/wake-training-ui/lib/**
+!./apps/wake-training-ui/lib/
+!./apps/wake-training-ui/lib/**
 
 # Virtual environments
 .env

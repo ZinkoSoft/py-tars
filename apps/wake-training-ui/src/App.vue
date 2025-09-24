@@ -1,12 +1,24 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from "vue";
-
+import { onMounted, onUnmounted, computed } from "vue";
 import DatasetList from "@/components/DatasetList.vue";
 import JobStatusCards from "@/components/JobStatusCards.vue";
 import JobLogViewer from "@/components/JobLogViewer.vue";
 import { useWakeTrainingStore } from "@/stores/wakeTraining";
 
 const store = useWakeTrainingStore();
+
+const apiHost = computed(() => {
+  const baseUrl = __API_BASE_URL__;
+  const UrlCtor = globalThis.URL;
+  if (typeof UrlCtor === "function") {
+    try {
+      return new UrlCtor(baseUrl).host;
+    } catch {
+      /* fall through */
+    }
+  }
+  return baseUrl;
+});
 
 onMounted(() => {
   void store.loadDatasets();
@@ -28,7 +40,7 @@ onUnmounted(() => {
         </p>
       </div>
       <div class="hero-meta">
-        <span class="badge">API: {{ new URL(__API_BASE_URL__).host }}</span>
+        <span class="badge">API: {{ apiHost }}</span>
         <span class="badge" v-if="store.lastError">Last error: {{ store.lastError }}</span>
       </div>
     </header>

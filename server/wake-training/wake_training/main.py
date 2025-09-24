@@ -15,6 +15,7 @@ from fastapi import (
     WebSocketDisconnect,
     Query,
 )
+from fastapi.middleware.cors import CORSMiddleware
 
 from .config import Settings, load_settings
 from .models import (
@@ -71,6 +72,22 @@ async def get_job_runner(
     else:
         runner.update_handles(storage=storage, job_storage=job_storage, event_hub=event_hub)
     return runner
+
+
+@app.on_event("startup")
+async def configure_cors() -> None:
+    settings = get_settings()
+    origins = settings.cors_allow_origins
+    if not origins:
+        return
+    allow_credentials = origins != ["*"]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=allow_credentials,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 @app.get("/health", response_model=HealthResponse)

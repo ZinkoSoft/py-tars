@@ -28,6 +28,14 @@ mkdir -p "$WAKE_TRAINING_HOST_DATA_DIR"
 docker compose up --build -d
 ```
 
+### Cross-origin access
+
+When serving the Vue console from a different host, configure the allowed origins via `WAKE_TRAINING_CORS_ORIGINS` (comma separated). The default allows `http://localhost:5173` and `http://127.0.0.1:5173` for local development.
+
+```bash
+export WAKE_TRAINING_CORS_ORIGINS=http://localhost:5173,http://192.168.7.1:4173
+```
+
 ### API endpoints (current MVP)
 
 - `GET /health` – basic status + resolved data root path.
