@@ -26,6 +26,10 @@ mkdir -p "$WAKE_TRAINING_HOST_DATA_DIR"
 
 # Build and start the container (runs uvicorn on port 8080)
 docker compose up --build -d
+
+# Allow additional browser origins (comma separated)
+export WAKE_TRAINING_CORS_ORIGINS=http://localhost:5173,http://192.168.7.217:5173
+docker compose up --build -d
 ```
 
 ### Cross-origin access
