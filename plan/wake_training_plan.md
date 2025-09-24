@@ -19,7 +19,7 @@ Goal: deliver a GPU-accelerated workflow for collecting wake-phrase audio, train
 | `artifact-registry` | File store for datasets & models | Host volume (`/data/wake-training`) | Mounted read/write inside Jetson containers |
 | `transfer-agent` | Handles “Apply to TARS” deployment | Paramiko/rsync/SSH | Needs Orange Pi credentials & target path |
 
-Deployment: docker compose bundle tailored for Jetson (arm64 + CUDA base). Compose mounts `./data/wake-training` (host) to `/data` in containers to satisfy the “accessible by host” requirement.
+Deployment: docker compose bundle tailored for Jetson (arm64 + CUDA base). The repository now hosts initial scaffolding under `server/wake-training/` (Dockerfile, compose, README). The compose defaults map `${WAKE_TRAINING_HOST_DATA_DIR:-../../data/wake-training}` on the host to `/data/wake-training` in-container, satisfying the “accessible by host” requirement while allowing overrides for real hardware paths.
 
 ## 3) Storage Layout
 ```
@@ -43,6 +43,8 @@ Deployment: docker compose bundle tailored for Jetson (arm64 + CUDA base). Compo
   scratch/                      # temporary augmented clips
   transfers/
     <timestamp>-model.tar.gz     # bundles staged for Orange Pi
+
+Repo note: `data/wake-training/` (with `.gitkeep`) seeds the host directory for local development; Jetson deployments should bind-mount the actual persistent path defined by `WAKE_TRAINING_HOST_DATA_DIR`.
 ```
 
 ## 4) Data Flow
@@ -137,3 +139,49 @@ Deployment: docker compose bundle tailored for Jetson (arm64 + CUDA base). Compo
 - Will the Jetson remain dedicated for training, or also run other services (affects GPU contention)?
 - Should we support incremental learning (continue training using previous checkpoint) vs always retraining?
 - Network constraints: ensure Orange Pi reachable over SSH; consider offline deployment fallback (USB export).
+
+## 14) Implementation Backlog (MVP-first)
+
+### Sprint 0 – Environment bring-up
+- [X] Provision Jetson Orin Nano base OS (JetPack) and enable CUDA + Docker runtime.
+- [ ] Create `/data/wake-training` host directory with proper permissions and backup job (rsync to NAS). *(Repo-level seed at `data/wake-training/` complete; production mount + backup job pending.)*
+- [ ] Generate SSH keys / credentials for Orange Pi deployment target; store in secrets vault.
+- [X] Commit container scaffolding under `server/wake-training/` (Dockerfile, compose, README) with host RW volume mapping.
+
+### Sprint 1 – Dataset service foundation
+- [ ] Scaffold `training-api` FastAPI project with health endpoint, dataset CRUD using local filesystem.
+- [ ] Implement storage adapters (datasets/, clips/, labels.json) and background metrics worker.
+- [ ] Add WebSocket broadcaster for dataset change events.
+- [ ] Stand up minimal React/Vite UI with dataset list + clip counter display.
+
+### Sprint 2 – Recording ingestion & curation
+- [ ] Add WebAudio/drag-drop upload flow with metadata tagging.
+- [ ] Implement clip review table with delete/restore + waveform preview.
+- [ ] Introduce validation jobs (duration bounds, RMS/SNR scoring) and surface warnings in UI.
+
+### Sprint 3 – GPU training pipeline
+- [ ] Containerize `training-worker` with CUDA base image and NeMo dependencies.
+- [ ] Build job queue bridge (e.g., Redis + RQ or FastAPI background TaskGroup) between API and worker.
+- [ ] Implement training job: dataset split, augmentation, MarbleNet fine-tune, evaluation metrics.
+- [ ] Export ONNX + metadata, persist logs/artifacts under `/data/wake-training/jobs/<job_id>/`.
+- [ ] Emit real-time job progress events (Pub/Sub channel consumed by UI progress modal).
+
+### Sprint 4 – Deploy-to-TARS pipeline
+- [ ] Implement artifact packaging + checksum manifest.
+- [ ] Build `transfer-agent` module (Paramiko/rsync) with retry + rollback logic.
+- [ ] Create remote `deploy_hotword.sh` script template and document expected location on Orange Pi.
+- [ ] Wire "Apply training" button in UI with confirmation dialog + status toasts.
+
+### Sprint 5 – Integration & hardening
+- [ ] Update STT worker to load external wake model and expose configuration flag.
+- [ ] Add automated smoke test that runs exported model against validation clips.
+- [ ] Instrument Prometheus metrics (dataset counts, GPU utilization, job durations, deploy outcomes).
+- [ ] Gate API/UI behind auth proxy (JWT/OIDC) and enable audit logging.
+- [ ] Implement artifact lifecycle management (auto-prune scratch/, retain last N models).
+
+### Immediate Next Steps
+1. Confirm Jetson OS + CUDA versions we target; document in repo `plan/`.
+2. Decide on job queue technology (RQ vs Celery vs FastAPI background tasks) and reflect in requirements.
+3. Draft interface contract for STT worker hotword loader so training artifacts match expected format.
+4. Finalize Jetson host storage mount for `/data/wake-training`, add rsync backup job, and record the path in infra docs.
+5. Start remaining Sprint 0 tasks; capture status updates in this plan file.

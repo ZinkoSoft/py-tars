@@ -59,8 +59,23 @@ run_tests() {
   fi
 
   export PYTHONPATH="${ROOT_DIR}:${PYTHONPATH:-}"
-  info "Running pytest ${pytest_args[*]}"
-  pytest "${pytest_args[@]}"
+  # Exclude wake-training from the root discovery; it's run separately below.
+  local -a root_pytest_args=("${pytest_args[@]}")
+  if [[ -d "${ROOT_DIR}/server/wake-training" ]]; then
+    root_pytest_args+=("--ignore=server/wake-training")
+  fi
+  info "Running pytest at repo root: ${root_pytest_args[*]}"
+  pytest "${root_pytest_args[@]}"
+  # Run wake-training tests (isolated, with its own requirements)
+  local WAKE_TRAINING_DIR="${ROOT_DIR}/server/wake-training"
+  if [[ -d "${WAKE_TRAINING_DIR}" && -f "${WAKE_TRAINING_DIR}/requirements.txt" && -d "${WAKE_TRAINING_DIR}/tests" ]]; then
+    info "Running wake-training tests in server/wake-training"
+    pushd "${WAKE_TRAINING_DIR}" >/dev/null
+  pip install --upgrade -r requirements.txt
+  info "Setting PYTHONPATH=. for wake-training tests"
+  PYTHONPATH=. pytest --maxfail=2 --disable-warnings -q tests
+    popd >/dev/null
+  fi
 }
 
 main() {

@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  wake-training:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: ${WAKE_TRAINING_BASE_IMAGE:-nvcr.io/nvidia/l4t-ml:r36.2.0-py3}
+    image: tars-wake-training:latest
+    container_name: tars-wake-training
+    # Jetson + NVIDIA Container Runtime still respect the legacy runtime flag.
+    # Comment this line out if you are building/running on a non-GPU dev host.
+    runtime: "${WAKE_TRAINING_CONTAINER_RUNTIME:-nvidia}"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
+      - NVIDIA_DRIVER_CAPABILITIES=${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
+      - WAKE_TRAINING_DATA_DIR=/data/wake-training
+    volumes:
+      - ${WAKE_TRAINING_HOST_DATA_DIR:-../../data/wake-training}:/data/wake-training:rw
+    ports:
+      - "${WAKE_TRAINING_API_PORT:-8080}:8080"
+    restart: unless-stopped
