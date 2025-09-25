@@ -70,7 +70,10 @@ class TrainingJobRunner:
             if job.id in self._tasks:
                 return
             task = asyncio.create_task(self._run_job(job.id))
-            task.add_done_callback(partial(self._tasks.pop, job.id, None))
+            def _drop_task(_: asyncio.Task[None]) -> None:
+                self._tasks.pop(job.id, None)
+
+            task.add_done_callback(_drop_task)
             self._tasks[job.id] = task
 
     async def _run_job(self, job_id: str) -> None:
