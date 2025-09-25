@@ -41,6 +41,8 @@ from .inference import InferenceError, run_clip_inference
 
 logger = logging.getLogger(__name__)
 
+DATASET_NAME_PATTERN = r"^[A-Za-z0-9._\- ]+$"
+
 app = FastAPI(title="TARS Wake Training API", version="0.1.0")
 app.state.event_hub = EventHub()
 app.state.job_runner = None
@@ -141,7 +143,7 @@ async def create_dataset(
 
 @app.get("/datasets/{name}", response_model=DatasetDetail)
 async def get_dataset(
-    name: Annotated[str, Path(pattern=r"^[A-Za-z0-9._-]+$", title="Dataset name")],
+    name: Annotated[str, Path(pattern=DATASET_NAME_PATTERN, title="Dataset name")],
     storage: Annotated[DatasetStorage, Depends(get_storage)],
 ) -> DatasetDetail:
     try:
@@ -152,7 +154,7 @@ async def get_dataset(
 
 @app.patch("/datasets/{name}", response_model=DatasetDetail)
 async def update_dataset(
-    name: Annotated[str, Path(pattern=r"^[A-Za-z0-9._-]+$", title="Dataset name")],
+    name: Annotated[str, Path(pattern=DATASET_NAME_PATTERN, title="Dataset name")],
     payload: DatasetUpdateRequest,
     storage: Annotated[DatasetStorage, Depends(get_storage)] = None,
     event_hub: Annotated[EventHub, Depends(get_event_hub)] = None,
@@ -178,7 +180,7 @@ async def update_dataset(
 
 @app.delete("/datasets/{name}", status_code=204)
 async def delete_dataset(
-    name: Annotated[str, Path(pattern=r"^[A-Za-z0-9._-]+$", title="Dataset name")],
+    name: Annotated[str, Path(pattern=DATASET_NAME_PATTERN, title="Dataset name")],
     storage: Annotated[DatasetStorage, Depends(get_storage)] = None,
     event_hub: Annotated[EventHub, Depends(get_event_hub)] = None,
 ) -> Response:
@@ -209,7 +211,7 @@ async def delete_dataset(
     status_code=201,
 )
 async def upload_recording(
-    name: Annotated[str, Path(pattern=r"^[A-Za-z0-9._-]+$", title="Dataset name")],
+    name: Annotated[str, Path(pattern=DATASET_NAME_PATTERN, title="Dataset name")],
     file: UploadFile = File(..., description="WAV audio file"),
     label: Optional[str] = Form(default="positive"),
     speaker: Optional[str] = Form(default=None),
@@ -242,7 +244,7 @@ async def upload_recording(
     status_code=200,
 )
 async def delete_recording(
-    name: Annotated[str, Path(pattern=r"^[A-Za-z0-9._-]+$", title="Dataset name")],
+    name: Annotated[str, Path(pattern=DATASET_NAME_PATTERN, title="Dataset name")],
     clip_id: Annotated[str, Path(pattern=r"^[a-f0-9]{32}$", title="Clip ID")],
     storage: Annotated[DatasetStorage, Depends(get_storage)] = None,
     event_hub: Annotated[EventHub, Depends(get_event_hub)] = None,
@@ -268,7 +270,7 @@ async def delete_recording(
     status_code=200,
 )
 async def restore_recording(
-    name: Annotated[str, Path(pattern=r"^[A-Za-z0-9._-]+$", title="Dataset name")],
+    name: Annotated[str, Path(pattern=DATASET_NAME_PATTERN, title="Dataset name")],
     clip_id: Annotated[str, Path(pattern=r"^[a-f0-9]{32}$", title="Clip ID")],
     storage: Annotated[DatasetStorage, Depends(get_storage)] = None,
     event_hub: Annotated[EventHub, Depends(get_event_hub)] = None,
@@ -293,7 +295,7 @@ async def restore_recording(
     "/datasets/{name}/recordings/{clip_id}",
 )
 async def patch_recording(
-    name: Annotated[str, Path(pattern=r"^[A-Za-z0-9._-]+$", title="Dataset name")],
+    name: Annotated[str, Path(pattern=DATASET_NAME_PATTERN, title="Dataset name")],
     clip_id: Annotated[str, Path(pattern=r"^[a-f0-9]{32}$", title="Clip ID")],
     patch: RecordingUpdate,
     storage: Annotated[DatasetStorage, Depends(get_storage)] = None,
@@ -320,7 +322,7 @@ async def patch_recording(
     response_model=InferenceResponse,
 )
 async def infer_recording(
-    name: Annotated[str, Path(pattern=r"^[A-Za-z0-9._-]+$", title="Dataset name")],
+    name: Annotated[str, Path(pattern=DATASET_NAME_PATTERN, title="Dataset name")],
     clip_id: Annotated[str, Path(pattern=r"^[a-f0-9]{32}$", title="Clip ID")],
     payload: InferenceRequest,
     storage: Annotated[DatasetStorage, Depends(get_storage)] = None,
@@ -407,7 +409,7 @@ async def infer_recording(
 
 @app.get("/datasets/{name}/metrics", response_model=DatasetMetrics)
 async def get_dataset_metrics(
-    name: Annotated[str, Path(pattern=r"^[A-Za-z0-9._-]+$", title="Dataset name")],
+    name: Annotated[str, Path(pattern=DATASET_NAME_PATTERN, title="Dataset name")],
     storage: Annotated[DatasetStorage, Depends(get_storage)] = None,
 ) -> DatasetMetrics:
     try:

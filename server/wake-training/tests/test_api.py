@@ -1,5 +1,6 @@
 import math
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 
@@ -49,6 +50,18 @@ def test_create_and_get_dataset(client: TestClient) -> None:
 def test_get_dataset_not_found(client: TestClient) -> None:
     resp = client.get("/datasets/doesnotexist")
     assert resp.status_code == 404
+
+
+def test_dataset_metrics_allows_spaces(client: TestClient) -> None:
+    name = "Hey Tars"
+    resp = client.post("/datasets", json={"name": name})
+    assert resp.status_code == 201
+
+    metrics_resp = client.get(f"/datasets/{quote(name)}/metrics")
+    assert metrics_resp.status_code == 200
+    data = metrics_resp.json()
+    assert data["name"] == name
+    assert data["clip_count"] == 0
 
 
 def test_infer_recording_with_latest_job(client: TestClient, make_wav) -> None:
