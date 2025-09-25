@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path as FilePath
 from typing import Annotated, Optional
 
 from fastapi import (
@@ -29,11 +30,14 @@ from .models import (
     RecordingMetadata,
     RecordingResponse,
     RecordingUpdate,
+    InferenceRequest,
+    InferenceResponse,
 )
 from .storage import DatasetStorage
 from .events import EventHub, DatasetEvent, DatasetEventType
-from .jobs import JobStorage, TrainingJob, TrainingJobCreateRequest, JobLogChunk
+from .jobs import JobStorage, TrainingJob, TrainingJobCreateRequest, JobLogChunk, TrainingJobStatus
 from .runner import TrainingJobRunner
+from .inference import InferenceError, run_clip_inference
 
 logger = logging.getLogger(__name__)
 
@@ -309,6 +313,96 @@ async def patch_recording(
         return {"status": "ok"}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Not found")
+
+
+@app.post(
+    "/datasets/{name}/recordings/{clip_id}/infer",
+    response_model=InferenceResponse,
+)
+async def infer_recording(
+    name: Annotated[str, Path(pattern=r"^[A-Za-z0-9._-]+$", title="Dataset name")],
+    clip_id: Annotated[str, Path(pattern=r"^[a-f0-9]{32}$", title="Clip ID")],
+    payload: InferenceRequest,
+    storage: Annotated[DatasetStorage, Depends(get_storage)] = None,
+    job_storage: Annotated[JobStorage, Depends(get_job_storage)] = None,
+) -> InferenceResponse:
+    try:
+        dataset = storage.get_dataset(name)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    clip_path = dataset.path / "clips" / f"{clip_id}.wav"
+    if not clip_path.exists():
+        raise HTTPException(status_code=404, detail="Clip not found in dataset")
+
+    job: TrainingJob | None = None
+    if payload.job_id is not None:
+        try:
+            job = job_storage.get_job(payload.job_id)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="Training job not found")
+        if job.dataset != name:
+            raise HTTPException(status_code=400, detail="Training job belongs to a different dataset")
+        if job.status != TrainingJobStatus.completed:
+            raise HTTPException(status_code=409, detail="Training job has not completed successfully")
+    else:
+        completed_jobs = [
+            item
+            for item in job_storage.list_jobs()
+            if item.dataset == name and item.status == TrainingJobStatus.completed
+        ]
+        if not completed_jobs:
+            raise HTTPException(status_code=409, detail="No completed training jobs for dataset")
+        job = max(completed_jobs, key=lambda item: item.updated_at)
+
+    metadata = job.config or {}
+    artifacts = metadata.get("artifacts", {})
+    model_path_str = artifacts.get("state_dict")
+    export_dir = metadata.get("export_dir")
+    job_dir = job_storage.get_job_dir(job.id)
+
+    if model_path_str:
+        model_path = FilePath(model_path_str)
+    elif export_dir:
+        model_path = FilePath(export_dir) / "wake_model.pt"
+    else:
+        model_path = job_dir / "export" / "wake_model.pt"
+
+    if not model_path.is_absolute():
+        model_path = (job_dir / model_path).resolve()
+
+    if not model_path.exists():
+        raise HTTPException(status_code=409, detail="Model artifact not found for training job")
+
+    try:
+        result = run_clip_inference(model_path, clip_path)
+    except InferenceError as exc:
+        message = str(exc)
+        status = 503 if "torch" in message.lower() else 500
+        raise HTTPException(status_code=status, detail=message)
+
+    trained_at = metadata.get("trained_at", result.trained_at)
+    best_epoch_raw = metadata.get("best_epoch", result.best_epoch)
+    if isinstance(best_epoch_raw, (int, float)):
+        best_epoch_value = int(best_epoch_raw)
+    elif isinstance(best_epoch_raw, str) and best_epoch_raw.isdigit():
+        best_epoch_value = int(best_epoch_raw)
+    else:
+        best_epoch_value = None
+
+    return InferenceResponse(
+        dataset=name,
+        clip_id=clip_id,
+        job_id=job.id,
+        probability=result.probability,
+        threshold=result.threshold,
+        logits=result.logits,
+        is_wake=result.is_wake,
+        sample_rate=result.sample_rate,
+        clip_duration_sec=result.clip_duration_sec,
+        trained_at=str(trained_at) if trained_at is not None else None,
+        best_epoch=best_epoch_value,
+    )
 
 
 @app.get("/datasets/{name}/metrics", response_model=DatasetMetrics)

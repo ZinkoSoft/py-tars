@@ -30,11 +30,6 @@ export interface DatasetMetrics {
   noise: number;
 }
 
-export interface DatasetDetail extends DatasetSummary {
-  deleted_clips: number;
-  path: string;
-}
-
 export interface TrainingJob {
   id: string;
   dataset: string;
@@ -60,12 +55,16 @@ export interface JobLogChunk {
   entries: JobLogEntry[];
 }
 
+export interface DatasetDetail extends DatasetSummary {
+  path: string;
+}
+
 export interface DatasetEvent {
   type: DatasetEventType;
   dataset: string;
+  previous_dataset?: string;
   metrics: DatasetMetrics;
   timestamp: string;
-  previous_dataset?: string;
   clip_id?: string;
   job_id?: string;
   log_chunk?: JobLogChunk;

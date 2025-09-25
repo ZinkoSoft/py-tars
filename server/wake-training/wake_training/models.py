@@ -6,7 +6,7 @@ from typing import Optional
 
 from .compat import StrEnum
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class DatasetSummary(BaseModel):
@@ -86,3 +86,29 @@ class RecordingUpdate(BaseModel):
     label: Optional[RecordingLabel] = None
     speaker: Optional[str] = None
     notes: Optional[str] = None
+
+
+class InferenceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: Optional[str] = Field(
+        default=None,
+        pattern=r"^[a-f0-9]{32}$",
+        description="Optional training job identifier to evaluate against.",
+    )
+
+
+class InferenceResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dataset: str
+    clip_id: str
+    job_id: str
+    probability: float = Field(ge=0.0, le=1.0)
+    threshold: float = Field(ge=0.0, le=1.0)
+    logits: float
+    is_wake: bool
+    sample_rate: int = Field(ge=1)
+    clip_duration_sec: float = Field(ge=0.0)
+    trained_at: Optional[str] = None
+    best_epoch: Optional[int] = Field(default=None, ge=0)

@@ -8,6 +8,7 @@ import { useWakeTrainingStore } from "@/stores/wakeTraining";
 
 const store = useWakeTrainingStore();
 const showRecorder = ref(false);
+let autoOpenedByEmpty = false;
 
 const apiHost = computed(() => {
   const baseUrl = __API_BASE_URL__;
@@ -33,15 +34,20 @@ onUnmounted(() => {
 
 watch(
   () => store.datasetList.length,
-  (count) => {
+  (count, previous) => {
     if (count === 0) {
       showRecorder.value = true;
+      autoOpenedByEmpty = true;
+    } else if (autoOpenedByEmpty && previous === 0) {
+      showRecorder.value = false;
+      autoOpenedByEmpty = false;
     }
   },
   { immediate: true },
 );
 
 function toggleRecorder(): void {
+  autoOpenedByEmpty = false;
   showRecorder.value = !showRecorder.value;
 }
 </script>
@@ -65,21 +71,21 @@ function toggleRecorder(): void {
     </header>
 
     <main class="layout">
-      <section class="layout-primary">
-        <transition name="slide-fade">
+      <section class="primary-column">
+        <DatasetList :datasets="store.datasetList" :loading="store.loadingDatasets" />
+        <transition name="fade-slide">
           <RecorderPanel
             v-if="showRecorder"
-            class="layout-recorder"
+            class="recorder-card"
             :datasets="store.datasetList"
             :loading="store.loadingDatasets"
           />
         </transition>
-        <DatasetList :datasets="store.datasetList" :loading="store.loadingDatasets" />
       </section>
-      <aside class="layout-sidebar">
+      <section class="secondary-column">
         <JobStatusCards :jobs="store.jobList" :status="store.connectionStatus" :error="store.lastError" />
         <JobLogViewer :logs="store.jobLogsList" />
-      </aside>
+      </section>
     </main>
   </div>
 </template>
@@ -103,6 +109,7 @@ function toggleRecorder(): void {
   color: rgba(226, 232, 240, 0.75);
 }
 
+
 .hero-meta {
   display: flex;
   align-items: center;
@@ -122,34 +129,37 @@ function toggleRecorder(): void {
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
   gap: 1.75rem;
+  grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr);
   align-items: start;
 }
 
-.layout-primary {
-  display: flex;
-  flex-direction: column;
+.primary-column {
+  display: grid;
   gap: 1.75rem;
 }
 
-.layout-sidebar {
-  display: flex;
-  flex-direction: column;
+.secondary-column {
+  display: grid;
   gap: 1.25rem;
+  grid-template-rows: auto 1fr;
 }
 
-.layout-recorder {
+.secondary-column > :last-child {
+  min-height: 0;
+}
+
+.recorder-card {
   box-shadow: 0 18px 36px rgba(15, 23, 42, 0.45);
 }
 
-.slide-fade-enter-active,
-.slide-fade-leave-active {
-  transition: all 0.25s ease;
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
 }
 
-.slide-fade-enter-from,
-.slide-fade-leave-to {
+.fade-slide-enter-from,
+.fade-slide-leave-to {
   opacity: 0;
   transform: translateY(-12px);
 }
@@ -159,8 +169,8 @@ function toggleRecorder(): void {
     grid-template-columns: 1fr;
   }
 
-  .layout-sidebar {
-    order: -1;
+  .secondary-column {
+    grid-template-rows: none;
   }
 }
 
