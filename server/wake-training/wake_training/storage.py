@@ -1,13 +1,29 @@
 from __future__ import annotations
 
+import contextlib
 import json
+import shutil
+import uuid
+import wave
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
-import uuid
-from .models import RecordingMetadata, RecordingResponse, RecordingUpdate, DatasetMetrics
 
-from .models import DatasetCreateRequest, DatasetDetail, DatasetSummary
+try:  # pragma: no cover - optional dependency, covered indirectly via metrics tests
+    import soundfile as sf  # type: ignore
+except Exception:  # pragma: no cover - fallback when soundfile missing
+    sf = None
+
+from .models import (
+    DatasetCreateRequest,
+    DatasetDetail,
+    DatasetMetrics,
+    DatasetSummary,
+    DatasetUpdateRequest,
+    RecordingMetadata,
+    RecordingResponse,
+    RecordingUpdate,
+)
 
 
 DATASET_META_FILENAME = "manifest.json"
@@ -47,6 +63,39 @@ class DatasetStorage:
         (dataset_dir / "trash").mkdir(parents=True, exist_ok=True)
         self._recompute_metrics(dataset_dir)
         return self._build_detail(dataset_dir)
+
+    def update_dataset(self, name: str, payload: DatasetUpdateRequest) -> DatasetDetail:
+        dataset_dir = self.datasets_root / name
+        if not dataset_dir.exists():
+            raise FileNotFoundError(name)
+
+        target_dir = dataset_dir
+        new_name = payload.name
+        if new_name and new_name != name:
+            target_dir = self.datasets_root / new_name
+            if target_dir.exists():
+                raise FileExistsError(new_name)
+            dataset_dir.rename(target_dir)
+            dataset_dir = target_dir
+
+        manifest = self._read_manifest(dataset_dir)
+        if new_name:
+            manifest["name"] = new_name
+        if payload.description is not None:
+            manifest["description"] = payload.description
+        manifest.setdefault("created_at", datetime.utcnow().isoformat())
+        meta_path = dataset_dir / DATASET_META_FILENAME
+        meta_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+        # Update metrics to ensure they exist at new location
+        self._recompute_metrics(dataset_dir)
+        return self._build_detail(dataset_dir)
+
+    def delete_dataset(self, name: str) -> None:
+        dataset_dir = self.datasets_root / name
+        if not dataset_dir.exists():
+            raise FileNotFoundError(name)
+        shutil.rmtree(dataset_dir)
 
     def save_recording(
         self,
@@ -288,6 +337,23 @@ class DatasetStorage:
 
     @staticmethod
     def _sum_durations(files: Iterable[Path]) -> float:
-        # Placeholder: duration will be calculated after metadata pipeline lands.
-        # For now, return 0.0 seconds.
-        return 0.0
+        total = 0.0
+        for path in files:
+            # Prefer soundfile for accurate metadata, fall back to wave module.
+            if sf is not None:
+                try:
+                    info = sf.info(str(path))
+                    if info.samplerate:
+                        total += info.frames / float(info.samplerate)
+                        continue
+                except Exception:  # pragma: no cover - handled by fallback
+                    pass
+            try:
+                with contextlib.closing(wave.open(str(path), "rb")) as wf:
+                    frames = wf.getnframes()
+                    rate = wf.getframerate()
+                    if rate:
+                        total += frames / float(rate)
+            except Exception:  # pragma: no cover - ignore unreadable files
+                continue
+        return total

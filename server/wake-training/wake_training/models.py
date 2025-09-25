@@ -6,7 +6,7 @@ from typing import Optional
 
 from .compat import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class DatasetSummary(BaseModel):
@@ -39,6 +39,17 @@ class DatasetMetrics(BaseModel):
 class DatasetCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     description: Optional[str] = None
+
+
+class DatasetUpdateRequest(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    description: Optional[str] = None
+
+    @model_validator(mode="after")
+    def ensure_fields_present(cls, values: "DatasetUpdateRequest") -> "DatasetUpdateRequest":
+        if values.name is None and values.description is None:
+            raise ValueError("At least one field must be provided for update")
+        return values
 
 
 class HealthResponse(BaseModel):

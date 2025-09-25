@@ -15,6 +15,8 @@ from .compat import StrEnum
 
 class DatasetEventType(StrEnum):
     dataset_created = "dataset.created"
+    dataset_updated = "dataset.updated"
+    dataset_deleted = "dataset.deleted"
     recording_uploaded = "recording.uploaded"
     recording_deleted = "recording.deleted"
     recording_restored = "recording.restored"
@@ -33,6 +35,7 @@ class DatasetEvent(BaseModel):
 
     type: DatasetEventType
     dataset: str
+    previous_dataset: Optional[str] = None
     metrics: DatasetMetrics
     timestamp: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
     clip_id: Optional[str] = None
