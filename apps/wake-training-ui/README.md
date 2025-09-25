@@ -2,6 +2,13 @@
 
 Single-page Vue app for curating wake-word datasets, monitoring training jobs, and tailing log streams. It targets the wake-training FastAPI backend over REST + WebSockets.
 
+### Key capabilities
+
+- Visual dataset summaries, rename/delete, and trash management
+- Inline recorder for collecting fresh clips from the browser
+- Live job cards with log streaming over WebSockets
+- **Decision-threshold tuning** directly on each dataset card; the chosen value is sent as a config override when you queue the next training job, and the UI updates when completed jobs report their effective threshold
+
 ## Quick start (Docker Compose)
 
 Run the UI directly in Docker without installing Node:

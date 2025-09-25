@@ -140,6 +140,36 @@ function parseErrorMessage(error: unknown): string {
   }
   return "Unknown error";
 }
+
+function thresholdValue(dataset: DatasetRecord): number {
+  return store.getTrainingThreshold(dataset.name);
+}
+
+function normalizeThresholdId(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+}
+
+function onThresholdSliderInput(dataset: DatasetRecord, event: Event): void {
+  const target = event.target as HTMLInputElement | null;
+  if (!target) return;
+  const value = Number(target.value);
+  if (!Number.isFinite(value)) return;
+  store.setTrainingThreshold(dataset.name, value);
+}
+
+function onThresholdNumberInput(dataset: DatasetRecord, event: Event): void {
+  const target = event.target as HTMLInputElement | null;
+  if (!target) return;
+  const trimmed = target.value.trim();
+  if (!trimmed) {
+    return;
+  }
+  const value = Number(trimmed);
+  if (!Number.isFinite(value)) {
+    return;
+  }
+  store.setTrainingThreshold(dataset.name, value);
+}
 </script>
 
 <template>
@@ -219,6 +249,34 @@ function parseErrorMessage(error: unknown): string {
             <dd>{{ formatter.format(dataset.deletedClips ?? 0) }}</dd>
           </div>
         </dl>
+
+        <div class="threshold-control" v-if="deleteTarget !== dataset.name && editingDataset !== dataset.name">
+          <label class="threshold-label" :for="`threshold-slider-${normalizeThresholdId(dataset.name)}`">
+            Decision threshold
+          </label>
+          <div class="threshold-inputs">
+            <input
+              class="threshold-slider"
+              type="range"
+              min="0.05"
+              max="0.95"
+              step="0.05"
+              :id="`threshold-slider-${normalizeThresholdId(dataset.name)}`"
+              :value="thresholdValue(dataset)"
+              @input="onThresholdSliderInput(dataset, $event)"
+            />
+            <input
+              class="threshold-number"
+              type="number"
+              min="0.05"
+              max="0.95"
+              step="0.01"
+              :value="thresholdValue(dataset).toFixed(2)"
+              @input="onThresholdNumberInput(dataset, $event)"
+            />
+            <span class="threshold-display">{{ thresholdValue(dataset).toFixed(2) }}</span>
+          </div>
+        </div>
 
         <div v-if="deleteTarget !== dataset.name && editingDataset !== dataset.name" class="dataset-card__actions">
           <button
@@ -375,6 +433,45 @@ function parseErrorMessage(error: unknown): string {
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
+}
+
+.threshold-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.threshold-label {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08rem;
+  color: rgba(226, 232, 240, 0.65);
+}
+
+.threshold-inputs {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.threshold-slider {
+  width: 160px;
+}
+
+.threshold-number {
+  width: 4.5rem;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 0.5rem;
+  padding: 0.35rem 0.45rem;
+  color: inherit;
+  font: inherit;
+}
+
+.threshold-display {
+  font-weight: 600;
+  font-size: 0.95rem;
 }
 
 .rename-input {

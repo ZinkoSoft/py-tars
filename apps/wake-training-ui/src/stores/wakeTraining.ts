@@ -55,6 +55,7 @@ export const useWakeTrainingStore = defineStore("wakeTraining", () => {
   const jobs = ref<Record<string, JobRecord>>({});
   const jobLogs = ref<Record<string, JobLogEntry[]>>({});
   const jobLogOffsets = ref<Record<string, number>>({});
+  const trainingThresholds = ref<Record<string, number>>({});
 
   const connectionStatus = ref<ConnectionStatus>("disconnected");
   const loadingDatasets = ref<boolean>(false);
@@ -91,6 +92,67 @@ export const useWakeTrainingStore = defineStore("wakeTraining", () => {
     delete next[oldName];
     next[newName] = { ...state };
     datasetBusy.value = next;
+    moveTrainingThreshold(oldName, newName);
+  }
+
+  function clampThreshold(value: unknown): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return 0.5;
+    }
+    return Math.min(0.95, Math.max(0.05, Number.parseFloat(numeric.toFixed(3))));
+  }
+
+  function getTrainingThreshold(dataset: string): number {
+    return trainingThresholds.value[dataset] ?? 0.5;
+  }
+
+  function setTrainingThreshold(dataset: string, value: number): void {
+    const clamped = clampThreshold(value);
+    if (trainingThresholds.value[dataset] === clamped) {
+      return;
+    }
+    trainingThresholds.value = {
+      ...trainingThresholds.value,
+      [dataset]: clamped,
+    };
+  }
+
+  function removeTrainingThreshold(dataset: string): void {
+    if (!(dataset in trainingThresholds.value)) {
+      return;
+    }
+    const next = { ...trainingThresholds.value };
+    delete next[dataset];
+    trainingThresholds.value = next;
+  }
+
+  function moveTrainingThreshold(oldName: string, newName: string): void {
+    if (oldName === newName || !(oldName in trainingThresholds.value)) {
+      return;
+    }
+    const value = trainingThresholds.value[oldName];
+    const next = { ...trainingThresholds.value };
+    delete next[oldName];
+    next[newName] = value;
+    trainingThresholds.value = next;
+  }
+
+  function syncThresholdFromConfig(dataset: string, config?: Record<string, unknown>): void {
+    if (!config) {
+      return;
+    }
+    const direct = config["threshold"];
+    const hyper = config["hyperparameters"];
+    const candidate =
+      direct ??
+      (typeof hyper === "object" && hyper !== null
+        ? (hyper as Record<string, unknown>)["threshold"]
+        : undefined);
+    if (candidate === undefined || candidate === null) {
+      return;
+    }
+    setTrainingThreshold(dataset, Number(candidate));
   }
 
   let socket: WebSocket | null = null;
@@ -217,6 +279,7 @@ export const useWakeTrainingStore = defineStore("wakeTraining", () => {
       const copy = { ...datasets.value };
       delete copy[name];
       datasets.value = copy;
+      removeTrainingThreshold(name);
     } catch (error) {
       lastError.value = parseError(error);
       throw error;
@@ -228,9 +291,16 @@ export const useWakeTrainingStore = defineStore("wakeTraining", () => {
   async function trainDataset(dataset: string, overrides?: Record<string, unknown>): Promise<void> {
     setDatasetBusy(dataset, "train", true);
     try {
+      const payloadOverrides: Record<string, unknown> = {
+        ...(overrides ?? {}),
+      };
+      if (!("threshold" in payloadOverrides)) {
+        payloadOverrides.threshold = getTrainingThreshold(dataset);
+      }
+
       await http.post("/train", {
         dataset_id: dataset,
-        config_overrides: overrides ?? {},
+        config_overrides: payloadOverrides,
       });
     } catch (error) {
       lastError.value = parseError(error);
@@ -284,6 +354,9 @@ export const useWakeTrainingStore = defineStore("wakeTraining", () => {
         error: data.error ?? null,
         config: data.config,
       };
+      if (data.status === "completed") {
+        syncThresholdFromConfig(data.dataset, data.config);
+      }
     } catch (error) {
       // if the job record disappeared, keep the last known status but note error
       const existing = jobs.value[jobId];
@@ -344,6 +417,7 @@ export const useWakeTrainingStore = defineStore("wakeTraining", () => {
         setDatasetBusy(event.dataset, "delete", false);
         setDatasetBusy(event.dataset, "rename", false);
         setDatasetBusy(event.dataset, "train", false);
+        removeTrainingThreshold(event.dataset);
         break;
       case "job.queued":
       case "job.running":
@@ -470,11 +544,14 @@ export const useWakeTrainingStore = defineStore("wakeTraining", () => {
     jobList,
     jobLogsList,
     datasetBusy,
+    trainingThresholds,
     connectionStatus,
     loadingDatasets,
     lastError,
     lastUploadError,
     uploadingRecording,
+    getTrainingThreshold,
+    setTrainingThreshold,
     loadDatasets,
     uploadRecording,
     renameDataset,
