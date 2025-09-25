@@ -14,6 +14,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
     Query,
+    Response,
 )
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -24,6 +25,7 @@ from .models import (
     DatasetSummary,
     HealthResponse,
     DatasetMetrics,
+    DatasetUpdateRequest,
     RecordingMetadata,
     RecordingResponse,
     RecordingUpdate,
@@ -142,6 +144,59 @@ async def get_dataset(
         return storage.get_dataset(name)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Dataset not found")
+
+
+@app.patch("/datasets/{name}", response_model=DatasetDetail)
+async def update_dataset(
+    name: Annotated[str, Path(pattern=r"^[A-Za-z0-9._-]+$", title="Dataset name")],
+    payload: DatasetUpdateRequest,
+    storage: Annotated[DatasetStorage, Depends(get_storage)] = None,
+    event_hub: Annotated[EventHub, Depends(get_event_hub)] = None,
+) -> DatasetDetail:
+    try:
+        updated = storage.update_dataset(name, payload)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    except FileExistsError:
+        raise HTTPException(status_code=409, detail="Dataset name already exists")
+
+    metrics = storage.get_metrics(updated.name)
+    await event_hub.publish(
+        DatasetEvent(
+            type=DatasetEventType.dataset_updated,
+            dataset=updated.name,
+            previous_dataset=name if name != updated.name else None,
+            metrics=metrics,
+        )
+    )
+    return updated
+
+
+@app.delete("/datasets/{name}", status_code=204)
+async def delete_dataset(
+    name: Annotated[str, Path(pattern=r"^[A-Za-z0-9._-]+$", title="Dataset name")],
+    storage: Annotated[DatasetStorage, Depends(get_storage)] = None,
+    event_hub: Annotated[EventHub, Depends(get_event_hub)] = None,
+) -> Response:
+    try:
+        metrics = storage.get_metrics(name)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    try:
+        storage.delete_dataset(name)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    await event_hub.publish(
+        DatasetEvent(
+            type=DatasetEventType.dataset_deleted,
+            dataset=name,
+            metrics=metrics,
+            previous_dataset=name,
+        )
+    )
+    return Response(status_code=204)
 
 
 @app.post(

@@ -1,5 +1,7 @@
 export type DatasetEventType =
   | "dataset.created"
+  | "dataset.updated"
+  | "dataset.deleted"
   | "recording.uploaded"
   | "recording.deleted"
   | "recording.restored"
@@ -15,6 +17,7 @@ export interface DatasetSummary {
   created_at: string;
   clip_count: number;
   total_duration_sec: number;
+  description?: string | null;
   deleted_clips?: number;
 }
 
@@ -25,6 +28,11 @@ export interface DatasetMetrics {
   positives: number;
   negatives: number;
   noise: number;
+}
+
+export interface DatasetDetail extends DatasetSummary {
+  deleted_clips: number;
+  path: string;
 }
 
 export interface TrainingJob {
@@ -57,6 +65,7 @@ export interface DatasetEvent {
   dataset: string;
   metrics: DatasetMetrics;
   timestamp: string;
+  previous_dataset?: string;
   clip_id?: string;
   job_id?: string;
   log_chunk?: JobLogChunk;

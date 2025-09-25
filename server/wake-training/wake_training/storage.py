@@ -304,6 +304,7 @@ class DatasetStorage:
             created_at=created_at,
             clip_count=len(clip_files),
             total_duration_sec=total_duration,
+            description=manifest.get("description"),
         )
 
     def _build_detail(self, dataset_dir: Path) -> DatasetDetail:

@@ -14,6 +14,7 @@ class DatasetSummary(BaseModel):
     created_at: datetime
     clip_count: int = 0
     total_duration_sec: float = 0.0
+    description: Optional[str] = None
 
 
 class DatasetDetail(DatasetSummary):
