@@ -217,6 +217,12 @@ class JobStorage:
             entries=entries,
         )
 
+    def get_job_dir(self, job_id: str) -> Path:
+        job_dir = self.jobs_root / job_id
+        if not job_dir.exists():
+            raise FileNotFoundError(job_id)
+        return job_dir
+
     def _write_job(self, job: TrainingJob, job_dir: Path) -> None:
         payload = job.model_dump(mode="json")
         job_path = job_dir / self.JOB_FILENAME

@@ -1,42 +1,23 @@
-import os
-import shutil
-import tempfile
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
-from wake_training.main import app
-from wake_training.config import Settings
 
-@pytest.fixture(scope="session")
-def temp_data_root():
-    tmpdir = tempfile.mkdtemp(prefix="waketraining-test-")
-    yield Path(tmpdir)
-    shutil.rmtree(tmpdir)
-
-@pytest.fixture(autouse=True)
-def patch_env(monkeypatch, temp_data_root):
-    monkeypatch.setenv("WAKE_TRAINING_DATA_DIR", str(temp_data_root))
-    yield
-
-@pytest.fixture
-def client():
-    return TestClient(app)
-
-def test_health(client, temp_data_root):
+def test_health(client: TestClient, tmp_path: Path) -> None:
     resp = client.get("/health")
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "ok"
-    assert str(temp_data_root) in str(data["data_root"])
+    returned_root = Path(data["data_root"]).resolve()
+    assert returned_root == tmp_path.resolve()
 
-def test_list_datasets_empty(client):
+
+def test_list_datasets_empty(client: TestClient) -> None:
     resp = client.get("/datasets")
     assert resp.status_code == 200
     assert resp.json() == []
 
-def test_create_and_get_dataset(client):
+def test_create_and_get_dataset(client: TestClient) -> None:
     # Create
     resp = client.post("/datasets", json={"name": "testset"})
     assert resp.status_code == 201
@@ -56,6 +37,6 @@ def test_create_and_get_dataset(client):
     resp = client.post("/datasets", json={"name": "testset"})
     assert resp.status_code == 409
 
-def test_get_dataset_not_found(client):
+def test_get_dataset_not_found(client: TestClient) -> None:
     resp = client.get("/datasets/doesnotexist")
     assert resp.status_code == 404

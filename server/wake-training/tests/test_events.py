@@ -1,17 +1,5 @@
 import io
 
-import pytest
-from fastapi.testclient import TestClient
-
-from wake_training.main import app
-
-
-@pytest.fixture
-def client(monkeypatch, tmp_path):
-    monkeypatch.setenv("WAKE_TRAINING_DATA_DIR", str(tmp_path))
-    return TestClient(app)
-
-
 def test_websocket_receives_dataset_events(client):
     with client.websocket_connect("/ws/events") as ws:
         # Create dataset and expect dataset.created event

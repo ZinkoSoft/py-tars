@@ -1,22 +1,41 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 from functools import partial
-from typing import Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 from .events import DatasetEvent, DatasetEventType, EventHub
 from .jobs import JobStorage, TrainingJob, TrainingJobStatus
-from .storage import DatasetStorage
 from .models import DatasetMetrics
+from .storage import DatasetStorage
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .trainer import TrainingResult
+else:  # pragma: no cover - runtime fallback type
+    TrainingResult = Any  # type: ignore[misc]
+
+try:
+    from .trainer import TrainingError, run_training_job
+except ModuleNotFoundError as exc:  # pragma: no cover - missing optional dependency
+    TRAINING_PIPELINE_AVAILABLE = False
+
+    class TrainingError(RuntimeError):
+        """Raised when the wake-word trainer cannot be imported."""
+
+        pass
+
+    def run_training_job(*args: Any, **kwargs: Any) -> Any:
+        raise TrainingError(
+            "Wake training requires PyTorch (torch==2.2.2). Install the dependency to enable training.",
+        ) from exc
+
+else:
+    TRAINING_PIPELINE_AVAILABLE = True
 
 
 class TrainingJobRunner:
-    """In-process executor that simulates training job lifecycle transitions.
-
-    Real GPU training will replace the `_run_job` stub. For now we immediately
-    transition queued jobs to running and then completed while emitting
-    WebSocket events and persisting status updates.
-    """
+    """In-process executor that orchestrates wake-word training jobs."""
 
     def __init__(
         self,
@@ -68,11 +87,61 @@ class TrainingJobRunner:
                 )
             )
 
-            # Placeholder for GPU fine-tune: insert actual training pipeline here.
-            await asyncio.sleep(0)
+            if not TRAINING_PIPELINE_AVAILABLE:
+                raise TrainingError(
+                    "Wake training pipeline unavailable. Install PyTorch to enable training.",
+                )
 
-            job = self._job_storage.update_status(job_id, TrainingJobStatus.completed)
-            await self._log(job_id, "Job completed successfully", dataset=job.dataset)
+            dataset_detail = self._storage.get_dataset(job.dataset)
+            job_dir = self._job_storage.jobs_root / job_id
+            loop = asyncio.get_running_loop()
+            log_futures: list[concurrent.futures.Future[None]] = []
+
+            def log_callback(message: str) -> None:
+                future = asyncio.run_coroutine_threadsafe(
+                    self._log(job_id, message, dataset=job.dataset),
+                    loop,
+                )
+                log_futures.append(future)
+
+            try:
+                training_result: TrainingResult = await asyncio.to_thread(
+                    run_training_job,
+                    dataset_dir=dataset_detail.path,
+                    job_dir=job_dir,
+                    dataset_name=job.dataset,
+                    overrides=job.config or {},
+                    log=log_callback,
+                )
+            except Exception:
+                await _drain_futures(log_futures)
+                raise
+            else:
+                await _drain_futures(log_futures)
+
+            metadata_update = training_result.metadata()
+            job = self._job_storage.update_status(
+                job_id,
+                TrainingJobStatus.completed,
+                metadata=metadata_update,
+            )
+
+            await self._log(
+                job_id,
+                f"Job completed successfully. Artifacts stored at {training_result.export_dir}",
+                dataset=job.dataset,
+            )
+
+            summary = ", ".join(
+                f"{key}={value:.3f}" for key, value in sorted(training_result.metrics.items())
+            )
+            if summary:
+                await self._log(
+                    job_id,
+                    f"Validation metrics: {summary}",
+                    dataset=job.dataset,
+                )
+
             metrics = self._storage.get_metrics(job.dataset)
             await self._event_hub.publish(
                 DatasetEvent(
@@ -82,34 +151,10 @@ class TrainingJobRunner:
                     metrics=metrics,
                 )
             )
+        except TrainingError as exc:
+            await self._handle_failure(job_id, str(exc))
         except Exception as exc:  # pragma: no cover - defensive
-            job: Optional[TrainingJob] = None
-            try:
-                job = self._job_storage.update_status(
-                    job_id,
-                    TrainingJobStatus.failed,
-                    error=str(exc),
-                )
-                await self._log(job_id, f"Job failed: {exc}", dataset=job.dataset)
-            except FileNotFoundError:
-                pass
-
-            dataset_name = job.dataset if job else "unknown"
-            metrics = None
-            if job:
-                try:
-                    metrics = self._storage.get_metrics(dataset_name)
-                except FileNotFoundError:
-                    metrics = None
-
-            await self._event_hub.publish(
-                DatasetEvent(
-                    type=DatasetEventType.job_failed,
-                    dataset=dataset_name,
-                    job_id=job_id,
-                    metrics=metrics,
-                )
-            )
+            await self._handle_failure(job_id, str(exc))
             raise
 
     async def _log(self, job_id: str, message: str, *, dataset: Optional[str] = None) -> None:
@@ -140,3 +185,41 @@ class TrainingJobRunner:
                 log_chunk=chunk,
             )
         )
+
+    async def _handle_failure(self, job_id: str, error: str) -> None:
+        job: Optional[TrainingJob] = None
+        try:
+            job = self._job_storage.update_status(
+                job_id,
+                TrainingJobStatus.failed,
+                error=error,
+            )
+        except FileNotFoundError:  # pragma: no cover - defensive
+            job = None
+
+        dataset_name = job.dataset if job else "unknown"
+        await self._log(job_id, f"Job failed: {error}", dataset=dataset_name if job else None)
+
+        try:
+            metrics = self._storage.get_metrics(dataset_name)
+        except FileNotFoundError:  # pragma: no cover - defensive
+            metrics = DatasetMetrics(name=dataset_name)
+
+        await self._event_hub.publish(
+            DatasetEvent(
+                type=DatasetEventType.job_failed,
+                dataset=dataset_name,
+                job_id=job_id,
+                metrics=metrics,
+            )
+        )
+
+
+async def _drain_futures(
+    futures: list[concurrent.futures.Future[None]],
+) -> None:
+    for future in futures:
+        try:
+            await asyncio.wrap_future(future)
+        except Exception:  # pragma: no cover - defensive
+            pass
