@@ -86,7 +86,7 @@ class ElevenLabsTTS(TTSExternalService):
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as f:
             t1 = time.time()
             self.synth_to_wav(text, f.name)
-            p = _spawn_player(args=[f.name])
+            p = _spawn_player(args=[f.name], role="playback")
             p.wait()
         dt = time.time() - t0
         logger.info(
@@ -175,7 +175,7 @@ class ElevenLabsTTS(TTSExternalService):
         with self._client.stream("POST", url, headers=headers, json=payload) as resp:
             resp.raise_for_status()
             # Pipe directly to player stdin
-            p = _spawn_player()
+            p = _spawn_player(role="stream-player")
             assert p.stdin is not None
             try:
                 for chunk in resp.iter_bytes():

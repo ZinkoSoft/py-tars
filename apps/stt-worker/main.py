@@ -46,6 +46,7 @@ class STTWorker:
         self._partials_task = None
         self._last_partial_text: str = ""
         self._fft_task = None
+        self._wake_ttl_task: asyncio.Task | None = None
 
     async def initialize(self):
         if os.path.exists("/host-models"):
@@ -58,6 +59,7 @@ class STTWorker:
         await self.mqtt.subscribe_stream('tts/status', self._handle_tts_status)
         # Also listen to tts/say to preemptively mute and set echo context, in case we miss 'speaking_start'
         await self.mqtt.subscribe_stream('tts/say', self._handle_tts_say)
+        await self.mqtt.subscribe_stream('wake/mic', self._handle_wake_mic)
         # For WS/OpenAI backends we open a network call per utterance; avoid partials to reduce overhead
         self._enable_partials = STREAMING_PARTIALS and STT_BACKEND not in {"ws", "openai"}
         if self._enable_partials:
@@ -123,6 +125,53 @@ class STTWorker:
             self.fallback_unmute_task = asyncio.create_task(fallback_unmute_tts())
         except Exception as e:
             logger.error(f"Error handling TTS say: {e}")
+
+    async def _handle_wake_mic(self, payload: bytes):
+        try:
+            data = orjson.loads(payload)
+        except Exception as exc:
+            logger.error(f"Invalid wake/mic payload: {exc}")
+            return
+
+        action = data.get('action')
+        reason = data.get('reason', 'wake')
+        ttl_ms = data.get('ttl_ms')
+
+        if action not in {'mute', 'unmute'}:
+            logger.warning(f"Unknown wake/mic action: {action}")
+            return
+
+        if self._wake_ttl_task and not self._wake_ttl_task.done():
+            self._wake_ttl_task.cancel()
+            self._wake_ttl_task = None
+
+        if action == 'unmute':
+            if self.fallback_unmute_task and not self.fallback_unmute_task.done():
+                self.fallback_unmute_task.cancel()
+                self.fallback_unmute_task = None
+            self.pending_tts = False
+            self.audio_capture.unmute(f"wake/{reason}")
+            self.recent_unmute_time = time.time()
+            logger.info("Wake control unmuted microphone")
+            if isinstance(ttl_ms, (int, float)) and ttl_ms > 0:
+                self._wake_ttl_task = asyncio.create_task(self._schedule_wake_ttl('mute', ttl_ms, reason))
+        else:
+            self.audio_capture.mute(f"wake/{reason}")
+            logger.info("Wake control muted microphone")
+            if isinstance(ttl_ms, (int, float)) and ttl_ms > 0:
+                self._wake_ttl_task = asyncio.create_task(self._schedule_wake_ttl('unmute', ttl_ms, reason))
+
+    async def _schedule_wake_ttl(self, next_action: str, ttl_ms: float, reason: str) -> None:
+        try:
+            await asyncio.sleep(ttl_ms / 1000.0)
+            if next_action == 'mute':
+                self.audio_capture.mute(f"wake/ttl/{reason}")
+            else:
+                self.audio_capture.unmute(f"wake/ttl/{reason}")
+                self.pending_tts = False
+                self.recent_unmute_time = time.time()
+        except asyncio.CancelledError:
+            pass
 
     async def process_audio_stream(self):
         logger.debug("Starting audio processing loop")

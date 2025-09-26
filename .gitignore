@@ -1,7 +1,5 @@
 # Cached Models and Data
-models/
-*.onnx
-*.onnx.json
+models/whisper
 
 # Environment and Configuration
 .env

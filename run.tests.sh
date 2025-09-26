@@ -28,6 +28,11 @@ install_requirements() {
     pip install -e "${ROOT_DIR}/apps/router"
   fi
 
+  if [[ -f "${ROOT_DIR}/apps/wake-activation/pyproject.toml" ]]; then
+    info "Installing wake activation package (editable)"
+    pip install -e "${ROOT_DIR}/apps/wake-activation"
+  fi
+
   local requirements=(
     "apps/stt-worker/requirements.txt"
     "apps/tts-worker/requirements.txt"

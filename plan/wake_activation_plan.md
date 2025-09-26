@@ -2,6 +2,21 @@
 
 Goal: Deliver a dedicated wake-activation package that listens for the "Hey Tars" wake phrase via OpenWakeWord, manages the microphone mute gate, and orchestrates TTS pause/stop behavior when the wake phrase is repeated.
 
+## Progress Snapshot
+
+- ✅ Repository plan authored and living at `plan/wake_activation_plan.md`.
+- ✅ Wake activation service scaffolded (`apps/wake-activation/` package, config/models/service/tests, Dockerfile, README).
+- ✅ Optional OpenWakeWord dependency handled via extras to avoid default install conflicts.
+- ✅ Repo test suite (`./run.tests.sh`) passing with new service included.
+- ✅ Dockerfile now bundles Colab-exported wake models into `/models/openwakeword/`.
+- ✅ Audio fan-out client streams PCM from the STT socket and normalizes frames for inference (Milestone M2).
+- ✅ Wake detector wired in with OpenWakeWord backend; service publishes `wake/event` + `wake/mic` on detection (Milestone M2).
+- ✅ STT worker subscribes to `wake/mic` and enforces TTL-based mute control (Milestone M3 validated end-to-end).
+- ✅ Regression harness and docs captured for the wake detector; curated sequences now guard M2 behavior.
+- ✅ Idle-timeout lifecycle exercised through new wake↔STT integration tests and documented for operators.
+- ✅ Piper-based TTS path now exposes a playback observer hook so pause/resume orchestration can supervise player processes.
+- ✅ Double-wake TTS controls implemented with pause/resume/stop integration tests guarding the flow (Milestone M4).
+
 ## 1) Current State & Pain Points
 
 - Wake detection happens downstream in the router by string matching STT text, so the microphone stays muted until the full phrase is transcribed and runs through the router.
@@ -109,35 +124,58 @@ Model deployment: store `.json` metadata alongside `.tflite`, mount via Docker v
 
 ## 7) Implementation Milestones
 
-1. **M0 – Prep**
-   - Vendor OpenWakeWord model artifacts and verify license compliance.
-   - Add dependency (`openwakeword` Python package) to shared constraints or service-specific requirements.
+- [ ] **M0 – Prep**
+   - [x] Stage OpenWakeWord model artifacts (TFLite + ONNX) under `models/openwakeword/` and wire Docker copy step.
+   - [ ] Confirm licensing/attribution requirements for distributing the Colab-trained model bundle.
+   - [x] Provide optional `openwakeword` extra in `pyproject.toml` and document install guidance in README.
 
-2. **M1 – Wake Activation Skeleton**
-   - Scaffold `apps/wake-activation` with config, health, MQTT wiring, and audio tap stub (mock feed for tests).
-   - Unit tests for config parsing and MQTT message shapes.
+- [x] **M1 – Wake Activation Skeleton**
+   - ✅ Scaffolded `apps/wake-activation` with config objects, MQTT wiring, service skeleton, and placeholder inference loop.
+   - ✅ Added unit tests for config parsing and model serialization; ensured service installs via `pyproject.toml`.
+   - ✅ Dockerfile builds editable install and now copies wake models into `/models/openwakeword/`.
 
-3. **M2 – OpenWakeWord Integration**
-   - Implement real-time inference loop consuming streamed PCM and emitting `wake/event` on detection.
-   - Add regression tests with captured audio samples (positive/negative) running through the detector offline.
+- [x] **M2 – OpenWakeWord Integration**
+   - ✅ Audio fan-out transport implemented and unit-tested (`AudioFanoutClient`).
+   - ✅ Real-time inference loop integrated: wake detector consumes streamed PCM, emits `wake/event`, and unmutes mic on detection.
+   - ✅ Regression tests with captured score sequences replay the detector offline and assert first-threshold detection.
+   - ✅ Documentation refreshed with regression harness guidance and backend selection notes.
 
-4. **M3 – Mute/Unmute Coordination**
-   - Implement `wake/mic` contract, adjust STT worker to obey commands and share audio buffer.
-   - Validate microphone gating end-to-end (wake phrase leads to unmute, silence leads to re-mute).
+- [x] **M3 – Mute/Unmute Coordination**
+   - ✅ `wake/mic` contract implemented; STT worker now obeys commands and schedules TTL re-mute.
+   - ✅ Wake activation emits idle-timeout TTL hints and publishes timeout events after silence.
+   - ✅ Structured logs trace wake sessions and mute lifecycle for observability.
 
-5. **M4 – Double Wake & TTS Controls**
-   - Extend TTS worker with pause/resume/stop control.
-   - Implement double wake detection logic and speech-cancel window behavior in wake activation.
-   - Integration tests simulating TTS playback with double wake + cancel.
+- [x] **M4 – Double Wake & TTS Controls**
+   - [x] Introduce playback observer scaffolding in the Piper TTS stack to emit player lifecycle callbacks.
+   - [x] Extend TTS worker with pause/resume/stop control.
+   - [x] Implement double wake detection logic and speech-cancel window behavior in wake activation.
+   - [x] Author integration tests simulating TTS playback with double wake + cancel.
 
-6. **M5 – Timeouts & Resumption Logic**
-   - Silence detection: if no STT final in `WAKE_IDLE_TIMEOUT_SEC`, resume TTS or close session.
-   - Router updates to use new events, remove old wake regex.
+- [ ] **M5 – Timeouts & Resumption Logic**
+   - [ ] Wire wake activation's idle-timeout branch to publish `tts/control` resume events once pause handling exists.
+   - [ ] Update router to consume `wake/event` `timeout/resume/cancelled` types and retire regex wake detection.
+   - [ ] Add integration coverage that exercises timeout → resume, timeout → session close, and ensures metrics/logging capture the transitions.
 
-7. **M6 – Hardening & Observability**
+- [ ] **M6 – Hardening & Observability**
    - Structured logging, metrics (detection count, false triggers, pause durations).
    - Health endpoints, watchdog for audio pipeline stalls.
    - Docs (README + operations guide) and add `make wake-check` smoke test.
+
+## 10) Next Milestone (M4) Action Items
+
+1. ✅ Ensure observer callbacks fire for all Piper player spawns to support downstream pause/resume orchestration.
+2. ✅ Extend the TTS worker to honor pause/resume/stop commands issued during double wake interactions.
+3. ✅ Implement wake activation logic to publish `wake/event` type `interrupt`, coordinate cancel phrases, and resume playback on timeout.
+4. ✅ Author integration coverage that simulates double wake scenarios and validates TTS pause/resume behavior end-to-end.
+5. Update service docs with interrupt lifecycle diagrams once the flow is implemented.
+
+## 11) Next Milestone (M5) Early Prep
+
+Once M4 control paths are stable, immediately begin validating the timeout/resume orchestration:
+
+- Draft MQTT contract tests that assert `wake/event` type `timeout` drives router window closure when no follow-up speech arrives.
+- Prototype a metrics counter for idle timeouts vs. cancels so we can observe regressions while finishing M5.
+- Capture any configuration deltas needed for `WAKE_IDLE_TIMEOUT_SEC` tuning ahead of the implementation sprint.
 
 ## 8) Risks & Mitigations
 

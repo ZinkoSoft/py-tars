@@ -10,9 +10,45 @@ import time
 import re
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Callable
 
 
 logger = logging.getLogger("tts-worker.piper")
+
+
+_PLAYER_OBSERVER: Callable[[subprocess.Popen, str], None] | None = None
+_STOP_CHECKER: Callable[[], bool] | None = None
+
+
+def set_player_observer(observer: Callable[[subprocess.Popen, str], None] | None) -> None:
+    global _PLAYER_OBSERVER
+    _PLAYER_OBSERVER = observer
+
+
+def set_stop_checker(checker: Callable[[], bool] | None) -> None:
+    global _STOP_CHECKER
+    _STOP_CHECKER = checker
+
+
+def _notify_observer(proc: subprocess.Popen, role: str) -> None:
+    observer = _PLAYER_OBSERVER
+    if observer is None:
+        return
+    try:
+        observer(proc, role)
+    except Exception:
+        logger.debug("player observer raised", exc_info=True)
+
+
+def _should_abort() -> bool:
+    checker = _STOP_CHECKER
+    if checker is None:
+        return False
+    try:
+        return bool(checker())
+    except Exception:
+        logger.debug("stop checker raised", exc_info=True)
+        return False
 
 
 try:
@@ -324,7 +360,7 @@ class PiperSynth:
 
         th = threading.Thread(target=_synth_thread, daemon=True)
         th.start()
-        p_play = _spawn_player(stdin=r)
+        p_play = _spawn_player(stdin=r, role="stream-player")
         rc = p_play.wait()
         th.join(timeout=1.0)
         try:
@@ -332,6 +368,9 @@ class PiperSynth:
         except Exception:
             pass
         if rc != 0:
+            if rc < 0 or _should_abort():
+                logger.debug(f"Streaming player exited with code {rc}; aborting playback per stop request")
+                return time.time() - t0
             logger.warning(f"paplay/aplay exited with code {rc}; falling back to file playback")
             return self._file_playback(text)
         return time.time() - t0
@@ -340,13 +379,16 @@ class PiperSynth:
         cmd = ["piper", "-m", self.voice_path, "-f", "-"]
         logger.debug(f"Streaming via Piper CLI -> player: {' '.join(cmd)} | paplay -")
         p_piper = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=False)
-        p_play = _spawn_player(stdin=p_piper.stdout)
+        p_play = _spawn_player(stdin=p_piper.stdout, role="stream-player")
         assert p_piper.stdin is not None
         p_piper.stdin.write(text.encode("utf-8"))
         p_piper.stdin.close()
         rc = p_play.wait()
         p_piper.wait()
         if rc != 0:
+            if rc < 0 or _should_abort():
+                logger.debug(f"CLI streaming player exited with code {rc}; aborting playback per stop request")
+                return time.time() - t0
             logger.warning(f"paplay/aplay exited with code {rc} (CLI stream); falling back to file playback")
             return self._file_playback(text)
         return time.time() - t0
@@ -380,11 +422,13 @@ class PiperSynth:
                 logger.warning(f"simpleaudio playback failed, falling back to system player: {e}")
 
         # Fallback: system player via paplay/aplay
-        p = _spawn_player(args=[path])
+        p = _spawn_player(args=[path], role="playback")
         rc = p.wait()
         if rc != 0:
+            if rc < 0 or _should_abort():
+                return
             # Try alternate player
-            alt = _spawn_player(args=[path], prefer_aplay=True)
+            alt = _spawn_player(args=[path], prefer_aplay=True, role="playback-alt")
             alt.wait()
 
     # ----- helpers -----
@@ -413,16 +457,26 @@ def _supports_wav_file(voice: object) -> bool:
     return any(p.name in ("wav_file", "wavfile", "audio_out") for p in sig.parameters.values())
 
 
-def _spawn_player(stdin=None, args: Optional[list[str]] = None, prefer_aplay: bool = False):
+def _spawn_player(
+    stdin=None,
+    args: Optional[list[str]] = None,
+    prefer_aplay: bool = False,
+    *,
+    role: str = "player",
+):
     """Start paplay/aplay with given stdin or path args."""
     if args is None:
         args = ["-"]
     if prefer_aplay:
         try:
-            return subprocess.Popen(["aplay", *args], stdin=stdin)
+            proc = subprocess.Popen(["aplay", *args], stdin=stdin)
         except FileNotFoundError:
-            return subprocess.Popen(["paplay", *args], stdin=stdin)
+            proc = subprocess.Popen(["paplay", *args], stdin=stdin)
+        _notify_observer(proc, role)
+        return proc
     try:
-        return subprocess.Popen(["paplay", *args], stdin=stdin)
+        proc = subprocess.Popen(["paplay", *args], stdin=stdin)
     except FileNotFoundError:
-        return subprocess.Popen(["aplay", *args], stdin=stdin)
+        proc = subprocess.Popen(["aplay", *args], stdin=stdin)
+    _notify_observer(proc, role)
+    return proc

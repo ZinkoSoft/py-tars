@@ -1,0 +1,72 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Mapping, MutableMapping, Optional
+import os
+
+
+@dataclass(slots=True)
+class WakeActivationConfig:
+    """Typed configuration for the wake activation service."""
+
+    mqtt_url: str = field(default_factory=lambda: os.getenv("MQTT_URL", "mqtt://tars:pass@127.0.0.1:1883"))
+    audio_fanout_path: Path = field(
+        default_factory=lambda: Path(os.getenv("WAKE_AUDIO_FANOUT", "/tmp/tars/audio-fanout.sock"))
+    )
+    wake_model_path: Path = field(
+        default_factory=lambda: Path(os.getenv("WAKE_MODEL_PATH", "/models/openwakeword/hey_tars.tflite"))
+    )
+    wake_detection_threshold: float = field(
+        default_factory=lambda: float(os.getenv("WAKE_DETECTION_THRESHOLD", "0.55"))
+    )
+    min_retrigger_sec: float = field(default_factory=lambda: float(os.getenv("WAKE_MIN_RETRIGGER_SEC", "1.0")))
+    interrupt_window_sec: float = field(
+        default_factory=lambda: float(os.getenv("WAKE_INTERRUPT_WINDOW_SEC", "2.5"))
+    )
+    idle_timeout_sec: float = field(default_factory=lambda: float(os.getenv("WAKE_IDLE_TIMEOUT_SEC", "3.0")))
+    health_topic: str = field(default_factory=lambda: os.getenv("WAKE_HEALTH_TOPIC", "wake/health"))
+    wake_event_topic: str = field(default_factory=lambda: os.getenv("WAKE_EVENT_TOPIC", "wake/event"))
+    mic_control_topic: str = field(default_factory=lambda: os.getenv("WAKE_MIC_TOPIC", "wake/mic"))
+    tts_control_topic: str = field(default_factory=lambda: os.getenv("WAKE_TTS_TOPIC", "tts/control"))
+    tts_status_topic: str = field(default_factory=lambda: os.getenv("WAKE_TTS_STATUS_TOPIC", "tts/status"))
+    stt_final_topic: str = field(default_factory=lambda: os.getenv("WAKE_STT_FINAL_TOPIC", "stt/final"))
+    detection_window_ms: int = field(default_factory=lambda: int(os.getenv("WAKE_DETECTION_WINDOW_MS", "750")))
+    health_interval_sec: float = field(default_factory=lambda: float(os.getenv("WAKE_HEALTH_INTERVAL_SEC", "15")))
+    log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
+
+    @classmethod
+    def from_env(cls, env: Optional[Mapping[str, str]] = None) -> "WakeActivationConfig":
+        """Create a configuration instance from a mapping (defaults to os.environ)."""
+
+        if env is None:
+            return cls()
+
+        # For testability allow passing an explicit mapping; convert to mutable copy for pop().
+        data: MutableMapping[str, str] = dict(env)
+
+        def _pop(key: str, default: str) -> str:
+            return data.pop(key, default)
+
+        config = cls(
+            mqtt_url=_pop("MQTT_URL", cls().mqtt_url),
+            audio_fanout_path=Path(_pop("WAKE_AUDIO_FANOUT", str(cls().audio_fanout_path))),
+            wake_model_path=Path(_pop("WAKE_MODEL_PATH", str(cls().wake_model_path))),
+            wake_detection_threshold=float(_pop("WAKE_DETECTION_THRESHOLD", str(cls().wake_detection_threshold))),
+            min_retrigger_sec=float(_pop("WAKE_MIN_RETRIGGER_SEC", str(cls().min_retrigger_sec))),
+            interrupt_window_sec=float(_pop("WAKE_INTERRUPT_WINDOW_SEC", str(cls().interrupt_window_sec))),
+            idle_timeout_sec=float(_pop("WAKE_IDLE_TIMEOUT_SEC", str(cls().idle_timeout_sec))),
+            health_topic=_pop("WAKE_HEALTH_TOPIC", cls().health_topic),
+            wake_event_topic=_pop("WAKE_EVENT_TOPIC", cls().wake_event_topic),
+            mic_control_topic=_pop("WAKE_MIC_TOPIC", cls().mic_control_topic),
+            tts_control_topic=_pop("WAKE_TTS_TOPIC", cls().tts_control_topic),
+            tts_status_topic=_pop("WAKE_TTS_STATUS_TOPIC", cls().tts_status_topic),
+            stt_final_topic=_pop("WAKE_STT_FINAL_TOPIC", cls().stt_final_topic),
+            detection_window_ms=int(_pop("WAKE_DETECTION_WINDOW_MS", str(cls().detection_window_ms))),
+            health_interval_sec=float(_pop("WAKE_HEALTH_INTERVAL_SEC", str(cls().health_interval_sec))),
+            log_level=_pop("LOG_LEVEL", cls().log_level),
+        )
+        if data:
+            unknown = ", ".join(sorted(data))
+            raise ValueError(f"Unknown wake activation config keys: {unknown}")
+        return config
