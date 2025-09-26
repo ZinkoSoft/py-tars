@@ -16,7 +16,7 @@ Data contracts (JSON over MQTT):
 - LLM stream (topic: llm/stream): { id, seq, delta, done }
 """
 
-import asyncio, os, logging, uuid, re, time
+import asyncio, os, logging, uuid, re, time, itertools
 import orjson as json
 from urllib.parse import urlparse
 from dataclasses import dataclass, field
@@ -55,6 +55,7 @@ class Config:
     topic_llm_resp: str = os.getenv("TOPIC_LLM_RESPONSE", "llm/response")
     topic_llm_stream: str = os.getenv("TOPIC_LLM_STREAM", "llm/stream")
     topic_llm_cancel: str = os.getenv("TOPIC_LLM_CANCEL", "llm/cancel")
+    topic_wake_event: str = os.getenv("TOPIC_WAKE_EVENT", "wake/event")
     # LLM → TTS streaming
     router_llm_tts_stream: bool = os.getenv("ROUTER_LLM_TTS_STREAM", "1").lower() in ("1", "true", "yes", "on")
     stream_min_chars: int = int(os.getenv("ROUTER_STREAM_MIN_CHARS", os.getenv("STREAM_MIN_CHARS", "60")))
@@ -67,8 +68,15 @@ class Config:
     # Wake word + live mode gating
     wake_phrases_raw: str = os.getenv("ROUTER_WAKE_PHRASES", os.getenv("WAKE_PHRASES", "hey tars"))
     wake_window_sec: float = float(os.getenv("ROUTER_WAKE_WINDOW_SEC", "8"))
+    wake_ack_enabled: bool = os.getenv("ROUTER_WAKE_ACK_ENABLED", "1").lower() in ("1", "true", "yes", "on")
     wake_ack_text: str = os.getenv("ROUTER_WAKE_ACK_TEXT", "Yes?")
+    wake_ack_choices_raw: str = os.getenv("ROUTER_WAKE_ACK_CHOICES", os.getenv("WAKE_ACK_CHOICES", "Hmm?|Huh?|Yes?"))
+    wake_ack_style: str = os.getenv("ROUTER_WAKE_ACK_STYLE", "friendly")
     wake_reprompt_text: str = os.getenv("ROUTER_WAKE_REPROMPT_TEXT", "")
+    wake_interrupt_text: str = os.getenv("ROUTER_WAKE_INTERRUPT_TEXT", "")
+    wake_resume_text: str = os.getenv("ROUTER_WAKE_RESUME_TEXT", "")
+    wake_cancel_text: str = os.getenv("ROUTER_WAKE_CANCEL_TEXT", "")
+    wake_timeout_text: str = os.getenv("ROUTER_WAKE_TIMEOUT_TEXT", "")
     live_mode_default: bool = os.getenv("ROUTER_LIVE_MODE_DEFAULT", "0").lower() in ("1", "true", "yes", "on")
     live_mode_enter_phrase: str = os.getenv("ROUTER_LIVE_MODE_ENTER_PHRASE", "enter live mode")
     live_mode_exit_phrase: str = os.getenv("ROUTER_LIVE_MODE_EXIT_PHRASE", "exit live mode")
@@ -77,12 +85,31 @@ class Config:
     live_mode_active_hint: str = os.getenv("ROUTER_LIVE_MODE_ACTIVE_HINT", "Live mode is already active.")
     live_mode_inactive_hint: str = os.getenv("ROUTER_LIVE_MODE_INACTIVE_HINT", "Live mode is already off.")
     wake_phrases: Tuple[str, ...] = field(init=False)
+    wake_ack_choices: Tuple[str, ...] = field(init=False)
 
     def __post_init__(self) -> None:
         phrases = [p.strip().lower() for p in self.wake_phrases_raw.split("|") if p.strip()]
         self.wake_phrases = tuple(phrases) if phrases else ("hey tars",)
         self.live_mode_enter_phrase = self.live_mode_enter_phrase.strip().lower()
         self.live_mode_exit_phrase = self.live_mode_exit_phrase.strip().lower()
+        self.wake_ack_enabled = bool(self.wake_ack_enabled)
+        self.wake_ack_text = (self.wake_ack_text or "").strip()
+        self.wake_ack_style = (self.wake_ack_style or "neutral").strip() or "neutral"
+        ack_choices = [p.strip() for p in self.wake_ack_choices_raw.split("|") if p.strip()]
+        default_choices: Tuple[str, ...] = ("Hmm?", "Huh?", "Yes?")
+        if not ack_choices:
+            ack_choices = list(default_choices)
+        self.wake_ack_choices = tuple(ack_choices)
+        if not self.wake_ack_text and self.wake_ack_choices:
+            self.wake_ack_text = self.wake_ack_choices[0]
+        if not self.wake_ack_enabled:
+            self.wake_ack_choices = ()
+            self.wake_ack_text = ""
+        self.wake_reprompt_text = self.wake_reprompt_text.strip()
+        self.wake_interrupt_text = self.wake_interrupt_text.strip()
+        self.wake_resume_text = self.wake_resume_text.strip()
+        self.wake_cancel_text = self.wake_cancel_text.strip()
+        self.wake_timeout_text = self.wake_timeout_text.strip()
 
 
 @dataclass
@@ -103,6 +130,7 @@ class TtsSay:
     utt_id: Optional[str] = None
     style: Optional[str] = None
     stt_ts: Optional[float] = None
+    wake_ack: Optional[bool] = None
 
 
 class RouterService:
@@ -113,8 +141,10 @@ class RouterService:
         self.llm_buf: Dict[str, str] = {}
         self.live_mode: bool = cfg.live_mode_default
         self.wake_active_until: float = 0.0
+        self.wake_session_active: bool = False
         wake_pattern = "|".join(re.escape(phrase) for phrase in self.cfg.wake_phrases)
         self.wake_regex = re.compile(rf"^\s*(?:{wake_pattern})\b[\s,]*", re.IGNORECASE)
+        self._wake_ack_cycle = itertools.cycle(self.cfg.wake_ack_choices) if self.cfg.wake_ack_choices else None
 
     @staticmethod
     def parse_mqtt(url: str):
@@ -124,10 +154,24 @@ class RouterService:
     async def publish(self, client: mqtt.Client, topic: str, payload: dict) -> None:
         await client.publish(topic, json.dumps(payload))
 
-    async def _speak(self, client: mqtt.Client, text: str, style: str = "neutral", utt_id: Optional[str] = None) -> None:
+    async def _speak(
+        self,
+        client: mqtt.Client,
+        text: str,
+        style: str = "neutral",
+        utt_id: Optional[str] = None,
+        wake_ack: bool | None = None,
+    ) -> None:
         if not text:
             return
-        say = TtsSay(text=text, voice="piper/en_US/amy", lang="en", utt_id=utt_id, style=style)
+        say = TtsSay(
+            text=text,
+            voice="piper/en_US/amy",
+            lang="en",
+            utt_id=utt_id,
+            style=style,
+            wake_ack=wake_ack,
+        )
         await self.publish(client, self.cfg.topic_tts_say, say.__dict__)
 
     @staticmethod
@@ -141,6 +185,14 @@ class RouterService:
             return None
         remainder = text[match.end():].strip()
         return remainder
+
+    def _open_wake_window(self) -> None:
+        self.wake_session_active = True
+        self.wake_active_until = time.monotonic() + self.cfg.wake_window_sec
+
+    def _close_wake_window(self) -> None:
+        self.wake_session_active = False
+        self.wake_active_until = 0.0
 
     # ---------- Rule routing ----------
     @staticmethod
@@ -228,6 +280,53 @@ class RouterService:
                 ).__dict__,
             )
 
+    async def handle_wake_event(self, client: mqtt.Client, payload: bytes) -> None:
+        try:
+            data = json.loads(payload)
+        except Exception:
+            logger.warning("Invalid wake/event payload (non-JSON)")
+            return
+
+        event_type = str(data.get("type") or "").lower()
+        tts_id = data.get("tts_id")
+
+        if event_type == "wake":
+            logger.info("Wake event received; opening window for %.1fs", self.cfg.wake_window_sec)
+            self._open_wake_window()
+            ack_text = None
+            if self._wake_ack_cycle is not None:
+                ack_text = next(self._wake_ack_cycle)
+            elif self.cfg.wake_ack_text:
+                ack_text = self.cfg.wake_ack_text
+            if ack_text:
+                ack_utt_id = tts_id or f"wake-ack-{int(time.time() * 1000)}"
+                logger.debug("Wake ack utterance id=%s text=%s", ack_utt_id, ack_text)
+                await self._speak(client, ack_text, style=self.cfg.wake_ack_style, utt_id=ack_utt_id, wake_ack=True)
+            if self.cfg.wake_reprompt_text:
+                await self._speak(client, self.cfg.wake_reprompt_text, utt_id=tts_id)
+        elif event_type == "interrupt":
+            logger.info("Wake interrupt event; keeping window open for %.1fs", self.cfg.wake_window_sec)
+            self._open_wake_window()
+            if self.cfg.wake_interrupt_text:
+                await self._speak(client, self.cfg.wake_interrupt_text, utt_id=tts_id)
+        elif event_type == "resume":
+            logger.info("Wake resume event received; closing window")
+            self._close_wake_window()
+            if self.cfg.wake_resume_text:
+                await self._speak(client, self.cfg.wake_resume_text, utt_id=tts_id)
+        elif event_type == "cancelled":
+            logger.info("Wake cancelled event received; closing window")
+            self._close_wake_window()
+            if self.cfg.wake_cancel_text:
+                await self._speak(client, self.cfg.wake_cancel_text, utt_id=tts_id)
+        elif event_type == "timeout":
+            logger.info("Wake timeout event received; closing window")
+            self._close_wake_window()
+            if self.cfg.wake_timeout_text:
+                await self._speak(client, self.cfg.wake_timeout_text, utt_id=tts_id)
+        else:
+            logger.debug("Ignoring wake/event type=%s", event_type)
+
     async def handle_stt_final(self, client: mqtt.Client, payload: bytes) -> None:
         try:
             data = json.loads(payload)
@@ -243,48 +342,38 @@ class RouterService:
 
         raw_text = u.text.strip()
         now = time.monotonic()
-        candidate_text = raw_text
-        gating_reason: Optional[str] = "live-mode" if self.live_mode else None
-        wake_triggered = False
 
-        if not self.live_mode:
-            remainder = self._strip_wake_phrase(raw_text)
-            if remainder is not None:
-                if remainder:
-                    candidate_text = remainder
-                    wake_triggered = True
-                    gating_reason = "wake-query"
-                    self.wake_active_until = 0.0
-                    logger.info("Wake phrase with inline query detected; routing remainder")
-                else:
-                    self.wake_active_until = now + self.cfg.wake_window_sec
-                    logger.info("Wake phrase detected; opening window %.1fs", self.cfg.wake_window_sec)
-                    await self._speak(client, self.cfg.wake_ack_text, utt_id=u.utt_id)
-                    if self.cfg.wake_reprompt_text:
-                        await self._speak(client, self.cfg.wake_reprompt_text, utt_id=u.utt_id)
-                    return
-            elif now < self.wake_active_until:
-                wake_triggered = True
-                gating_reason = "wake-window"
-                logger.info("Within wake window (%.1fs remaining); routing", self.wake_active_until - now)
-                self.wake_active_until = 0.0
-            else:
-                gating_reason = None
+        if self.wake_session_active and now > self.wake_active_until:
+            logger.info("Wake window expired (%.1fs past deadline)", now - self.wake_active_until)
+            self._close_wake_window()
+
+        candidate_text = raw_text
+        remainder = self._strip_wake_phrase(raw_text)
+        if remainder is not None and remainder:
+            candidate_text = remainder
+
+        window_active = self.wake_session_active
+        gating_reason: Optional[str] = None
+        if self.live_mode:
+            gating_reason = "live-mode"
+        elif window_active:
+            gating_reason = "wake-event"
+
+        if not self.live_mode and not window_active:
+            logger.info("Dropping utterance outside wake session: %s", candidate_text)
+            return
 
         norm_candidate = self._normalize_command(candidate_text)
-        command_allowed = self.live_mode or wake_triggered
 
         if norm_candidate == self.cfg.live_mode_enter_phrase:
             if self.live_mode:
                 logger.info("Live mode already active")
                 await self._speak(client, self.cfg.live_mode_active_hint, utt_id=u.utt_id)
-            elif command_allowed:
+            else:
                 logger.info("Enabling live mode via command")
                 self.live_mode = True
-                self.wake_active_until = 0.0
+                self._close_wake_window()
                 await self._speak(client, self.cfg.live_mode_enter_ack, utt_id=u.utt_id)
-            else:
-                logger.info("Ignoring live mode enable outside wake window")
             return
 
         if norm_candidate == self.cfg.live_mode_exit_phrase:
@@ -294,13 +383,12 @@ class RouterService:
             else:
                 logger.info("Disabling live mode via command")
                 self.live_mode = False
-                self.wake_active_until = 0.0
+                self._close_wake_window()
                 await self._speak(client, self.cfg.live_mode_exit_ack, utt_id=u.utt_id)
             return
 
-        if not self.live_mode and not wake_triggered:
-            logger.info("Dropping utterance outside wake window: %s", candidate_text)
-            return
+        if window_active:
+            self._close_wake_window()
 
         logger.debug("Routing utterance via %s", gating_reason or "wake")
 
@@ -415,6 +503,7 @@ class RouterService:
                             self.cfg.topic_llm_stream,
                             self.cfg.topic_llm_resp,
                             self.cfg.topic_llm_cancel,
+                            self.cfg.topic_wake_event,
                         ]
                         for t in topics:
                             await client.subscribe(t)
@@ -436,6 +525,8 @@ class RouterService:
                                     await self.handle_llm_response(client, m.payload)
                                 elif topic == self.cfg.topic_llm_stream:
                                     await self.handle_llm_stream(client, m.payload)
+                                elif topic == self.cfg.topic_wake_event:
+                                    await self.handle_wake_event(client, m.payload)
                             except Exception as e:
                                 logger.error("Error processing message: %s", e)
                                 await self.publish(client, "system/health/router", {"ok": False, "err": str(e)})

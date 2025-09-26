@@ -14,7 +14,7 @@ coordinating microphone mute/unmute plus TTS interruption behavior.
 ## Running locally
 
 ```bash
-pip install -e .
+pip install -e ".[openwakeword]"
 python -m wake_activation
 ```
 
@@ -42,8 +42,10 @@ Environment variables (defaults in parentheses):
 pytest tests
 ```
 
-> **Note:** Install the optional wake-word inference dependency with `pip install -e .[openwakeword]` when
-> you're ready to exercise the detector offline.
+> **Note:** The wake detector relies on the OpenWakeWord extra; make sure you install with
+> `pip install -e ".[openwakeword]"` before running either locally or in Docker. The package pins
+> `numpy<2.0` because the bundled `tflite-runtime` wheels are not yet compatible with NumPy 2.x, and
+> the Docker image pre-fetches the OpenWakeWord feature resources (melspectrogram + VAD) at build time.
 
 ## Regression fixtures
 

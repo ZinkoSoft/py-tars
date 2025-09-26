@@ -99,6 +99,29 @@ async def test_idle_timeout_emits_timeout_event() -> None:
 
 
 @pytest.mark.asyncio
+async def test_idle_timeout_resumes_when_interrupt_active() -> None:
+    cfg = WakeActivationConfig(idle_timeout_sec=0.0)
+    service = WakeActivationService(cfg)
+    client = FakeClient()
+    context = InterruptContext(tts_id="utt-timeout", started_at=time.monotonic(), deadline=time.monotonic() + 1.0)
+    service._active_interrupt = context
+    service._tts_state = "paused"
+
+    await service._idle_timeout_flow(client, session_id=7)
+
+    assert len(client.published) == 2
+    timeout_event = orjson.loads(client.published[0][1])
+    resume_control = orjson.loads(client.published[1][1])
+
+    assert timeout_event["type"] == "timeout"
+    assert timeout_event["tts_id"] == "utt-timeout"
+    assert resume_control == {"action": "resume", "reason": "wake_timeout", "id": "utt-timeout"}
+    assert service._active_interrupt is None
+    assert service._tts_state == "speaking"
+    assert service._tts_utt_id == "utt-timeout"
+
+
+@pytest.mark.asyncio
 async def test_stt_mic_ttl_remutes_after_idle_timeout() -> None:
     cfg = WakeActivationConfig(idle_timeout_sec=0.05)
     service = WakeActivationService(cfg)

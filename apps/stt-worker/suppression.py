@@ -16,7 +16,7 @@ import re
 import logging
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Deque, List, Tuple, Dict, Optional
+from typing import Deque, Tuple, Dict, Optional
 import numpy as np
 
 from config import (

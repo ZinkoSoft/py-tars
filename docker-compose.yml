@@ -22,6 +22,7 @@ services:
     volumes:
       - /run/user/1000/pulse:/run/user/1000/pulse:ro
       - ./models/whisper:/host-models
+      - /tmp/tars:/tmp/tars
     environment:
       # Broker URL assembled from global creds/host/port
       - MQTT_URL=mqtt://$MQTT_USER:$MQTT_PASS@$MQTT_HOST:$MQTT_PORT
@@ -38,6 +39,27 @@ services:
       - CHUNK_DURATION_MS=${CHUNK_DURATION_MS:-20}
       - VAD_AGGRESSIVENESS=${VAD_AGGRESSIVENESS:-3}
       - SAMPLE_RATE=${SAMPLE_RATE:-16000}
+      - AUDIO_FANOUT_PATH=${WAKE_AUDIO_FANOUT:-/tmp/tars/audio-fanout.sock}
+
+  wake-activation:
+    build:
+      context: .
+      dockerfile: apps/wake-activation/Dockerfile
+    container_name: tars-wake-activation
+    network_mode: host
+    env_file: .env
+    depends_on:
+      - mqtt
+      - stt
+    volumes:
+      - ./models/openwakeword:/models/openwakeword:ro
+      - /tmp/tars:/tmp/tars
+    environment:
+      - MQTT_URL=mqtt://$MQTT_USER:$MQTT_PASS@$MQTT_HOST:$MQTT_PORT
+      - WAKE_AUDIO_FANOUT=${WAKE_AUDIO_FANOUT:-/tmp/tars/audio-fanout.sock}
+      - WAKE_MODEL_PATH=${WAKE_MODEL_PATH:-/models/openwakeword/hey_tars.tflite}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    restart: unless-stopped
 
   router:
     build: ./apps/router

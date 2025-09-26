@@ -101,13 +101,14 @@ class TTSService:
                 utt_id=self._normalize_utt_id(utt_id),
                 streaming_override=False,
                 pipeline_override=False,
+                wake_ack=False,
             )
         else:
             texts = [t.strip() for t in self._agg_texts if t and t.strip()]
             self._agg_texts.clear()
             self._agg_id = None
             for t in texts:
-                await self._speak(client, t, stt_ts, utt_id=self._normalize_utt_id(utt_id))
+                await self._speak(client, t, stt_ts, utt_id=self._normalize_utt_id(utt_id), wake_ack=False)
 
     @staticmethod
     def md_to_text(md: str) -> str:
@@ -136,12 +137,15 @@ class TTSService:
         utt_id: Optional[str],
         reason: Optional[str] = None,
         log_level: int = logging.INFO,
+        wake_ack: Optional[bool] = None,
     ) -> None:
         payload: dict[str, Any] = {"event": event, "text": text, "timestamp": time.time()}
         if utt_id:
             payload["utt_id"] = utt_id
         if reason:
             payload["reason"] = reason
+        if wake_ack is not None:
+            payload["wake_ack"] = wake_ack
         message = json.dumps(payload)
         await mqtt_client.publish(STATUS_TOPIC, message)
         logger.log(log_level, "Published TTS %s status: %s", event, message)
@@ -181,18 +185,34 @@ class TTSService:
             return
         stt_ts = data.get("stt_ts") or data.get("timestamp")
         utt_id_raw = data.get("utt_id")
+        style = data.get("style")
+        wake_ack = bool(data.get("wake_ack", False))
+        logger.info(
+            "TTS request received: text='%s' len=%d utt_id=%s style=%s streaming=%s pipeline=%s",
+            text[:80].replace("\n", " ") + ("..." if len(text) > 80 else ""),
+            len(text),
+            utt_id_raw,
+            style,
+            bool(TTS_STREAMING),
+            bool(TTS_PIPELINE),
+        )
         if TTS_AGGREGATE and isinstance(utt_id_raw, str) and utt_id_raw:
-            loop = asyncio.get_running_loop()
-            if self._agg_id and self._agg_id != utt_id_raw and self._agg_texts:
-                await self._flush_aggregate(client, stt_ts)
-            self._agg_id = utt_id_raw
-            self._agg_texts.append(text)
-            self._schedule_flush(loop, client, stt_ts)
-            return
+            if wake_ack:
+                logger.debug("Bypassing aggregation for wake ack utterance")
+            else:
+                loop = asyncio.get_running_loop()
+                if self._agg_id and self._agg_id != utt_id_raw and self._agg_texts:
+                    await self._flush_aggregate(client, stt_ts)
+                self._agg_id = utt_id_raw
+                self._agg_texts.append(text)
+                self._schedule_flush(loop, client, stt_ts)
+                return
         # Non-aggregated path or missing utt_id: flush any pending aggregate first
         if self._agg_texts:
             await self._flush_aggregate(client, stt_ts)
-        await self._speak(client, text, stt_ts, utt_id=self._normalize_utt_id(utt_id_raw if isinstance(utt_id_raw, str) else None))
+        normalized_id = self._normalize_utt_id(utt_id_raw if isinstance(utt_id_raw, str) else None)
+        await self._speak(client, text, stt_ts, utt_id=normalized_id, wake_ack=wake_ack)
+        logger.info("TTS playback finished for utt_id=%s wake_ack=%s", normalized_id, wake_ack)
 
     async def _handle_control_message(self, client: mqtt.Client, data: Any) -> None:
         try:
@@ -223,6 +243,7 @@ class TTSService:
         utt_id: Optional[str] = None,
         streaming_override: bool | None = None,
         pipeline_override: bool | None = None,
+        wake_ack: bool = False,
     ) -> None:
         if self._play_lock.locked():
             logger.debug("Playback busy; queuing next utterance (len=%d)", len(text or ""))
@@ -231,7 +252,13 @@ class TTSService:
             self._current_session = session
             try:
                 logger.debug("Playback start (len=%d)", len(text or ""))
-                await self._publish_status(mqtt_client, event="speaking_start", text=text, utt_id=session.utt_id)
+                await self._publish_status(
+                    mqtt_client,
+                    event="speaking_start",
+                    text=text,
+                    utt_id=session.utt_id,
+                    wake_ack=wake_ack,
+                )
 
                 t0 = time.time()
                 streaming = bool(TTS_STREAMING) if streaming_override is None else bool(streaming_override)
@@ -255,6 +282,7 @@ class TTSService:
                     text=text,
                     utt_id=session.utt_id,
                     reason=reason,
+                    wake_ack=wake_ack,
                 )
                 logger.debug("Playback end (len=%d)", len(text or ""))
             finally:

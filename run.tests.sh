@@ -40,7 +40,7 @@ install_requirements() {
     "apps/memory-worker/requirements.txt"
     "apps/ui/requirements.txt"
     "apps/ui-web/requirements.txt"
-    "server/stt-ws/requirements.txt"
+    "server/stt-ws/requirements.txt"    
   )
 
   for rel_path in "${requirements[@]}"; do

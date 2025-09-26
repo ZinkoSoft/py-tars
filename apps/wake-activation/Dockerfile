@@ -7,9 +7,11 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /opt/wake-activation
 
-COPY pyproject.toml ./
-COPY wake_activation ./wake_activation
+COPY apps/wake-activation/pyproject.toml ./
+COPY apps/wake-activation/wake_activation ./wake_activation
 COPY models/openwakeword /models/openwakeword
-RUN pip install --upgrade pip && pip install -e .
+RUN pip install --upgrade pip \
+    && pip install -e ".[openwakeword]" \
+    && python -c "import openwakeword.utils as u; u.download_models(model_names=['__feature_only__'])"
 
 CMD ["python", "-m", "wake_activation"]

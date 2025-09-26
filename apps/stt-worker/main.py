@@ -11,11 +11,29 @@ import time
 import numpy as np
 import orjson
 
+from audio_fanout import AudioFanoutPublisher
 from config import (
-    LOG_LEVEL, MQTT_URL, POST_PUBLISH_COOLDOWN_MS, TTS_BASE_MUTE_MS, TTS_PER_CHAR_MS, TTS_MAX_MUTE_MS,
-    STREAMING_PARTIALS, PARTIAL_INTERVAL_MS, PARTIAL_MIN_DURATION_MS, PARTIAL_MIN_CHARS, PARTIAL_MIN_NEW_CHARS,
-    PARTIAL_ALPHA_RATIO_MIN, STT_BACKEND, UNMUTE_GUARD_MS,
-    FFT_PUBLISH, FFT_TOPIC, FFT_RATE_HZ, FFT_BINS, FFT_LOG_SCALE
+    LOG_LEVEL,
+    MQTT_URL,
+    POST_PUBLISH_COOLDOWN_MS,
+    TTS_BASE_MUTE_MS,
+    TTS_PER_CHAR_MS,
+    TTS_MAX_MUTE_MS,
+    STREAMING_PARTIALS,
+    PARTIAL_INTERVAL_MS,
+    PARTIAL_MIN_DURATION_MS,
+    PARTIAL_MIN_CHARS,
+    PARTIAL_MIN_NEW_CHARS,
+    PARTIAL_ALPHA_RATIO_MIN,
+    STT_BACKEND,
+    UNMUTE_GUARD_MS,
+    FFT_PUBLISH,
+    FFT_TOPIC,
+    FFT_RATE_HZ,
+    FFT_BINS,
+    FFT_LOG_SCALE,
+    AUDIO_FANOUT_PATH,
+    AUDIO_FANOUT_RATE,
 )
 from audio_capture import AudioCapture
 from vad import VADProcessor
@@ -47,6 +65,7 @@ class STTWorker:
         self._last_partial_text: str = ""
         self._fft_task = None
         self._wake_ttl_task: asyncio.Task | None = None
+        self.audio_fanout: AudioFanoutPublisher | None = None
 
     async def initialize(self):
         if os.path.exists("/host-models"):
@@ -60,6 +79,9 @@ class STTWorker:
         # Also listen to tts/say to preemptively mute and set echo context, in case we miss 'speaking_start'
         await self.mqtt.subscribe_stream('tts/say', self._handle_tts_say)
         await self.mqtt.subscribe_stream('wake/mic', self._handle_wake_mic)
+        self.audio_fanout = AudioFanoutPublisher(AUDIO_FANOUT_PATH, target_sample_rate=AUDIO_FANOUT_RATE)
+        await self.audio_fanout.start()
+        self.audio_capture.register_fanout(self.audio_fanout)
         # For WS/OpenAI backends we open a network call per utterance; avoid partials to reduce overhead
         self._enable_partials = STREAMING_PARTIALS and STT_BACKEND not in {"ws", "openai"}
         if self._enable_partials:
@@ -80,13 +102,24 @@ class STTWorker:
             data = orjson.loads(payload)
             event = data.get('event')
             txt = data.get('text', '')
+            wake_ack = bool(data.get('wake_ack', False))
             if event == 'speaking_start':
+                if wake_ack:
+                    logger.debug("Wake ack speaking_start received; keeping microphone unmuted")
+                    self.pending_tts = False
+                    if self.audio_capture.is_muted:
+                        self.audio_capture.unmute("tts wake_ack start")
+                        self.recent_unmute_time = time.time()
+                    return
                 self.state.last_tts_text = txt.strip()
                 self.pending_tts = True
                 self.audio_capture.mute("tts speaking_start")
                 if self.fallback_unmute_task and not self.fallback_unmute_task.done():
                     self.fallback_unmute_task.cancel()
             elif event == 'speaking_end':
+                if wake_ack:
+                    logger.debug("Wake ack speaking_end received; no mute adjustments needed")
+                    return
                 async def delayed_unmute():
                     await asyncio.sleep(0.2)
                     self.pending_tts = False
@@ -103,6 +136,12 @@ class STTWorker:
         try:
             data = orjson.loads(payload)
             txt = data.get('text', '')
+            if data.get('wake_ack'):
+                logger.debug("Wake ack TTS received; ensuring microphone is unmuted")
+                self.pending_tts = False
+                self.audio_capture.unmute("wake/ack")
+                self.recent_unmute_time = time.time()
+                return
             if not txt:
                 return
             self.state.last_tts_text = txt.strip()
@@ -137,6 +176,14 @@ class STTWorker:
         reason = data.get('reason', 'wake')
         ttl_ms = data.get('ttl_ms')
 
+        logger.info(
+            "Wake mic command received: action=%s reason=%s ttl_ms=%s muted=%s",
+            action,
+            reason,
+            ttl_ms,
+            self.audio_capture.is_muted,
+        )
+
         if action not in {'mute', 'unmute'}:
             logger.warning(f"Unknown wake/mic action: {action}")
             return
@@ -152,6 +199,7 @@ class STTWorker:
             self.pending_tts = False
             self.audio_capture.unmute(f"wake/{reason}")
             self.recent_unmute_time = time.time()
+            logger.info("Microphone state after wake unmute: muted=%s", self.audio_capture.is_muted)
             logger.info("Wake control unmuted microphone")
             if isinstance(ttl_ms, (int, float)) and ttl_ms > 0:
                 self._wake_ttl_task = asyncio.create_task(self._schedule_wake_ttl('mute', ttl_ms, reason))
@@ -253,6 +301,8 @@ class STTWorker:
             await self.publish_health(False, f"Worker error: {e}")
         finally:
             self.audio_capture.stop_capture()
+            if self.audio_fanout is not None:
+                await self.audio_fanout.close()
             await self.mqtt.disconnect()
 
     async def _partials_loop(self):

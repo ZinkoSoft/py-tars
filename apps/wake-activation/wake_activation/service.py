@@ -393,18 +393,37 @@ class WakeActivationService:
             self._log_action("idle_timeout_cancelled", session=session_id)
             return
 
+        context = self._active_interrupt
+        tts_id = context.tts_id if context is not None else None
         event = WakeEvent(
             type=WakeEventType.TIMEOUT,
             confidence=None,
             energy=None,
             cause="silence",
             ts=time.monotonic(),
+            tts_id=tts_id,
         )
         await self.publish_wake_event(client, event)
+
+        resumed = False
+        if context is not None:
+            await self._cancel_interrupt_timer()
+            resume_cmd = TtsControl(action=TtsAction.RESUME, reason="wake_timeout", id=tts_id)
+            await self.send_tts_command(client, resume_cmd)
+            self._active_interrupt = None
+            self._tts_state = "speaking"
+            self._tts_utt_id = tts_id
+            resumed = True
+        else:
+            self._tts_state = "idle"
+            self._tts_utt_id = None
+
         self._log_action(
             "idle_timeout_triggered",
             session=session_id,
             timeout_sec=self.cfg.idle_timeout_sec,
+            tts_id=tts_id,
+            resumed=resumed,
         )
 
     async def _cancel_idle_timeout(self) -> None:

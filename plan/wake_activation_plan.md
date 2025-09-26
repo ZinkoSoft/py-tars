@@ -151,10 +151,18 @@ Model deployment: store `.json` metadata alongside `.tflite`, mount via Docker v
    - [x] Implement double wake detection logic and speech-cancel window behavior in wake activation.
    - [x] Author integration tests simulating TTS playback with double wake + cancel.
 
-- [ ] **M5 – Timeouts & Resumption Logic**
-   - [ ] Wire wake activation's idle-timeout branch to publish `tts/control` resume events once pause handling exists.
-   - [ ] Update router to consume `wake/event` `timeout/resume/cancelled` types and retire regex wake detection.
-   - [ ] Add integration coverage that exercises timeout → resume, timeout → session close, and ensures metrics/logging capture the transitions.
+- [x] **M5 – Timeouts & Resumption Logic**
+   - [x] Wake activation idle-timeout flow:
+      - [x] Publish `wake/event` type `timeout` alongside `tts/control` `{ action: "resume", reason: "wake_timeout" }` when an interrupt window expires.
+      - [x] Reset `_tts_state`, `_tts_utt_id`, and cancel any pending interrupt timers so the service returns to idle.
+      - [x] Guard against double resume by checking whether the interrupt timer already fired.
+   - [x] Router wake lifecycle:
+      - [x] Subscribe to `wake/event` and drive wake window, live-mode gating, and resume/timeout handling from those messages.
+      - [x] Keep inline wake regex only for trimming phrases from routed utterances; remove it as the wake-window opener.
+      - [x] Publish acknowledgements (wake ack, resume prompt) via `tts/say` in response to the new events.
+   - [x] Coverage & observability:
+      - [x] Extend unit/integration tests for timeout → resume and timeout → session close (router + wake activation).
+      - [ ] Add log assertions/metrics scaffolding to distinguish cancels vs. timeouts for future dashboards.
 
 - [ ] **M6 – Hardening & Observability**
    - Structured logging, metrics (detection count, false triggers, pause durations).
@@ -171,11 +179,9 @@ Model deployment: store `.json` metadata alongside `.tflite`, mount via Docker v
 
 ## 11) Next Milestone (M5) Early Prep
 
-Once M4 control paths are stable, immediately begin validating the timeout/resume orchestration:
-
-- Draft MQTT contract tests that assert `wake/event` type `timeout` drives router window closure when no follow-up speech arrives.
-- Prototype a metrics counter for idle timeouts vs. cancels so we can observe regressions while finishing M5.
-- Capture any configuration deltas needed for `WAKE_IDLE_TIMEOUT_SEC` tuning ahead of the implementation sprint.
+- ✅ Drafted MQTT contract tests validating `wake/event` timeout → router gating.
+- ✅ Captured idle-timeout vs. cancel coverage in unit tests.
+- 🔄 Metrics counter for idle timeouts vs. cancels still to formalize alongside M6 observability.
 
 ## 8) Risks & Mitigations
 

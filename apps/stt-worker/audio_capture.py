@@ -7,14 +7,15 @@ avoid capturing TTS playback. Behavior unchanged; now includes types and docs.
 """
 
 import logging
-import os
 import time
 import threading
 from queue import Queue, Empty
+from typing import AsyncGenerator, Optional
+
 import pyaudio
 import webrtcvad
-from typing import AsyncGenerator
 
+from audio_fanout import AudioFanoutPublisher
 from config import CHUNK_DURATION_MS, UNMUTE_GUARD_MS, SAMPLE_RATE, VAD_AGGRESSIVENESS
 
 logger = logging.getLogger("stt-worker.audio")
@@ -28,8 +29,13 @@ class AudioCapture:
         self.stream = None
         self.audio_queue = Queue()
         self.is_recording = False
-        self.is_muted = False
+        self.is_muted = True
         self.post_unmute_guard_until: float = 0.0
+        self.sample_rate = SAMPLE_RATE
+        self.fanout: Optional[AudioFanoutPublisher] = None
+
+    def register_fanout(self, fanout: AudioFanoutPublisher) -> None:
+        self.fanout = fanout
 
     def mute(self, reason: str = "") -> None:
         if not self.is_muted:
@@ -99,11 +105,15 @@ class AudioCapture:
         self.is_recording = True
         threading.Thread(target=self._capture_loop, daemon=True).start()
         logger.info("Audio capture started")
+        if self.is_muted:
+            logger.info("Microphone starting muted; waiting for wake control to unmute")
 
     def _capture_loop(self) -> None:
         while self.is_recording:
             try:
                 data = self.stream.read(self.frame_size, exception_on_overflow=False)
+                if self.fanout is not None:
+                    self.fanout.push(data, self.sample_rate)
                 now = time.time()
                 if not self.is_muted and now >= self.post_unmute_guard_until:
                     self.audio_queue.put(data)
