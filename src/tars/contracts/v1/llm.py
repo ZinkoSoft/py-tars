@@ -20,6 +20,7 @@ class LLMRequest(BaseLLMMessage):
     text: str
     stream: bool = True
     use_rag: bool | None = None
+    rag_k: int | None = None
     system: str | None = None
     params: dict | None = None
 
@@ -38,6 +39,8 @@ class LLMStreamDelta(BaseLLMMessage):
     seq: int | None = None
     delta: str | None = None
     done: bool = False
+    provider: str | None = None
+    model: str | None = None
 
 
 class LLMCancel(BaseLLMMessage):

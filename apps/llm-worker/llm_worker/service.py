@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from urllib.parse import urlparse
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 
 import asyncio_mqtt as mqtt
 import orjson as json
+from pydantic import ValidationError
 
 from .config import (
     MQTT_URL,
@@ -40,6 +41,23 @@ from .config import (
 )
 from .providers.openai import OpenAIProvider
 
+from tars.contracts.envelope import Envelope  # type: ignore[import]
+from tars.contracts.registry import register  # type: ignore[import]
+from tars.contracts.v1 import (  # type: ignore[import]
+    EVENT_TYPE_LLM_CANCEL,
+    EVENT_TYPE_LLM_REQUEST,
+    EVENT_TYPE_LLM_RESPONSE,
+    EVENT_TYPE_LLM_STREAM,
+    EVENT_TYPE_SAY,
+    LLMRequest,
+    LLMResponse,
+    LLMStreamDelta,
+    TtsSay,
+)
+
+
+SOURCE_NAME = "llm-worker"
+
 
 logging.basicConfig(
     level=LOG_LEVEL,
@@ -56,6 +74,7 @@ def parse_mqtt(url: str):
 
 class LLMService:
     def __init__(self):
+        self._register_topics()
         # Provider selection (only OpenAI for now)
         provider = LLM_PROVIDER.lower()
         if provider == "openai":
@@ -65,6 +84,35 @@ class LLMService:
             self.provider = OpenAIProvider(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL or None)
         # Character/persona state (loaded via MQTT retained message)
         self.character: Dict[str, Any] = {}
+
+    def _register_topics(self) -> None:
+        register(EVENT_TYPE_LLM_CANCEL, TOPIC_LLM_CANCEL)
+        register(EVENT_TYPE_LLM_REQUEST, TOPIC_LLM_REQUEST)
+        register(EVENT_TYPE_LLM_RESPONSE, TOPIC_LLM_RESPONSE)
+        register(EVENT_TYPE_LLM_STREAM, TOPIC_LLM_STREAM)
+        register(EVENT_TYPE_SAY, TOPIC_TTS_SAY)
+
+    def _decode_llm_request(self, payload: bytes) -> Tuple[Optional[LLMRequest], Optional[str]]:
+        envelope: Optional[Envelope] = None
+        try:
+            envelope = Envelope.model_validate_json(payload)
+            data = envelope.data
+        except ValidationError:
+            try:
+                data = json.loads(payload)
+            except Exception:
+                logger.warning("Invalid llm/request payload (unable to parse JSON)")
+                return None, None
+        try:
+            request = LLMRequest.model_validate(data)
+        except ValidationError as exc:
+            logger.warning("Invalid llm/request payload: %s", exc)
+            return None, envelope.id if envelope else None
+        return request, envelope.id if envelope else None
+
+    async def _publish_event(self, client: mqtt.Client, *, event_type: str, topic: str, payload: Any, correlate: Optional[str] = None, qos: int = 1, retain: bool = False) -> None:
+        envelope = Envelope.new(event_type=event_type, data=payload, correlate=correlate, source=SOURCE_NAME)
+        await client.publish(topic, envelope.model_dump_json().encode(), qos=qos, retain=retain)
 
     def _build_system_prompt(self, base_system: str | None = None) -> str | None:
         """Combine character persona and optional base system prompt.
@@ -129,9 +177,9 @@ class LLMService:
             return text[: idx + 1].strip(), text[idx + 1 :].lstrip()
         return "", text
 
-    async def _do_rag(self, client, prompt: str) -> str:
+    async def _do_rag(self, client, prompt: str, top_k: int) -> str:
         try:
-            payload = {"text": prompt, "top_k": RAG_TOP_K}
+            payload = {"text": prompt, "top_k": top_k}
             await client.publish(TOPIC_MEMORY_QUERY, json.dumps(payload))
             # Wait for a single memory/results message; simple heuristic for MVP
             async with client.messages() as mstream:
@@ -145,7 +193,7 @@ class LLMService:
                     if not results:
                         return ""
                     snippets = []
-                    for r in results[:RAG_TOP_K]:
+                    for r in results[:top_k]:
                         doc = r.get("document") or {}
                         t = doc.get("text") or json.dumps(doc)
                         snippets.append(t)
@@ -198,32 +246,38 @@ class LLMService:
                             continue
                         if topic != TOPIC_LLM_REQUEST:
                             continue
-                        try:
-                            req = json.loads(m.payload)
-                        except Exception:
-                            logger.warning("Invalid request payload (non-JSON)")
+                        request, envelope_id = self._decode_llm_request(m.payload)
+                        if request is None:
                             continue
-                        logger.info("llm/request received: %s", req)
-                        req_id = req.get("id") or ""
-                        text = (req.get("text") or "").strip()
+                        logger.info(
+                            "llm/request received id=%s stream=%s use_rag=%s",
+                            request.id,
+                            request.stream,
+                            request.use_rag,
+                        )
+                        text = (request.text or "").strip()
                         if not text:
+                            logger.debug("llm/request ignored id=%s (empty text)", request.id)
                             continue
-                        want_stream = bool(req.get("stream", False))
-                        use_rag = bool(req.get("use_rag", RAG_ENABLED))
-                        rag_k = int(req.get("rag_k", RAG_TOP_K))
-                        system = req.get("system")
-                        params = req.get("params") or {}
+                        want_stream = bool(request.stream)
+                        use_rag = RAG_ENABLED if request.use_rag is None else bool(request.use_rag)
+                        rag_k = request.rag_k if (request.rag_k is not None and request.rag_k > 0) else RAG_TOP_K
+                        system = request.system
+                        params = request.params or {}
                         model = params.get("model", LLM_MODEL)
                         max_tokens = int(params.get("max_tokens", LLM_MAX_TOKENS))
                         temperature = float(params.get("temperature", LLM_TEMPERATURE))
                         top_p = float(params.get("top_p", LLM_TOP_P))
+
+                        req_id = request.id
+                        correlation_id = envelope_id or request.message_id
 
                         # Merge character persona into system prompt
                         system = self._build_system_prompt(system)
 
                         context = ""
                         if use_rag:
-                            context = await self._do_rag(client, text)
+                            context = await self._do_rag(client, text, rag_k)
                         prompt = text
                         if context:
                             prompt = RAG_PROMPT_TEMPLATE.format(context=context, user=text)
@@ -231,9 +285,18 @@ class LLMService:
                         # Fast-fail when required creds are missing (avoid long HTTP timeouts)
                         if isinstance(self.provider, OpenAIProvider) and not OPENAI_API_KEY:
                             logger.warning("OPENAI_API_KEY not set; responding with error for id=%s", req_id)
-                            await client.publish(
-                                TOPIC_LLM_RESPONSE,
-                                json.dumps({"id": req_id, "error": "OPENAI_API_KEY not set", "provider": self.provider.name, "model": model}),
+                            error_resp = LLMResponse(
+                                id=req_id,
+                                error="OPENAI_API_KEY not set",
+                                provider=self.provider.name,
+                                model=model,
+                            )
+                            await self._publish_event(
+                                client,
+                                event_type=EVENT_TYPE_LLM_RESPONSE,
+                                topic=TOPIC_LLM_RESPONSE,
+                                payload=error_resp,
+                                correlate=correlation_id,
                             )
                             continue
 
@@ -251,13 +314,27 @@ class LLMService:
                                     system=system,
                                 ):
                                     seq += 1
-                                    out = {"id": req_id, "seq": seq, "delta": ch.get("delta"), "done": False, "provider": self.provider.name, "model": model}
-                                    logger.debug("llm/stream id=%s seq=%d len=%d", req_id, seq, len(out.get("delta") or ""))
-                                    await client.publish(TOPIC_LLM_STREAM, json.dumps(out))
+                                    delta_text = ch.get("delta")
+                                    out = LLMStreamDelta(
+                                        id=req_id,
+                                        seq=seq,
+                                        delta=delta_text,
+                                        done=False,
+                                        provider=self.provider.name,
+                                        model=model,
+                                    )
+                                    logger.debug("llm/stream id=%s seq=%d len=%d", req_id, seq, len(delta_text or ""))
+                                    await self._publish_event(
+                                        client,
+                                        event_type=EVENT_TYPE_LLM_STREAM,
+                                        topic=TOPIC_LLM_STREAM,
+                                        payload=out,
+                                        correlate=correlation_id,
+                                    )
                                     # Optional: accumulate and forward sentences to TTS.
                                     # Note: Router now bridges LLM -> TTS by default; this path remains behind LLM_TTS_STREAM flag for testing.
                                     if LLM_TTS_STREAM:
-                                        delta = out.get("delta") or ""
+                                        delta = out.delta or ""
                                         if delta:
                                             tts_buf += delta
                                             # If multiple sentence boundaries arrived at once, flush repeatedly
@@ -266,17 +343,35 @@ class LLMService:
                                                 if not sent:
                                                     break
                                                 logger.info("TTS chunk publish len=%d", len(sent))
-                                                await client.publish(TOPIC_TTS_SAY, json.dumps({"text": sent}))
+                                                await self._publish_event(
+                                                    client,
+                                                    event_type=EVENT_TYPE_SAY,
+                                                    topic=TOPIC_TTS_SAY,
+                                                    payload=TtsSay(text=sent),
+                                                    correlate=correlation_id,
+                                                )
                                                 tts_buf = remainder
                                 # Stream end
-                                done = {"id": req_id, "seq": seq + 1, "done": True}
+                                done = LLMStreamDelta(id=req_id, seq=seq + 1, done=True, provider=self.provider.name, model=model)
                                 logger.info("Streaming done for id=%s with %d chunks", req_id, seq)
-                                await client.publish(TOPIC_LLM_STREAM, json.dumps(done))
+                                await self._publish_event(
+                                    client,
+                                    event_type=EVENT_TYPE_LLM_STREAM,
+                                    topic=TOPIC_LLM_STREAM,
+                                    payload=done,
+                                    correlate=correlation_id,
+                                )
                                 # Flush any remainder
                                 if LLM_TTS_STREAM and tts_buf.strip():
                                     final_sent = tts_buf.strip()
                                     logger.info("TTS final chunk publish len=%d", len(final_sent))
-                                    await client.publish(TOPIC_TTS_SAY, json.dumps({"text": final_sent}))
+                                    await self._publish_event(
+                                        client,
+                                        event_type=EVENT_TYPE_SAY,
+                                        topic=TOPIC_TTS_SAY,
+                                        payload=TtsSay(text=final_sent),
+                                        correlate=correlation_id,
+                                    )
                             else:
                                 result = await self.provider.generate(
                                     prompt,
@@ -286,20 +381,35 @@ class LLMService:
                                     top_p=top_p,
                                     system=system,
                                 )
-                                resp = {
-                                    "id": req_id,
-                                    "reply": result.text,
-                                    "provider": self.provider.name,
-                                    "model": model,
-                                    "tokens": result.usage or {},
-                                }
+                                resp = LLMResponse(
+                                    id=req_id,
+                                    reply=result.text,
+                                    provider=self.provider.name,
+                                    model=model,
+                                    tokens=result.usage or {},
+                                )
                                 logger.info("Publishing llm/response for id=%s (len=%d)", req_id, len(result.text or ""))
-                                await client.publish(TOPIC_LLM_RESPONSE, json.dumps(resp))
+                                await self._publish_event(
+                                    client,
+                                    event_type=EVENT_TYPE_LLM_RESPONSE,
+                                    topic=TOPIC_LLM_RESPONSE,
+                                    payload=resp,
+                                    correlate=correlation_id,
+                                )
                         except Exception as e:
                             logger.exception("generation failed")
-                            await client.publish(
-                                TOPIC_LLM_RESPONSE,
-                                json.dumps({"id": req_id, "error": str(e), "provider": self.provider.name, "model": model}),
+                            error_resp = LLMResponse(
+                                id=req_id,
+                                error=str(e),
+                                provider=self.provider.name,
+                                model=model,
+                            )
+                            await self._publish_event(
+                                client,
+                                event_type=EVENT_TYPE_LLM_RESPONSE,
+                                topic=TOPIC_LLM_RESPONSE,
+                                payload=error_resp,
+                                correlate=correlation_id,
                             )
         except Exception as e:
             logger.info("MQTT disconnected or error: %s; shutting down gracefully", e)

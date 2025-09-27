@@ -4,9 +4,17 @@ import httpx
 import asyncio
 import logging
 import time
-from typing import Dict, Any, AsyncIterator
-import json
+from typing import AsyncIterator
+
+from pydantic import ValidationError
+
 from .base import LLMProvider, LLMResult
+from .models import (
+    ChatCompletionRequest,
+    ChatCompletionResponse,
+    StreamChunk,
+    build_messages,
+)
 
 
 logger = logging.getLogger("llm-worker.openai")
@@ -27,19 +35,15 @@ class OpenAIProvider(LLMProvider):
         temperature = kwargs.get("temperature")
         top_p = kwargs.get("top_p")
         system = kwargs.get("system")
-        messages = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
 
-        payload: Dict[str, Any] = {
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "top_p": top_p,
-        }
-        if max_tokens:
-            payload["max_tokens"] = max_tokens
+        payload = ChatCompletionRequest(
+            model=model,
+            messages=build_messages(prompt, system),
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            stream=False,
+        )
 
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         t0 = time.time()
@@ -53,39 +57,38 @@ class OpenAIProvider(LLMProvider):
         )
         logger.debug("prompt preview: %s", (prompt or "")[:120].replace("\n", " "))
         async with httpx.AsyncClient(timeout=self.timeout, base_url=self.base_url) as client:
-            resp = await client.post("/chat/completions", json=payload, headers=headers)
+            resp = await client.post("/chat/completions", json=payload.model_dump(exclude_none=True), headers=headers)
             logger.debug("openai.generate HTTP status=%s", resp.status_code)
             resp.raise_for_status()
             data = resp.json()
-            text = data["choices"][0]["message"]["content"]
-            usage = data.get("usage")
+            try:
+                parsed = ChatCompletionResponse.model_validate(data)
+            except ValidationError as exc:
+                logger.error("openai.generate validation error: %s", exc)
+                raise
+            text = parsed.choices[0].message.content
+            usage = parsed.usage.dict(exclude_none=True) if parsed.usage else None
             dt = time.time() - t0
             logger.info("openai.generate done model=%s reply_len=%d elapsed=%.3fs", model, len(text or ""), dt)
             logger.debug("usage=%s", usage)
             return LLMResult(text=text, usage=usage, model=model, provider=self.name)
 
-    async def stream(self, prompt: str, **kwargs) -> AsyncIterator[Dict[str, Any]]:
+    async def stream(self, prompt: str, **kwargs) -> AsyncIterator[dict[str, str | None]]:
         model = kwargs.get("model")
         temperature = kwargs.get("temperature")
         top_p = kwargs.get("top_p")
         system = kwargs.get("system")
-        messages = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
 
         logger.debug("openai.stream prompt preview: %s", (prompt or "")[:120].replace("\n", " "))
 
-        payload: Dict[str, Any] = {
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "top_p": top_p,
-            "stream": True,
-        }
-        max_tokens = kwargs.get("max_tokens")
-        if max_tokens:
-            payload["max_tokens"] = max_tokens
+        payload = ChatCompletionRequest(
+            model=model,
+            messages=build_messages(prompt, system),
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=kwargs.get("max_tokens"),
+            stream=True,
+        )
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -104,7 +107,12 @@ class OpenAIProvider(LLMProvider):
             len(prompt or ""),
         )
         async with httpx.AsyncClient(timeout=None, base_url=self.base_url) as client:
-            async with client.stream("POST", "/chat/completions", json=payload, headers=headers) as resp:
+            async with client.stream(
+                "POST",
+                "/chat/completions",
+                json=payload.model_dump(exclude_none=True),
+                headers=headers,
+            ) as resp:
                 logger.debug("openai.stream HTTP status=%s", resp.status_code)
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():
@@ -125,27 +133,22 @@ class OpenAIProvider(LLMProvider):
                         logger.debug("openai.stream received [DONE]")
                         break
                     try:
-                        chunk = json.loads(data_str)
-                    except Exception as e:
+                        chunk = StreamChunk.model_validate_json(data_str)
+                    except ValidationError as e:
                         logger.debug("openai.stream JSON parse error: %s", e)
                         continue
-                    try:
-                        choices = chunk.get("choices") or []
-                        if not choices:
-                            continue
-                        delta = choices[0].get("delta") or {}
-                        text = delta.get("content")
-                        if text:
-                            if first_dt is None:
-                                first_dt = time.time() - t0
-                                logger.info("openai.stream first_token_latency=%.3fs", first_dt)
-                            total_len += len(text)
-                            chunks += 1
-                            logger.debug("openai.stream chunk #%d len=%d", chunks, len(text))
-                            yield {"delta": text}
-                    except Exception as e:
-                        logger.debug("openai.stream delta parse error: %s", e)
+                    if not chunk.choices:
                         continue
+                    delta = chunk.choices[0].delta
+                    text = delta.content if delta else None
+                    if text:
+                        if first_dt is None:
+                            first_dt = time.time() - t0
+                            logger.info("openai.stream first_token_latency=%.3fs", first_dt)
+                        total_len += len(text)
+                        chunks += 1
+                        logger.debug("openai.stream chunk #%d len=%d", chunks, len(text))
+                        yield {"delta": text}
         dt = time.time() - t0
         logger.info(
             "openai.stream done chunks=%d total_len=%d elapsed=%.3fs first_token_latency=%.3fs",
