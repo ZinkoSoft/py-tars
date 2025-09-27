@@ -14,6 +14,7 @@ from typing import Any
 
 import numpy as np
 import orjson
+from pydantic import BaseModel, ValidationError
 
 SRC_DIR = Path(__file__).resolve().parents[2] / "src"
 if SRC_DIR.exists():
@@ -56,12 +57,27 @@ from audio_preproc import preprocess_pcm
 from config import PREPROCESS_ENABLE, PREPROCESS_MIN_MS
 
 from tars.adapters.mqtt_asyncio import AsyncioMQTTPublisher  # type: ignore[import]
+from tars.contracts.envelope import Envelope  # type: ignore[import]
 from tars.contracts.v1 import (  # type: ignore[import]
+    EVENT_TYPE_SAY,
     EVENT_TYPE_STT_FINAL,
     EVENT_TYPE_STT_PARTIAL,
+    EVENT_TYPE_TTS_STATUS,
+    EVENT_TYPE_WAKE_EVENT,
+    EVENT_TYPE_WAKE_MIC,
     FinalTranscript,
     HealthPing,
     PartialTranscript,
+    TtsSay,
+    TtsStatus,
+    WakeEvent,
+    WakeMicCommand,
+)
+from tars.domain.stt import (  # type: ignore[import]
+    STTProcessResult,
+    STTService,
+    STTServiceConfig,
+    PartialSettings,
 )
 from tars.runtime.publisher import publish_event  # type: ignore[import]
 
@@ -87,12 +103,12 @@ class STTWorker:
         self.recent_unmute_time = 0.0
         self.fallback_unmute_task = None
         self._partials_task = None
-        self._last_partial_text: str = ""
         self._fft_task = None
         self._wake_ttl_task: asyncio.Task | None = None
         self._wake_fallback_task: asyncio.Task | None = None
         self.audio_fanout: AudioFanoutPublisher | None = None
         self._publisher: AsyncioMQTTPublisher | None = None
+        self.service: STTService | None = None
 
     async def initialize(self):
         if os.path.exists("/host-models"):
@@ -126,9 +142,9 @@ class STTWorker:
         payload = HealthPing(ok=ok, event=event_text, err=err_text)
         await self._publish_event(EVENT_TYPE_HEALTH_STT, payload, retain=True)
 
-    async def publish_transcript(self, text: str, confidence: float | None):
-        transcript = FinalTranscript(text=text, confidence=confidence)
+    async def publish_transcript(self, transcript: FinalTranscript):
         message_id = await self._publish_event(EVENT_TYPE_STT_FINAL, transcript, qos=1)
+        text = transcript.text
         preview = text[:60] + ('...' if len(text) > 60 else '')
         logger.info(
             "Published final transcript: %s",
@@ -155,84 +171,115 @@ class STTWorker:
             logger.error("Failed to publish %s: %s", event_type, exc)
             return None
 
-    async def _handle_tts_status(self, payload: bytes):
+    @staticmethod
+    def _decode_event(
+        payload: bytes,
+        model: type[BaseModel],
+        *,
+        event_type: str | None = None,
+    ) -> BaseModel | None:
         try:
-            data = orjson.loads(payload)
-            event = data.get('event')
-            txt = data.get('text', '')
-            wake_ack = bool(data.get('wake_ack', False))
-            if event == 'speaking_start':
-                if wake_ack:
-                    logger.debug("Wake ack speaking_start received; keeping microphone unmuted")
-                    self.pending_tts = False
-                    if self.audio_capture.is_muted:
-                        self.audio_capture.unmute("tts wake_ack start")
-                        self.recent_unmute_time = time.time()
-                    return
-                self.state.last_tts_text = txt.strip()
-                self.pending_tts = True
-                self.audio_capture.mute("tts speaking_start")
-                if self.fallback_unmute_task and not self.fallback_unmute_task.done():
-                    self.fallback_unmute_task.cancel()
-            elif event == 'speaking_end':
-                if wake_ack:
-                    logger.debug("Wake ack speaking_end received; no mute adjustments needed")
-                    return
-                async def delayed_unmute():
-                    await asyncio.sleep(0.2)
-                    self.pending_tts = False
-                    self.audio_capture.unmute("tts speaking_end")
+            envelope = Envelope.model_validate_json(payload)
+            raw = envelope.data
+            if event_type and envelope.type != event_type:
+                logger.debug(
+                    "Envelope type mismatch: expected=%s actual=%s",
+                    event_type,
+                    envelope.type,
+                )
+        except ValidationError:
+            try:
+                raw = orjson.loads(payload)
+            except orjson.JSONDecodeError as exc:
+                logger.error("Failed to decode %s payload: %s", model.__name__, exc)
+                return None
+
+        try:
+            return model.model_validate(raw)
+        except ValidationError as exc:
+            logger.error("Invalid %s payload: %s", model.__name__, exc)
+            return None
+
+    async def _handle_tts_status(self, payload: bytes):
+        status = self._decode_event(payload, TtsStatus, event_type=EVENT_TYPE_TTS_STATUS)
+        if status is None:
+            return
+
+        text = status.text or ""
+        wake_ack = bool(status.wake_ack)
+
+        if status.event == "speaking_start":
+            if wake_ack:
+                logger.debug("Wake ack speaking_start received; keeping microphone unmuted")
+                self.pending_tts = False
+                if self.audio_capture.is_muted:
+                    self.audio_capture.unmute("tts wake_ack start")
                     self.recent_unmute_time = time.time()
-                asyncio.create_task(delayed_unmute())
-        except Exception as e:
-            logger.error(f"Error handling TTS status: {e}")
+                return
+            self.state.last_tts_text = text.strip()
+            self.pending_tts = True
+            self.audio_capture.mute("tts speaking_start")
+            if self.fallback_unmute_task and not self.fallback_unmute_task.done():
+                self.fallback_unmute_task.cancel()
+        elif status.event == "speaking_end":
+            if wake_ack:
+                logger.debug("Wake ack speaking_end received; no mute adjustments needed")
+                return
+
+            async def delayed_unmute() -> None:
+                await asyncio.sleep(0.2)
+                self.pending_tts = False
+                self.audio_capture.unmute("tts speaking_end")
+                self.recent_unmute_time = time.time()
+
+            asyncio.create_task(delayed_unmute())
 
     async def _handle_tts_say(self, payload: bytes):
         """When a TTS request is published, proactively mute to avoid capturing the TTS audio.
         Also reschedule a conservative fallback unmute based on the outgoing TTS text length.
         """
-        try:
-            data = orjson.loads(payload)
-            txt = data.get('text', '')
-            if data.get('wake_ack'):
-                logger.debug("Wake ack TTS received; ensuring microphone is unmuted")
-                self.pending_tts = False
-                self.audio_capture.unmute("wake/ack")
-                self.recent_unmute_time = time.time()
-                return
-            if not txt:
-                return
-            self.state.last_tts_text = txt.strip()
-            self.pending_tts = True
-            self.audio_capture.mute("tts say")
-            # Reschedule fallback unmute based on the TTS text itself (more accurate than STT text)
-            if self.fallback_unmute_task and not self.fallback_unmute_task.done():
-                self.fallback_unmute_task.cancel()
-            # Use conservative cap; avoid underestimating TTS duration
-            async def fallback_unmute_tts():
-                try:
-                    await asyncio.sleep(TTS_MAX_MUTE_MS / 1000.0)
-                    # If we never saw speaking_end, fail safe by unmuting but clear pending flag
-                    if self.audio_capture.is_muted and self.pending_tts:
-                        self.pending_tts = False
-                        self.audio_capture.unmute("tts say fallback-timeout")
-                        self.recent_unmute_time = time.time()
-                except asyncio.CancelledError:
-                    pass
-            self.fallback_unmute_task = asyncio.create_task(fallback_unmute_tts())
-        except Exception as e:
-            logger.error(f"Error handling TTS say: {e}")
-
-    async def _handle_wake_mic(self, payload: bytes):
-        try:
-            data = orjson.loads(payload)
-        except Exception as exc:
-            logger.error(f"Invalid wake/mic payload: {exc}")
+        say = self._decode_event(payload, TtsSay, event_type=EVENT_TYPE_SAY)
+        if say is None:
             return
 
-        action = data.get('action')
-        reason = data.get('reason', 'wake')
-        ttl_ms = data.get('ttl_ms')
+        text = (say.text or "").strip()
+        if say.wake_ack:
+            logger.debug("Wake ack TTS received; ensuring microphone is unmuted")
+            self.pending_tts = False
+            self.audio_capture.unmute("wake/ack")
+            self.recent_unmute_time = time.time()
+            return
+        if not text:
+            return
+
+        self.state.last_tts_text = text
+        self.pending_tts = True
+        self.audio_capture.mute("tts say")
+        # Reschedule fallback unmute based on the TTS text itself (more accurate than STT text)
+        if self.fallback_unmute_task and not self.fallback_unmute_task.done():
+            self.fallback_unmute_task.cancel()
+
+        async def fallback_unmute_tts() -> None:
+            try:
+                await asyncio.sleep(TTS_MAX_MUTE_MS / 1000.0)
+                # If we never saw speaking_end, fail safe by unmuting but clear pending flag
+                if self.audio_capture.is_muted and self.pending_tts:
+                    self.pending_tts = False
+                    self.audio_capture.unmute("tts say fallback-timeout")
+                    self.recent_unmute_time = time.time()
+            except asyncio.CancelledError:
+                pass
+
+        self.fallback_unmute_task = asyncio.create_task(fallback_unmute_tts())
+
+    async def _handle_wake_mic(self, payload: bytes):
+        command = self._decode_event(payload, WakeMicCommand, event_type=EVENT_TYPE_WAKE_MIC)
+        if command is None:
+            return
+
+        action = command.action
+        reason = (command.reason or "wake").strip() or "wake"
+        ttl_ms = command.ttl_ms
 
         logger.info(
             "Wake mic command received: action=%s reason=%s ttl_ms=%s muted=%s",
@@ -242,17 +289,13 @@ class STTWorker:
             self.audio_capture.is_muted,
         )
 
-        if action not in {'mute', 'unmute'}:
-            logger.warning(f"Unknown wake/mic action: {action}")
-            return
-
         self._cancel_wake_fallback()
 
         if self._wake_ttl_task and not self._wake_ttl_task.done():
             self._wake_ttl_task.cancel()
             self._wake_ttl_task = None
 
-        if action == 'unmute':
+        if action == "unmute":
             if self.fallback_unmute_task and not self.fallback_unmute_task.done():
                 self.fallback_unmute_task.cancel()
                 self.fallback_unmute_task = None
@@ -262,12 +305,12 @@ class STTWorker:
             logger.info("Microphone state after wake unmute: muted=%s", self.audio_capture.is_muted)
             logger.info("Wake control unmuted microphone")
             if isinstance(ttl_ms, (int, float)) and ttl_ms > 0:
-                self._wake_ttl_task = asyncio.create_task(self._schedule_wake_ttl('mute', ttl_ms, reason))
+                self._wake_ttl_task = asyncio.create_task(self._schedule_wake_ttl("mute", ttl_ms, reason))
         else:
             self.audio_capture.mute(f"wake/{reason}")
             logger.info("Wake control muted microphone")
             if isinstance(ttl_ms, (int, float)) and ttl_ms > 0:
-                self._wake_ttl_task = asyncio.create_task(self._schedule_wake_ttl('unmute', ttl_ms, reason))
+                self._wake_ttl_task = asyncio.create_task(self._schedule_wake_ttl("unmute", ttl_ms, reason))
 
     def _cancel_wake_fallback(self) -> None:
         task = getattr(self, "_wake_fallback_task", None)
@@ -313,13 +356,11 @@ class STTWorker:
         self._wake_fallback_task = asyncio.create_task(_fallback())
 
     async def _handle_wake_event(self, payload: bytes):
-        try:
-            data = orjson.loads(payload)
-        except Exception as exc:
-            logger.error(f"Invalid wake/event payload: {exc}")
+        event = self._decode_event(payload, WakeEvent, event_type=EVENT_TYPE_WAKE_EVENT)
+        if event is None:
             return
 
-        event_type = str(data.get('type') or '').lower()
+        event_type = (event.type or "").lower()
         if event_type in {'wake', 'interrupt'}:
             logger.debug("Wake event (%s) received; arming microphone fallback", event_type)
             delay_override = 0 if event_type == 'interrupt' else None
@@ -343,75 +384,97 @@ class STTWorker:
 
     async def process_audio_stream(self):
         logger.debug("Starting audio processing loop")
+        service = self.service
+        if service is None:
+            raise RuntimeError("STT service not initialized")
+
         async for chunk in self.audio_capture.get_audio_chunks():
             # Always yield control so MQTT pings/heartbeats and other tasks can run
             await asyncio.sleep(0)
-            # Cooldown gating
-            if self.state.cooldown_until and time.time() < self.state.cooldown_until:
-                continue
+            now = time.time()
             if self.pending_tts:
                 continue
-            if self.recent_unmute_time and (time.time() - self.recent_unmute_time) < (UNMUTE_GUARD_MS / 1000.0):
+            if service.in_cooldown(now):
+                continue
+            if self.recent_unmute_time and (now - self.recent_unmute_time) < (UNMUTE_GUARD_MS / 1000.0):
                 np_chunk = np.frombuffer(chunk, dtype=np.int16)
                 if np_chunk.size:
                     rms = float(np.sqrt(np.mean(np_chunk.astype(np.float32) ** 2)))
                     if rms < 120:
                         continue
-            # Offload CPU-bound VAD to a thread to avoid blocking the event loop
-            utterance = await asyncio.to_thread(self.vad_processor.process_chunk, chunk) if self.vad_processor else None
-            if not utterance:
-                continue
-            try:
-                # Optional FFmpeg preprocessing before transcription
-                if PREPROCESS_ENABLE:
-                    # Avoid spending cycles on tiny clips
-                    utt_ms = (len(utterance) / 2) / self.audio_capture.sample_rate * 1000.0
-                    if utt_ms >= PREPROCESS_MIN_MS:
-                        pre_len = len(utterance)
-                        utterance = await asyncio.to_thread(preprocess_pcm, utterance, self.audio_capture.sample_rate)
-                        if len(utterance) != pre_len:
-                            logger.debug("Preprocessed utterance size %d -> %d bytes", pre_len, len(utterance))
-                # Offload blocking transcription to a worker thread to avoid blocking the event loop
-                text, confidence, metrics = await asyncio.to_thread(self.transcriber.transcribe, utterance, self.audio_capture.sample_rate)
-            except Exception as e:
-                logger.error(f"Transcription error: {e}")
-                await self.publish_health(False, f"Transcription error: {e}")
+
+            result = await service.process_chunk(chunk, now=now)
+            if result.error:
+                logger.error(result.error)
+                await self.publish_health(False, result.error)
                 self.audio_capture.unmute("error")
                 continue
-            if not text.strip():
+
+            if not result.final:
+                if result.candidate_text and result.rejection_reasons:
+                    logger.info(
+                        "Discarded '%s' reasons=%s",
+                        result.candidate_text,
+                        result.rejection_reasons,
+                    )
                 continue
-            accepted, info = self.suppress_engine.evaluate(text, confidence, metrics, utterance, self.audio_capture.sample_rate, self.audio_capture.frame_size)
-            if not accepted:
-                logger.info(f"Discarded '{text.strip()}' reasons={info.get('reasons')}")
-                continue
-            # Publish accepted
-            logger.info(f"Transcribed: '{text.strip()}'{f' (conf {confidence:.2f})' if confidence is not None else ''}")
+
+            final = result.final
+            text = final.text
+            confidence = final.confidence
+            logger.info(
+                "Transcribed: '%s'%s",
+                text,
+                f" (conf {confidence:.2f})" if confidence is not None else "",
+            )
             self.audio_capture.mute("post-transcription")
+
             # Use conservative cap; per-char estimates can be too short
-            est_ms = int(TTS_MAX_MUTE_MS)
-            unmute_at = time.time() + est_ms / 1000.0
+            unmute_at = now + (TTS_MAX_MUTE_MS / 1000.0)
             if self.fallback_unmute_task and not self.fallback_unmute_task.done():
                 self.fallback_unmute_task.cancel()
-            async def fallback_unmute(ts=unmute_at):
+
+            async def fallback_unmute(ts: float = unmute_at) -> None:
                 try:
                     await asyncio.sleep(max(0, ts - time.time()))
                     if self.audio_capture.is_muted and not self.pending_tts:
                         self.audio_capture.unmute("fallback-timeout")
                 except asyncio.CancelledError:
                     pass
+
             self.fallback_unmute_task = asyncio.create_task(fallback_unmute())
-            self.suppress_engine.register_publication(text.strip().lower())
-            await self.publish_transcript(text.strip(), confidence)
-            self.state.cooldown_until = time.time() + (POST_PUBLISH_COOLDOWN_MS / 1000.0)
-            # Reset partial tracking after a final utterance
-            self._last_partial_text = ""
+            await self.publish_transcript(final)
 
     async def run(self):
         try:
             await self.initialize()
             self.audio_capture.start_capture()
             self.vad_processor = VADProcessor(self.audio_capture.sample_rate, self.audio_capture.frame_size)
-            if self._enable_partials:
+            partial_settings = PartialSettings(
+                enabled=bool(self._enable_partials),
+                min_duration_ms=PARTIAL_MIN_DURATION_MS,
+                min_chars=PARTIAL_MIN_CHARS,
+                min_new_chars=PARTIAL_MIN_NEW_CHARS,
+                alpha_ratio_min=PARTIAL_ALPHA_RATIO_MIN,
+            )
+            service_config = STTServiceConfig(
+                post_publish_cooldown_ms=POST_PUBLISH_COOLDOWN_MS,
+                preprocess_min_ms=PREPROCESS_MIN_MS,
+                partials=partial_settings,
+            )
+            preprocess_fn = preprocess_pcm if PREPROCESS_ENABLE else None
+            if not self.vad_processor:
+                raise RuntimeError("VAD processor failed to initialize")
+            self.service = STTService(
+                vad=self.vad_processor,
+                transcriber=self.transcriber,
+                suppression=self.suppress_engine,
+                sample_rate=self.audio_capture.sample_rate,
+                frame_size=self.audio_capture.frame_size,
+                config=service_config,
+                preprocess=preprocess_fn,
+            )
+            if self.service.partials_enabled:
                 self._partials_task = asyncio.create_task(self._partials_loop())
             if FFT_PUBLISH:
                 self._fft_task = asyncio.create_task(self._fft_loop())
@@ -429,12 +492,14 @@ class STTWorker:
                 self._wake_ttl_task.cancel()
             await self.mqtt.disconnect()
             self._publisher = None
+            self.service = None
 
     async def _partials_loop(self):
         interval = PARTIAL_INTERVAL_MS / 1000.0
         while True:
             await asyncio.sleep(interval)
-            if not STREAMING_PARTIALS:
+            service = self.service
+            if not service or not service.partials_enabled:
                 continue
             if not self.vad_processor or not self.vad_processor.is_speech:
                 continue
@@ -443,32 +508,9 @@ class STTWorker:
             # Basic guard after unmute
             if self.recent_unmute_time and (time.time() - self.recent_unmute_time) < (UNMUTE_GUARD_MS / 1000.0):
                 continue
-            buf = self.vad_processor.get_active_buffer()
-            if not buf:
+            partial = await service.maybe_partial()
+            if not partial:
                 continue
-            duration_ms = (len(buf) / 2) / self.audio_capture.sample_rate * 1000.0
-            if duration_ms < PARTIAL_MIN_DURATION_MS:
-                continue
-            try:
-                # Offload blocking transcription to a worker thread to avoid blocking the event loop
-                text, confidence, metrics = await asyncio.to_thread(self.transcriber.transcribe, buf, self.audio_capture.sample_rate)
-            except Exception as e:
-                logger.debug(f"Partial transcription error: {e}")
-                continue
-            t = text.strip()
-            if not t or len(t) < PARTIAL_MIN_CHARS:
-                continue
-            alpha = sum(c.isalpha() for c in t)
-            alpha_ratio = alpha / max(1, len(t))
-            if alpha_ratio < PARTIAL_ALPHA_RATIO_MIN:
-                continue
-            # Require some growth
-            if self._last_partial_text and (len(t) - len(self._last_partial_text)) < PARTIAL_MIN_NEW_CHARS and not t.endswith('.'):
-                continue
-            if t == self._last_partial_text:
-                continue
-            self._last_partial_text = t
-            partial = PartialTranscript(text=t, confidence=confidence)
             message_id = await self._publish_event(
                 EVENT_TYPE_STT_PARTIAL,
                 partial,
@@ -476,7 +518,7 @@ class STTWorker:
             )
             logger.debug(
                 "Published partial: %s",
-                t[:60] + ('...' if len(t) > 60 else ''),
+                partial.text[:60] + ('...' if len(partial.text) > 60 else ''),
                 extra={"message_id": message_id},
             )
 

@@ -2,9 +2,26 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
+from pathlib import Path
 from typing import Any
 
 import orjson
+from pydantic import BaseModel, ValidationError
+
+SRC_DIR = Path(__file__).resolve().parents[3] / "src"
+if SRC_DIR.exists():
+    src_path = str(SRC_DIR)
+    if src_path not in sys.path:
+        sys.path.insert(0, src_path)
+
+from tars.contracts.envelope import Envelope  # type: ignore[import]
+from tars.contracts.v1 import (  # type: ignore[import]
+    EVENT_TYPE_WAKE_EVENT,
+    EVENT_TYPE_WAKE_MIC,
+    WakeEvent,
+    WakeMicCommand,
+)
 
 WAKE_EVENT_FALLBACK_DELAY_MS = 250
 WAKE_EVENT_FALLBACK_TTL_MS = 3500
@@ -31,19 +48,13 @@ class STTWorker:
         self._wake_fallback_task = None
 
     async def _handle_wake_mic(self, payload: bytes) -> None:
-        try:
-            data = orjson.loads(payload)
-        except Exception as exc:  # pragma: no cover - guard
-            logger.error(f"Invalid wake/mic payload: {exc}")
+        command = self._decode_event(payload, WakeMicCommand, event_type=EVENT_TYPE_WAKE_MIC)
+        if command is None:
             return
 
-        action = data.get("action")
-        reason = data.get("reason", "wake")
-        ttl_ms = data.get("ttl_ms")
-
-        if action not in {"mute", "unmute"}:
-            logger.warning(f"Unknown wake/mic action: {action}")
-            return
+        action = command.action
+        reason = (command.reason or "wake").strip() or "wake"
+        ttl_ms = command.ttl_ms
 
         self._cancel_wake_fallback()
 
@@ -118,15 +129,42 @@ class STTWorker:
             pass
 
     async def _handle_wake_event(self, payload: bytes) -> None:
-        try:
-            data = orjson.loads(payload)
-        except Exception as exc:  # pragma: no cover - guard
-            logger.error(f"Invalid wake/event payload: {exc}")
+        event = self._decode_event(payload, WakeEvent, event_type=EVENT_TYPE_WAKE_EVENT)
+        if event is None:
             return
 
-        event_type = str(data.get("type") or "").lower()
+        event_type = (event.type or "").lower()
         if event_type in {"wake", "interrupt"}:
             delay_override = 0 if event_type == "interrupt" else None
             self._schedule_wake_fallback(event_type, delay_override)
         elif event_type in {"timeout", "cancelled", "resume"}:
             self._cancel_wake_fallback()
+
+    @staticmethod
+    def _decode_event(
+        payload: bytes,
+        model: type[BaseModel],
+        *,
+        event_type: str | None = None,
+    ) -> BaseModel | None:
+        try:
+            envelope = Envelope.model_validate_json(payload)
+            raw = envelope.data
+            if event_type and envelope.type != event_type:
+                logger.debug(
+                    "[test shim] envelope type mismatch expected=%s actual=%s",
+                    event_type,
+                    envelope.type,
+                )
+        except ValidationError:
+            try:
+                raw = orjson.loads(payload)
+            except orjson.JSONDecodeError as exc:  # pragma: no cover - guard
+                logger.error("Failed to decode %s payload: %s", model.__name__, exc)
+                return None
+
+        try:
+            return model.model_validate(raw)
+        except ValidationError as exc:  # pragma: no cover - guard
+            logger.error("Invalid %s payload: %s", model.__name__, exc)
+            return None

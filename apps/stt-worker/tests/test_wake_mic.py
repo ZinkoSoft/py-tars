@@ -4,8 +4,21 @@ import importlib.util
 import sys
 from pathlib import Path
 
-import orjson
 import pytest
+
+SRC_DIR = Path(__file__).resolve().parents[3] / "src"
+if SRC_DIR.exists():
+    src_path = str(SRC_DIR)
+    if src_path not in sys.path:
+        sys.path.insert(0, src_path)
+
+from tars.contracts.envelope import Envelope  # type: ignore[import]
+from tars.contracts.v1 import (  # type: ignore[import]
+    EVENT_TYPE_WAKE_EVENT,
+    EVENT_TYPE_WAKE_MIC,
+    WakeEvent,
+    WakeMicCommand,
+)
 
 
 def _load_stt_module():
@@ -35,6 +48,10 @@ class DummyCapture:
         self.is_muted = False
         self.unmute_calls.append(reason)
 
+def _encode_event(event_type: str, model) -> bytes:
+    envelope = Envelope.new(event_type=event_type, data=model)
+    return envelope.model_dump_json().encode()
+
 
 @pytest.mark.asyncio
 async def test_wake_mic_unmute_triggers_mute_ttl():
@@ -47,7 +64,8 @@ async def test_wake_mic_unmute_triggers_mute_ttl():
     worker._wake_ttl_task = None
     worker._wake_fallback_task = None
 
-    payload = orjson.dumps({"action": "unmute", "reason": "wake", "ttl_ms": 20})
+    command = WakeMicCommand(action="unmute", reason="wake", ttl_ms=20)
+    payload = _encode_event(EVENT_TYPE_WAKE_MIC, command)
     await stt_main.STTWorker._handle_wake_mic(worker, payload)
 
     assert worker.audio_capture.unmute_calls == ["wake/wake"]
@@ -74,7 +92,8 @@ async def test_wake_mic_mute_triggers_unmute_ttl():
     worker._wake_ttl_task = None
     worker._wake_fallback_task = None
 
-    payload = orjson.dumps({"action": "mute", "reason": "wake", "ttl_ms": 10})
+    command = WakeMicCommand(action="mute", reason="wake", ttl_ms=10)
+    payload = _encode_event(EVENT_TYPE_WAKE_MIC, command)
     await stt_main.STTWorker._handle_wake_mic(worker, payload)
 
     assert worker.audio_capture.mute_calls == ["wake/wake"]
@@ -102,7 +121,8 @@ async def test_wake_event_fallback_unmutes_when_mic_stays_muted(monkeypatch):
     monkeypatch.setattr(stt_main, "WAKE_EVENT_FALLBACK_DELAY_MS", 5)
     monkeypatch.setattr(stt_main, "WAKE_EVENT_FALLBACK_TTL_MS", 20)
 
-    payload = orjson.dumps({"type": "wake"})
+    event = WakeEvent(type="wake")
+    payload = _encode_event(EVENT_TYPE_WAKE_EVENT, event)
     await stt_main.STTWorker._handle_wake_event(worker, payload)
 
     await asyncio.sleep(0.02)

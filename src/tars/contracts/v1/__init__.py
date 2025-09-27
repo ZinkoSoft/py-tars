@@ -13,8 +13,8 @@ from .llm import (
 	LLMStreamDelta,
 )
 from .stt import EVENT_TYPE_STT_FINAL, EVENT_TYPE_STT_PARTIAL, FinalTranscript, PartialTranscript
-from .tts import EVENT_TYPE_SAY, TtsSay
-from .wake import EVENT_TYPE_WAKE_EVENT, WakeEvent
+from .tts import EVENT_TYPE_SAY, EVENT_TYPE_TTS_STATUS, TtsSay, TtsStatus
+from .wake import EVENT_TYPE_WAKE_EVENT, EVENT_TYPE_WAKE_MIC, WakeEvent, WakeMicCommand
 
 __all__ = [
 	"EVENT_TYPE_HEALTH",
@@ -33,7 +33,11 @@ __all__ = [
 	"FinalTranscript",
 	"PartialTranscript",
 	"EVENT_TYPE_SAY",
+	"EVENT_TYPE_TTS_STATUS",
 	"TtsSay",
+	"TtsStatus",
 	"EVENT_TYPE_WAKE_EVENT",
+	"EVENT_TYPE_WAKE_MIC",
 	"WakeEvent",
+	"WakeMicCommand",
 ]
