@@ -16,6 +16,7 @@ This plan operationalizes the outcomes captured in `py-tars_SOLID-review.md`.
 - ✅ Structured logging groundwork in router/runtime is in place (JSON logs with correlation metadata) from earlier phases.
 - ✅ Router policy publishes only typed contracts, and the wake-mode regressions now assert against `TtsSay`/`LLMRequest` models instead of raw dict payloads.
 - ✅ Shared MQTT adapters (`src/tars/adapters/mqtt_asyncio.py`) expose configurable dedupe options, and router tests exercise the subscriber behavior to guard regressions.
+- ✅ STT worker publishes `FinalTranscript`/`PartialTranscript` events via the shared MQTT publisher, introducing envelopes and message IDs for downstream consumers.
 
 ## Phase 1 – Stabilize Contracts (Week 1)
 **Objectives**
@@ -141,7 +142,7 @@ This plan operationalizes the outcomes captured in `py-tars_SOLID-review.md`.
    - [ ] Move rule evaluation and streaming boundary management into `src/tars/domain/policy.py`, leaving `apps/router/main.py` as a thin composition root.
    - ✅ Add regression tests under `apps/router/tests/` that exercise the dispatcher flow with the new contracts. *(Dispatcher queue guardrails + typed wake-mode assertions live under `apps/router/tests/`.)*
 - **STT Worker**
-   - [ ] Emit `FinalTranscript`/`PartialTranscript` from `src/tars/contracts/v1/stt.py` and rely on the shared publisher adapter for MQTT.
+   - [x] Emit `FinalTranscript`/`PartialTranscript` from `src/tars/contracts/v1/stt.py` and rely on the shared publisher adapter for MQTT.
    - [ ] Consume wake/health contracts from `src/tars/contracts/v1/` where relevant (e.g., suppressions/ready signals).
    - [ ] Wrap VAD/transcription orchestration in a port-aware service under `src/tars/domain/stt.py`.
    - [ ] Backfill unit tests for suppression heuristics using the shared contracts to guarantee schema parity.

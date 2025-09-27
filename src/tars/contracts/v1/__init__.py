@@ -12,7 +12,7 @@ from .llm import (
 	LLMResponse,
 	LLMStreamDelta,
 )
-from .stt import EVENT_TYPE_STT_FINAL, EVENT_TYPE_STT_PARTIAL, FinalTranscript
+from .stt import EVENT_TYPE_STT_FINAL, EVENT_TYPE_STT_PARTIAL, FinalTranscript, PartialTranscript
 from .tts import EVENT_TYPE_SAY, TtsSay
 from .wake import EVENT_TYPE_WAKE_EVENT, WakeEvent
 
@@ -31,6 +31,7 @@ __all__ = [
 	"EVENT_TYPE_STT_FINAL",
 	"EVENT_TYPE_STT_PARTIAL",
 	"FinalTranscript",
+	"PartialTranscript",
 	"EVENT_TYPE_SAY",
 	"TtsSay",
 	"EVENT_TYPE_WAKE_EVENT",

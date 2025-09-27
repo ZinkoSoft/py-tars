@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import time
 import uuid
+
 from pydantic import BaseModel, Field
 
 EVENT_TYPE_STT_FINAL = "stt.final"
@@ -15,7 +17,21 @@ class FinalTranscript(BaseModel):
     lang: str = "en"
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     utt_id: str | None = None
-    ts: float | None = None
+    ts: float = Field(default_factory=time.time)
     is_final: bool = True
+
+    model_config = {"extra": "forbid"}
+
+
+class PartialTranscript(BaseModel):
+    """Streaming partial emitted while an utterance is in progress."""
+
+    message_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    text: str
+    lang: str = "en"
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    utt_id: str | None = None
+    ts: float = Field(default_factory=time.time)
+    is_final: bool = False
 
     model_config = {"extra": "forbid"}
