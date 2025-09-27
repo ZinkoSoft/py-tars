@@ -25,7 +25,14 @@ def setup_logging():
 
 async def main():
     setup_logging()
+    piper_synth: PiperSynth | None = None
     try:
+        try:
+            piper_synth = PiperSynth(PIPER_VOICE)
+        except Exception:
+            logging.exception("Failed to initialize Piper voice '%s'", PIPER_VOICE)
+            piper_synth = None
+
         if TTS_PROVIDER == "elevenlabs":
             if not ELEVEN_API_KEY or not ELEVEN_VOICE_ID:
                 logging.warning("TTS_PROVIDER=elevenlabs but ELEVEN_API_KEY or ELEVEN_VOICE_ID is missing; falling back to Piper")
@@ -37,11 +44,21 @@ async def main():
                 model_id=ELEVEN_MODEL_ID,
                 optimize_streaming=ELEVEN_OPTIMIZE_STREAMING,
             )
+            wake_synth = piper_synth
+            if wake_synth is None:
+                logging.warning("Piper voice unavailable; wake acknowledgements will use ElevenLabs provider")
         else:
-            synth = PiperSynth(PIPER_VOICE)
+            if piper_synth is None:
+                piper_synth = PiperSynth(PIPER_VOICE)
+            synth = piper_synth
+            wake_synth = None
     except Exception:
-        synth = PiperSynth(PIPER_VOICE)
-    service = TTSService(synth)
+        logging.exception("Failed to initialize TTS provider '%s'; falling back to Piper", TTS_PROVIDER)
+        piper_synth = piper_synth or PiperSynth(PIPER_VOICE)
+        synth = piper_synth
+        wake_synth = None
+
+    service = TTSService(synth, wake_ack_synth=wake_synth)
     await service.run()
 
 

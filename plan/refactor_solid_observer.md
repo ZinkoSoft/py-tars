@@ -17,6 +17,7 @@ This plan operationalizes the outcomes captured in `py-tars_SOLID-review.md`.
 - ✅ Router policy publishes only typed contracts, and the wake-mode regressions now assert against `TtsSay`/`LLMRequest` models instead of raw dict payloads.
 - ✅ Shared MQTT adapters (`src/tars/adapters/mqtt_asyncio.py`) expose configurable dedupe options, and router tests exercise the subscriber behavior to guard regressions.
 - ✅ STT worker publishes `FinalTranscript`/`PartialTranscript` events via the shared MQTT publisher, introducing envelopes and message IDs for downstream consumers.
+- ✅ Wake acknowledgements are now marked with `wake_ack=True`, and the TTS worker routes them through the Piper fallback synthesizer with tests in `apps/router/tests/test_wake_mode.py` and `apps/tts-worker/tests/test_service_controls.py` locking the behavior.
 
 ## Phase 1 – Stabilize Contracts (Week 1)
 **Objectives**
@@ -147,8 +148,8 @@ This plan operationalizes the outcomes captured in `py-tars_SOLID-review.md`.
    - [x] Wrap VAD/transcription orchestration in a port-aware service under `src/tars/domain/stt.py`.
    - [x] Backfill unit tests for suppression heuristics using the shared contracts to guarantee schema parity.
 - **TTS Worker**
-   - [ ] Accept `TTSSay` models from `src/tars/contracts/v1/tts.py` and funnel speech synthesis through a dispatcher-aware consumer.
-   - [ ] Publish `tts/status` as a typed health/event contract and expose aggregation via domain services.
+   - [x] Accept `TTSSay` models from `src/tars/contracts/v1/tts.py` and funnel speech synthesis through a dispatcher-aware consumer.
+   - [x] Publish `tts/status` as a typed health/event contract and expose aggregation via domain services.
    - [ ] Gradually retire bespoke serialization helpers once the adapter is in place.
 - **LLM Worker**
    - [ ] Import `LLMRequest`, `LLMResponse`, and `LLMStreamDelta` from `src/tars/contracts/v1/llm.py` and delete duplicated BaseModel definitions.
