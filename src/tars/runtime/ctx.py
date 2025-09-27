@@ -16,6 +16,7 @@ class Ctx:
     pub: Publisher
     policy: Any
     logger: Logger
+    metrics: Any | None = None
 
     async def publish(
         self,

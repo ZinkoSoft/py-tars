@@ -22,6 +22,7 @@ from tars.contracts.v1 import (
 from tars.runtime.ctx import Ctx
 
 from .config import RouterSettings
+from .metrics import RouterMetrics
 
 
 @dataclass(slots=True)
@@ -29,6 +30,7 @@ class RouterPolicy:
     """Stateful policy that translates observed events into actions."""
 
     settings: RouterSettings
+    metrics: RouterMetrics | None = None
     ready: Dict[str, bool] = field(default_factory=lambda: {"tts": False, "stt": False})
     announced: bool = False
     llm_buf: Dict[str, str] = field(default_factory=dict)
@@ -71,6 +73,7 @@ class RouterPolicy:
                 utt_id="boot",
                 correlate=ctx.id_from(event),
             )
+            self._log_metrics(ctx)
 
     async def handle_wake_event(self, event: WakeEvent, ctx: Ctx) -> None:
         event_type = (event.type or "").lower()
@@ -226,12 +229,18 @@ class RouterPolicy:
             extra={"id": req_id, "len": len(candidate_text or ""), "reason": gating_reason},
         )
         await ctx.publish(EVENT_TYPE_LLM_REQUEST, llm_req, correlate=ctx.id_from(event), qos=1)
+        if self.metrics:
+            self.metrics.record_llm_request(req_id)
+            self._log_metrics(ctx)
 
     async def handle_llm_cancel(self, event: LLMCancel, ctx: Ctx) -> None:
         rid = event.id.strip()
         if rid and rid in self.llm_buf:
             ctx.logger.info("router.llm.cancel", extra={"id": rid})
             self.llm_buf.pop(rid, None)
+        if self.metrics:
+            self.metrics.abandon_llm_request(rid)
+            self._log_metrics(ctx)
 
     async def handle_llm_response(self, event: LLMResponse, ctx: Ctx) -> None:
         text = (event.reply or "").strip()
@@ -244,6 +253,9 @@ class RouterPolicy:
             utt_id=event.id or None,
             correlate=ctx.id_from(event),
         )
+        if self.metrics:
+            self.metrics.record_llm_response(event.id or "")
+            self._log_metrics(ctx)
 
     async def handle_llm_stream(self, event: LLMStreamDelta, ctx: Ctx) -> None:
         if not self.settings.router_llm_tts_stream:
@@ -289,6 +301,9 @@ class RouterPolicy:
             if final:
                 ctx.logger.info("router.llm.stream.final", extra={"len": len(final), "id": rid})
                 await self._speak(ctx, text=final, utt_id=rid, correlate=ctx.id_from(event))
+            if self.metrics:
+                self.metrics.record_llm_response(rid)
+                self._log_metrics(ctx)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -331,6 +346,9 @@ class RouterPolicy:
             stt_ts=stt_ts,
         )
         await ctx.publish(EVENT_TYPE_SAY, say, correlate=correlate, qos=1)
+        if self.metrics:
+            self.metrics.record_tts_message()
+            self._log_metrics(ctx)
 
     @staticmethod
     def _normalize_command(text: str) -> str:
@@ -379,3 +397,8 @@ class RouterPolicy:
         if idx >= 0:
             return text[: idx + 1].strip(), text[idx + 1 :].lstrip()
         return "", text
+
+    def _log_metrics(self, ctx: Ctx) -> None:
+        if not self.metrics:
+            return
+        ctx.logger.debug("router.metrics", extra=self.metrics.snapshot())

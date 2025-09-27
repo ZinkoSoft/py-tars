@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import sys
 from pathlib import Path
@@ -27,9 +26,10 @@ from tars.contracts.v1 import (  # type: ignore[import]
     LLMStreamDelta,
     WakeEvent,
 )
-from tars.domain.router import RouterPolicy, RouterSettings  # type: ignore[import]
+from tars.domain.router import RouterMetrics, RouterPolicy, RouterSettings  # type: ignore[import]
 from tars.runtime.ctx import Ctx  # type: ignore[import]
 from tars.runtime.dispatcher import Dispatcher  # type: ignore[import]
+from tars.runtime.logging import configure_logging  # type: ignore[import]
 from tars.runtime.registry import register_topics  # type: ignore[import]
 from tars.runtime.subscription import Sub  # type: ignore[import]
 
@@ -77,16 +77,12 @@ def _build_subscriptions(settings: RouterSettings, policy: RouterPolicy) -> Iter
 
 async def run_router() -> None:
     settings = RouterSettings.from_env()
-    logging.basicConfig(
-        level=os.getenv("LOG_LEVEL", "INFO"),
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-    logger = logging.getLogger("router")
+    logger = configure_logging(os.getenv("LOG_LEVEL", "INFO"), name="router")
 
     register_topics(settings.as_topic_map())
 
-    policy = RouterPolicy(settings)
+    metrics = RouterMetrics()
+    policy = RouterPolicy(settings, metrics=metrics)
     host, port, username, password = parse_mqtt(settings.mqtt_url)
     backoff = 1.0
 
@@ -106,10 +102,10 @@ async def run_router() -> None:
                 subs = _build_subscriptions(settings, policy)
 
                 def ctx_factory(_envelope: Envelope) -> Ctx:
-                    return Ctx(pub=publisher, policy=policy, logger=logger)
+                    return Ctx(pub=publisher, policy=policy, logger=logger, metrics=metrics)
 
                 dispatcher = Dispatcher(subscriber, subs, ctx_factory)
-                ctx = Ctx(pub=publisher, policy=policy, logger=logger)
+                ctx = Ctx(pub=publisher, policy=policy, logger=logger, metrics=metrics)
                 await ctx.publish("system.health.router", HealthPing(ok=True, event="ready"), qos=1)
                 backoff = 1.0
                 try:
