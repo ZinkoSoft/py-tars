@@ -16,6 +16,12 @@ _EVENT_TO_TOPIC: dict[str, str] = {
     "system.health.tts": "system/health/tts",
     "system.health.stt": "system/health/stt",
     "system.health.router": "system/health/router",
+    "memory.query": "memory/query",
+    "memory.results": "memory/results",
+    "system.health.memory": "system/health/memory",
+    "character.get": "character/get",
+    "character.result": "character/result",
+    "system.character.current": "system/character/current",
 }
 
 _TOPIC_TO_EVENT: dict[str, str] = {topic: event for event, topic in _EVENT_TO_TOPIC.items()}

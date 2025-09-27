@@ -231,17 +231,27 @@ class LLMService:
                                 logger.warning("Failed to parse character/current")
                             continue
                         if topic == TOPIC_CHARACTER_RESULT:
+                            payload_data: Dict[str, Any]
                             try:
-                                data = json.loads(m.payload)
-                            except Exception:
-                                data = {}
-                            if data:
-                                # Accept either full snapshot or a subsection
-                                if "name" in data:
-                                    self.character = data
+                                envelope = Envelope.model_validate_json(m.payload)
+                                raw_data = envelope.data
+                                payload_data = raw_data if isinstance(raw_data, dict) else {}
+                            except ValidationError:
+                                try:
+                                    payload_data = json.loads(m.payload)
+                                except Exception:
+                                    payload_data = {}
+
+                            if payload_data:
+                                if "name" in payload_data:
+                                    self.character = payload_data
+                                elif "section" in payload_data and "value" in payload_data:
+                                    section_key = payload_data.get("section")
+                                    if isinstance(section_key, str):
+                                        self.character.setdefault(section_key, payload_data.get("value"))
+                                        self.character[section_key] = payload_data.get("value")
                                 else:
-                                    # Merge into existing snapshot
-                                    self.character.update(data)
+                                    self.character.update(payload_data)
                                 logger.info("character/result received: name=%s", self.character.get("name"))
                             continue
                         if topic != TOPIC_LLM_REQUEST:

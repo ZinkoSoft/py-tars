@@ -12,6 +12,21 @@ from .llm import (
 	LLMResponse,
 	LLMStreamDelta,
 )
+from .memory import (
+	EVENT_TYPE_CHARACTER_CURRENT,
+	EVENT_TYPE_CHARACTER_GET,
+	EVENT_TYPE_CHARACTER_RESULT,
+	EVENT_TYPE_MEMORY_HEALTH,
+	EVENT_TYPE_MEMORY_QUERY,
+	EVENT_TYPE_MEMORY_RESULTS,
+	BaseMemoryMessage,
+	CharacterGetRequest,
+	CharacterSection,
+	CharacterSnapshot,
+	MemoryQuery,
+	MemoryResult,
+	MemoryResults,
+)
 from .stt import EVENT_TYPE_STT_FINAL, EVENT_TYPE_STT_PARTIAL, FinalTranscript, PartialTranscript
 from .tts import EVENT_TYPE_SAY, EVENT_TYPE_TTS_STATUS, TtsSay, TtsStatus
 from .wake import EVENT_TYPE_WAKE_EVENT, EVENT_TYPE_WAKE_MIC, WakeEvent, WakeMicCommand
@@ -28,6 +43,19 @@ __all__ = [
 	"LLMRequest",
 	"LLMResponse",
 	"LLMStreamDelta",
+	"EVENT_TYPE_MEMORY_QUERY",
+	"EVENT_TYPE_MEMORY_RESULTS",
+	"EVENT_TYPE_MEMORY_HEALTH",
+	"EVENT_TYPE_CHARACTER_GET",
+	"EVENT_TYPE_CHARACTER_RESULT",
+	"EVENT_TYPE_CHARACTER_CURRENT",
+	"BaseMemoryMessage",
+	"MemoryQuery",
+	"MemoryResult",
+	"MemoryResults",
+	"CharacterGetRequest",
+	"CharacterSnapshot",
+	"CharacterSection",
 	"EVENT_TYPE_STT_FINAL",
 	"EVENT_TYPE_STT_PARTIAL",
 	"FinalTranscript",

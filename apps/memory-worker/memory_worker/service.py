@@ -1,38 +1,81 @@
 from __future__ import annotations
 
-import logging, os
-from urllib.parse import urlparse
-from typing import Any, Dict
+import logging
+import os
 from pathlib import Path
+from typing import Any, Tuple
+from urllib.parse import urlparse
+
 import asyncio_mqtt as mqtt
-import orjson as json
-from .config import (
-    MQTT_URL, LOG_LEVEL,
-    MEMORY_DIR, MEMORY_FILE,
-    RAG_STRATEGY, TOP_K, EMBED_MODEL,
-    TOPIC_STT_FINAL, TOPIC_TTS_SAY,
-    TOPIC_QUERY, TOPIC_RESULTS, TOPIC_HEALTH,
-    # character topics/config
-    CHARACTER_NAME, CHARACTER_DIR,
-    TOPIC_CHAR_GET, TOPIC_CHAR_RESULT, TOPIC_CHAR_CURRENT,
-)
-from .hyperdb import HyperDB, HyperConfig
 import numpy as np
+import orjson as json
+from pydantic import ValidationError
 from sentence_transformers import SentenceTransformer
 
-try:
+from .config import (
+    CHARACTER_DIR,
+    CHARACTER_NAME,
+    EMBED_MODEL,
+    LOG_LEVEL,
+    MEMORY_DIR,
+    MEMORY_FILE,
+    MQTT_URL,
+    RAG_STRATEGY,
+    TOPIC_CHAR_CURRENT,
+    TOPIC_CHAR_GET,
+    TOPIC_CHAR_RESULT,
+    TOPIC_HEALTH,
+    TOPIC_QUERY,
+    TOPIC_RESULTS,
+    TOPIC_STT_FINAL,
+    TOPIC_TTS_SAY,
+    TOP_K,
+)
+from .hyperdb import HyperConfig, HyperDB
+
+from tars.contracts.envelope import Envelope
+from tars.contracts.registry import register
+from tars.contracts.v1 import (
+    EVENT_TYPE_SAY,
+    EVENT_TYPE_STT_FINAL,
+    FinalTranscript,
+    HealthPing,
+    TtsSay,
+)
+from tars.contracts.v1.memory import (
+    EVENT_TYPE_CHARACTER_CURRENT,
+    EVENT_TYPE_CHARACTER_GET,
+    EVENT_TYPE_CHARACTER_RESULT,
+    EVENT_TYPE_MEMORY_HEALTH,
+    EVENT_TYPE_MEMORY_QUERY,
+    EVENT_TYPE_MEMORY_RESULTS,
+    CharacterGetRequest,
+    CharacterSection,
+    CharacterSnapshot,
+    MemoryQuery,
+    MemoryResult,
+    MemoryResults,
+)
+
+try:  # pragma: no cover - compatibility shim
     import tomllib  # Python 3.11+
-except Exception:  # pragma: no cover
+except Exception:  # pragma: no cover - fallback for <=3.10
     import tomli as tomllib  # type: ignore
 
 
-logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+SOURCE_NAME = "memory-worker"
+
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 logger = logging.getLogger("memory-worker")
 
 
-def parse_mqtt(url: str):
-    u = urlparse(url)
-    return (u.hostname or "127.0.0.1", u.port or 1883, u.username, u.password)
+def parse_mqtt(url: str) -> Tuple[str, int, str | None, str | None]:
+    parsed = urlparse(url)
+    return parsed.hostname or "127.0.0.1", parsed.port or 1883, parsed.username, parsed.password
 
 
 class STEmbedder:
@@ -42,131 +85,325 @@ class STEmbedder:
         self.model = SentenceTransformer(model_name, device="cpu")
 
     def __call__(self, texts: list[str]) -> np.ndarray:
-        embs = self.model.encode(texts, show_progress_bar=False, convert_to_numpy=True, normalize_embeddings=True)
-        return embs.astype(np.float32)
+        embeddings = self.model.encode(
+            texts,
+            show_progress_bar=False,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        )
+        return embeddings.astype(np.float32)
 
 
 class MemoryService:
-    def __init__(self):
+    def __init__(self) -> None:
+        self._register_topics()
         os.makedirs(MEMORY_DIR, exist_ok=True)
-        self.path = os.path.join(MEMORY_DIR, MEMORY_FILE)
-        embedder = STEmbedder(EMBED_MODEL)
-        self.db = HyperDB(embedding_fn=embedder, cfg=HyperConfig(rag_strategy=RAG_STRATEGY, top_k=TOP_K))
-        # Load existing DB if available
-        if os.path.exists(self.path):
-            ok = self.db.load(self.path)
-            logger.info(f"Loaded memory db: {ok}")
-            # If vectors exist but have a different dim than current embedder, re-embed
+        self.database_path = os.path.join(MEMORY_DIR, MEMORY_FILE)
+        self.embedder = STEmbedder(EMBED_MODEL)
+        self.db = HyperDB(embedding_fn=self.embedder, cfg=HyperConfig(rag_strategy=RAG_STRATEGY, top_k=TOP_K))
+        self._load_or_initialize_db()
+        self.character = self._load_character()
+
+    def _register_topics(self) -> None:
+        register(EVENT_TYPE_MEMORY_QUERY, TOPIC_QUERY)
+        register(EVENT_TYPE_MEMORY_RESULTS, TOPIC_RESULTS)
+        register(EVENT_TYPE_MEMORY_HEALTH, TOPIC_HEALTH)
+        register(EVENT_TYPE_CHARACTER_GET, TOPIC_CHAR_GET)
+        register(EVENT_TYPE_CHARACTER_RESULT, TOPIC_CHAR_RESULT)
+        register(EVENT_TYPE_CHARACTER_CURRENT, TOPIC_CHAR_CURRENT)
+        register(EVENT_TYPE_STT_FINAL, TOPIC_STT_FINAL)
+        register(EVENT_TYPE_SAY, TOPIC_TTS_SAY)
+
+    def _load_or_initialize_db(self) -> None:
+        if not os.path.exists(self.database_path):
+            return
+        try:
+            loaded = self.db.load(self.database_path)
+            logger.info("Loaded memory db from %s: %s", self.database_path, loaded)
+            if loaded:
+                self._reconcile_embedding_dim()
+        except Exception:
+            logger.exception("Failed to load memory database")
+
+    def _reconcile_embedding_dim(self) -> None:
+        try:
+            vectors = self.db.vectors
+            if vectors is None or getattr(vectors, "size", 0) == 0:
+                return
+            vectors_shape = tuple(vectors.shape)
+            current_dim = vectors_shape[1] if len(vectors_shape) == 2 else vectors_shape[-1]
+            probe = self.embedder(["dim_check"])
+            probe_shape = tuple(probe.shape)
+            embed_dim = probe_shape[1] if len(probe_shape) == 2 else probe_shape[0]
+            logger.info(
+                "Memory vectors dim=%s embedder dim=%s docs=%s",
+                current_dim,
+                embed_dim,
+                len(self.db.documents),
+            )
+            if current_dim == embed_dim:
+                return
+            logger.info(
+                "Embedding dim changed %s -> %s; re-embedding %s docs",
+                current_dim,
+                embed_dim,
+                len(self.db.documents),
+            )
+            texts = [self.db._doc_to_text(doc) for doc in self.db.documents]
+            self.db.vectors = self.embedder(texts).astype(np.float32)
+            self.db._ensure_bm25()
             try:
-                if ok and self.db.vectors is not None and self.db.vectors.size:
-                    vectors_shape = tuple(self.db.vectors.shape)
-                    current_dim = vectors_shape[1] if len(vectors_shape) == 2 else vectors_shape[-1]
-                    probe = embedder(["dim_check"])  # expect (1, D) but be robust
-                    probe_shape = tuple(probe.shape)
-                    test_dim = probe_shape[1] if len(probe_shape) == 2 else probe_shape[0]
-                    logger.info(f"Memory vectors dim={current_dim}, embedder dim={test_dim}, docs={len(self.db.documents)}")
-                    if current_dim != test_dim:
-                        logger.info(f"Embedding dim changed {current_dim} -> {test_dim}; re-embedding {len(self.db.documents)} docs")
-                        # Rebuild vectors with new embedder
-                        texts = [self.db._doc_to_text(d) for d in self.db.documents]
-                        new_vecs = embedder(texts).astype(np.float32)
-                        self.db.vectors = new_vecs
-                        # Re-index BM25 side
-                        self.db._ensure_bm25()
-                        # Save upgraded db
-                        try:
-                            self.db.save(self.path)
-                        except Exception:
-                            pass
-            except Exception as e:
-                logger.warning(f"Could not reconcile embedding dim: {e}")
-        # Character state
-        self.character = {}
-        self._load_character()
+                self.db.save(self.database_path)
+            except Exception:
+                logger.debug("Failed to persist reconciled memory db", exc_info=True)
+        except Exception:
+            logger.warning("Could not reconcile embedding dimensions", exc_info=True)
 
-    async def run(self):
-        host, port, user, pwd = parse_mqtt(MQTT_URL)
-        logger.info(f"Connecting to MQTT {host}:{port}")
+    async def run(self) -> None:
+        host, port, user, password = parse_mqtt(MQTT_URL)
+        logger.info("Connecting to MQTT %s:%s", host, port)
         try:
-            async with mqtt.Client(hostname=host, port=port, username=user, password=pwd, client_id="tars-memory") as client:
-                logger.info(f"Connected to MQTT {host}:{port} as tars-memory")
-                await client.publish(TOPIC_HEALTH, json.dumps({"ok": True, "event": "ready"}), retain=True)
-                # Publish current character snapshot (retained)
-                if self.character:
-                    try:
-                        await client.publish(TOPIC_CHAR_CURRENT, json.dumps(self.character), retain=True)
-                    except Exception:
-                        logger.exception("Failed to publish character/current")
-                # Prepare message stream (unfiltered_messages is deprecated)
-                async with client.messages() as mstream:
-                    for t in [TOPIC_STT_FINAL, TOPIC_TTS_SAY, TOPIC_QUERY, TOPIC_CHAR_GET]:
-                        await client.subscribe(t)
-                        logger.info(f"Subscribed to {t}")
-                    async for m in mstream:
+            async with mqtt.Client(
+                hostname=host,
+                port=port,
+                username=user,
+                password=password,
+                client_id="tars-memory",
+            ) as client:
+                logger.info("Connected to MQTT %s:%s as tars-memory", host, port)
+                await self._publish_health(client, ok=True, event="ready", retain=True)
+                await self._publish_character_current(client)
+                async with client.messages() as stream:
+                    for topic in (TOPIC_STT_FINAL, TOPIC_TTS_SAY, TOPIC_QUERY, TOPIC_CHAR_GET):
+                        await client.subscribe(topic)
+                        logger.info("Subscribed to %s", topic)
+                    async for message in stream:
+                        topic = str(getattr(message, "topic", ""))
+                        payload = message.payload
                         try:
-                            # Ensure topic is a plain string; some clients provide a Topic object
-                            topic = str(getattr(m, "topic", ""))
-                            logger.info(f"MQTT msg on topic='{topic}' len={len(m.payload)}")
-                            # Robust payload parsing: prefer JSON, but accept plain-text payloads
-                            try:
-                                data = json.loads(m.payload)
-                            except Exception:
-                                try:
-                                    data_text = m.payload.decode("utf-8", "ignore").strip()
-                                except Exception:
-                                    data_text = ""
-                                data = {"text": data_text} if data_text else {}
                             if topic == TOPIC_QUERY:
-                                q = (data.get("text") or data.get("query") or "").strip()
-                                k = int(data.get("top_k", TOP_K))
-                                if not q:
-                                    logger.info("Ignored empty memory/query")
+                                query, correlate = self._decode_memory_query(payload)
+                                if query is None or not query.text.strip():
+                                    logger.info("Ignored empty memory/query message")
                                     continue
-                                logger.info(f"Processing memory/query: '{q}' k={k}")
-                                results = self.db.query(q, top_k=k)
-                                out = [{"document": doc, "score": score} for doc, score in results]
-                                payload = {"query": q, "results": out, "k": k}
-                                logger.info(f"Publishing memory/results: {len(out)} hits")
-                                await client.publish(TOPIC_RESULTS, json.dumps(payload))
+                                await self._handle_memory_query(client, query, correlate)
                             elif topic == TOPIC_CHAR_GET:
-                                await self._handle_char_get(client, data)
+                                request, correlate = self._decode_character_get(payload)
+                                await self._handle_char_get(client, request, correlate)
                             elif topic in (TOPIC_STT_FINAL, TOPIC_TTS_SAY):
-                                # Record conversational pairings where possible
-                                text = (data.get("text") or "").strip()
-                                if not text:
-                                    continue
-                                doc = data
-                                self.db.add([doc])
-                                # Persist lightly
-                                try:
-                                    self.db.save(self.path)
-                                except Exception:
-                                    pass
-                                logger.info("Indexed new doc into memory store")
+                                self._ingest_document(topic, payload)
                             else:
-                                logger.debug(f"Unhandled topic: {topic}")
-                        except Exception as e:
-                            logger.error(f"Error handling message: {e}")
-                            await client.publish(TOPIC_HEALTH, json.dumps({"ok": False, "err": str(e)}), retain=True)
-        except Exception as e:
-            logger.info(f"MQTT disconnected or error: {e}; shutting down gracefully")
+                                logger.debug("Unhandled topic: %s", topic)
+                        except Exception as exc:  # pragma: no cover - defensive
+                            logger.exception("Error handling message on topic=%s", topic)
+                            await self._publish_health(client, ok=False, err=str(exc), retain=True)
+        except Exception as exc:  # pragma: no cover - network layer
+            logger.info("MQTT disconnected or error: %s; shutting down gracefully", exc)
 
-    def _load_character(self) -> None:
-        """Load character TOML if available and seed in-memory snapshot.
+    async def _publish_health(
+        self,
+        client: mqtt.Client,
+        *,
+        ok: bool,
+        event: str | None = None,
+        err: str | None = None,
+        retain: bool = False,
+    ) -> None:
+        payload = HealthPing(ok=ok, event=event, err=err)
+        await self._publish_event(
+            client,
+            event_type=EVENT_TYPE_MEMORY_HEALTH,
+            topic=TOPIC_HEALTH,
+            payload=payload,
+            correlate=None,
+            qos=1,
+            retain=retain,
+        )
 
-        Expected path: CHARACTER_DIR/CHARACTER_NAME/character.toml
-        Minimal schema: { info = { name, description? }, traits = { ... }, voice = { ... } }
-        """
+    async def _publish_character_current(self, client: mqtt.Client) -> None:
+        await self._publish_event(
+            client,
+            event_type=EVENT_TYPE_CHARACTER_CURRENT,
+            topic=TOPIC_CHAR_CURRENT,
+            payload=self.character,
+            correlate=self.character.message_id,
+            qos=1,
+            retain=True,
+        )
+
+    async def _handle_memory_query(
+        self,
+        client: mqtt.Client,
+        query: MemoryQuery,
+        correlate: str | None,
+    ) -> None:
+        top_k = query.top_k or TOP_K
+        results = self.db.query(query.text, top_k=top_k)
+        hits = [
+            MemoryResult(
+                document=doc if isinstance(doc, dict) else {"text": str(doc)},
+                score=float(score),
+            )
+            for doc, score in results
+        ]
+        payload = MemoryResults(query=query.text, k=top_k, results=hits)
+        await self._publish_event(
+            client,
+            event_type=EVENT_TYPE_MEMORY_RESULTS,
+            topic=TOPIC_RESULTS,
+            payload=payload,
+            correlate=correlate or query.message_id,
+            qos=1,
+            retain=False,
+        )
+
+    async def _handle_char_get(
+        self,
+        client: mqtt.Client,
+        request: CharacterGetRequest,
+        correlate: str | None,
+    ) -> None:
+        snapshot_dict = self.character.model_dump()
+        if not request.section:
+            await self._publish_event(
+                client,
+                event_type=EVENT_TYPE_CHARACTER_RESULT,
+                topic=TOPIC_CHAR_RESULT,
+                payload=self.character,
+                correlate=correlate or request.message_id,
+                qos=0,
+                retain=False,
+            )
+            return
+        section = request.section
+        if section in snapshot_dict:
+            value: Any = snapshot_dict[section]
+        else:
+            value = {"error": f"unknown section '{section}'", "available": list(snapshot_dict.keys())}
+        payload = CharacterSection(section=section, value=value)
+        await self._publish_event(
+            client,
+            event_type=EVENT_TYPE_CHARACTER_RESULT,
+            topic=TOPIC_CHAR_RESULT,
+            payload=payload,
+            correlate=correlate or request.message_id,
+            qos=0,
+            retain=False,
+        )
+
+    def _ingest_document(self, topic: str, payload: bytes) -> None:
+        data, _ = self._decode_payload(payload)
+        if not data:
+            return
+        if topic == TOPIC_STT_FINAL:
+            doc = self._coerce_transcript(data)
+        else:
+            doc = self._coerce_tts_payload(data)
+        if doc is None:
+            return
+        self.db.add([doc])
         try:
-            char_dir = Path(CHARACTER_DIR) / CHARACTER_NAME
-            toml_path = char_dir / "character.toml"
+            self.db.save(self.database_path)
+        except Exception:
+            logger.debug("Failed to persist memory db after ingest", exc_info=True)
+        logger.info("Indexed new doc into memory store from %s", topic)
+
+    def _coerce_transcript(self, data: dict[str, Any]) -> dict[str, Any] | None:
+        try:
+            transcript = FinalTranscript.model_validate(data)
+            return transcript.model_dump()
+        except ValidationError:
+            text = str(data.get("text") or "").strip()
+            if not text:
+                return None
+            clone = dict(data)
+            clone["text"] = text
+            clone.setdefault("is_final", True)
+            return clone
+
+    def _coerce_tts_payload(self, data: dict[str, Any]) -> dict[str, Any] | None:
+        try:
+            say = TtsSay.model_validate(data)
+            return say.model_dump()
+        except ValidationError:
+            text = str(data.get("text") or "").strip()
+            if not text:
+                return None
+            clone = dict(data)
+            clone["text"] = text
+            return clone
+
+    def _decode_memory_query(self, payload: bytes) -> tuple[MemoryQuery | None, str | None]:
+        data, message_id = self._decode_payload(payload)
+        if not data:
+            return None, message_id
+        try:
+            return MemoryQuery.model_validate(data), message_id
+        except ValidationError:
+            text = str(data.get("text") or data.get("query") or "").strip()
+            if not text:
+                return None, message_id
+            top_k_raw = data.get("top_k", TOP_K)
+            try:
+                top_k_int = int(top_k_raw)
+            except (TypeError, ValueError):
+                top_k_int = TOP_K
+            return MemoryQuery(text=text, top_k=max(1, top_k_int)), message_id
+
+    def _decode_character_get(self, payload: bytes) -> tuple[CharacterGetRequest, str | None]:
+        data, message_id = self._decode_payload(payload)
+        try:
+            return CharacterGetRequest.model_validate(data), message_id
+        except ValidationError:
+            section = data.get("section") if isinstance(data, dict) else None
+            return CharacterGetRequest(section=section if isinstance(section, str) else None), message_id
+
+    def _decode_payload(self, payload: bytes) -> tuple[dict[str, Any], str | None]:
+        envelope: Envelope | None = None
+        try:
+            envelope = Envelope.model_validate_json(payload)
+            raw = envelope.data
+            if isinstance(raw, dict):
+                return raw, envelope.id
+            return {}, envelope.id
+        except ValidationError:
+            pass
+        try:
+            parsed = json.loads(payload)
+            if isinstance(parsed, dict):
+                return parsed, None
+        except Exception:
+            try:
+                text = payload.decode("utf-8", "ignore").strip()
+            except Exception:
+                text = ""
+            if text:
+                return {"text": text}, None
+        return {}, None
+
+    async def _publish_event(
+        self,
+        client: mqtt.Client,
+        *,
+        event_type: str,
+        topic: str,
+        payload: Any,
+        correlate: str | None,
+        qos: int,
+        retain: bool,
+    ) -> None:
+        envelope = Envelope.new(event_type=event_type, data=payload, correlate=correlate, source=SOURCE_NAME)
+        await client.publish(topic, envelope.model_dump_json().encode(), qos=qos, retain=retain)
+
+    def _load_character(self) -> CharacterSnapshot:
+        try:
+            base = Path(CHARACTER_DIR) / CHARACTER_NAME
+            toml_path = base / "character.toml"
             if not toml_path.exists():
                 logger.warning("Character file not found: %s", toml_path)
-                # Seed with defaults
-                self.character = {"name": CHARACTER_NAME, "traits": {}, "voice": {}}
-                return
-            with open(toml_path, "rb") as f:
-                data = tomllib.load(f)
+                return CharacterSnapshot(name=CHARACTER_NAME)
+            with open(toml_path, "rb") as fp:
+                data = tomllib.load(fp)
             info = data.get("info", {}) or {}
             name = info.get("name") or CHARACTER_NAME
             description = info.get("description") or ""
@@ -174,32 +411,16 @@ class MemoryService:
             traits = data.get("traits", {}) or {}
             voice = data.get("voice", {}) or {}
             meta = data.get("meta", {}) or {}
-            self.character = {
-                "name": name,
-                "description": description,
-                "systemprompt": systemprompt,
-                "traits": traits,
-                "voice": voice,
-                "meta": meta,
-            }
-            logger.info("Loaded character '%s' with %d traits", name, len(traits))
+            snapshot = CharacterSnapshot(
+                name=name,
+                description=description or None,
+                systemprompt=systemprompt or None,
+                traits=traits,
+                voice=voice,
+                meta=meta,
+            )
+            logger.info("Loaded character '%s' with %d traits", snapshot.name, len(traits))
+            return snapshot
         except Exception:
             logger.exception("Failed to load character config")
-            self.character = {"name": CHARACTER_NAME, "traits": {}, "voice": {}}
-
-    async def _handle_char_get(self, client, data: Dict[str, Any]) -> None:
-        """Respond to character/get with character/result containing current state.
-
-        Payload may specify a section filter: { section: "traits" | "voice" | "meta" }
-        or a path: { path: "traits.personality" }, but for now we support section only.
-        """
-        section = (data or {}).get("section")
-        result: Dict[str, Any]
-        if not section:
-            result = self.character
-        else:
-            if section in self.character:
-                result = {section: self.character.get(section)}
-            else:
-                result = {"error": f"unknown section '{section}'", "available": list(self.character.keys())}
-        await client.publish(TOPIC_CHAR_RESULT, json.dumps(result), qos=0, retain=False)
+            return CharacterSnapshot(name=CHARACTER_NAME)
