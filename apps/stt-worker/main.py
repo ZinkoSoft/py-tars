@@ -34,6 +34,8 @@ from config import (
     FFT_LOG_SCALE,
     AUDIO_FANOUT_PATH,
     AUDIO_FANOUT_RATE,
+    WAKE_EVENT_FALLBACK_DELAY_MS,
+    WAKE_EVENT_FALLBACK_TTL_MS,
 )
 from audio_capture import AudioCapture
 from vad import VADProcessor
@@ -65,6 +67,7 @@ class STTWorker:
         self._last_partial_text: str = ""
         self._fft_task = None
         self._wake_ttl_task: asyncio.Task | None = None
+        self._wake_fallback_task: asyncio.Task | None = None
         self.audio_fanout: AudioFanoutPublisher | None = None
 
     async def initialize(self):
@@ -79,6 +82,7 @@ class STTWorker:
         # Also listen to tts/say to preemptively mute and set echo context, in case we miss 'speaking_start'
         await self.mqtt.subscribe_stream('tts/say', self._handle_tts_say)
         await self.mqtt.subscribe_stream('wake/mic', self._handle_wake_mic)
+        await self.mqtt.subscribe_stream('wake/event', self._handle_wake_event)
         self.audio_fanout = AudioFanoutPublisher(AUDIO_FANOUT_PATH, target_sample_rate=AUDIO_FANOUT_RATE)
         await self.audio_fanout.start()
         self.audio_capture.register_fanout(self.audio_fanout)
@@ -188,6 +192,8 @@ class STTWorker:
             logger.warning(f"Unknown wake/mic action: {action}")
             return
 
+        self._cancel_wake_fallback()
+
         if self._wake_ttl_task and not self._wake_ttl_task.done():
             self._wake_ttl_task.cancel()
             self._wake_ttl_task = None
@@ -208,6 +214,66 @@ class STTWorker:
             logger.info("Wake control muted microphone")
             if isinstance(ttl_ms, (int, float)) and ttl_ms > 0:
                 self._wake_ttl_task = asyncio.create_task(self._schedule_wake_ttl('unmute', ttl_ms, reason))
+
+    def _cancel_wake_fallback(self) -> None:
+        task = getattr(self, "_wake_fallback_task", None)
+        if task and not task.done():
+            task.cancel()
+        self._wake_fallback_task = None
+
+    def _schedule_wake_fallback(self, event_type: str, delay_ms: int | None = None) -> None:
+        if WAKE_EVENT_FALLBACK_DELAY_MS <= 0 and delay_ms is None:
+            return
+        self._cancel_wake_fallback()
+
+        delay = (delay_ms if delay_ms is not None else WAKE_EVENT_FALLBACK_DELAY_MS) / 1000.0
+        delay = max(0.0, delay)
+        ttl_ms = max(0, WAKE_EVENT_FALLBACK_TTL_MS)
+
+        async def _fallback() -> None:
+            try:
+                if delay:
+                    await asyncio.sleep(delay)
+                if not self.audio_capture.is_muted:
+                    return
+                logger.warning(
+                    "Wake event (%s) did not produce wake/mic unmute within %.0fms; forcing microphone open",
+                    event_type,
+                    delay * 1000.0,
+                )
+                if self.fallback_unmute_task and not self.fallback_unmute_task.done():
+                    self.fallback_unmute_task.cancel()
+                    self.fallback_unmute_task = None
+                self.pending_tts = False
+                self.audio_capture.unmute(f"wake-event/{event_type}")
+                self.recent_unmute_time = time.time()
+                if ttl_ms > 0:
+                    if self._wake_ttl_task and not self._wake_ttl_task.done():
+                        self._wake_ttl_task.cancel()
+                    self._wake_ttl_task = asyncio.create_task(
+                        self._schedule_wake_ttl('mute', ttl_ms, f"{event_type}-fallback")
+                    )
+            except asyncio.CancelledError:
+                pass
+
+        self._wake_fallback_task = asyncio.create_task(_fallback())
+
+    async def _handle_wake_event(self, payload: bytes):
+        try:
+            data = orjson.loads(payload)
+        except Exception as exc:
+            logger.error(f"Invalid wake/event payload: {exc}")
+            return
+
+        event_type = str(data.get('type') or '').lower()
+        if event_type in {'wake', 'interrupt'}:
+            logger.debug("Wake event (%s) received; arming microphone fallback", event_type)
+            delay_override = 0 if event_type == 'interrupt' else None
+            self._schedule_wake_fallback(event_type, delay_override)
+        elif event_type in {'timeout', 'cancelled', 'resume'}:
+            self._cancel_wake_fallback()
+        else:
+            logger.debug("Ignoring wake/event type=%s", event_type)
 
     async def _schedule_wake_ttl(self, next_action: str, ttl_ms: float, reason: str) -> None:
         try:
@@ -303,6 +369,10 @@ class STTWorker:
             self.audio_capture.stop_capture()
             if self.audio_fanout is not None:
                 await self.audio_fanout.close()
+            if self._wake_fallback_task and not self._wake_fallback_task.done():
+                self._wake_fallback_task.cancel()
+            if self._wake_ttl_task and not self._wake_ttl_task.done():
+                self._wake_ttl_task.cancel()
             await self.mqtt.disconnect()
 
     async def _partials_loop(self):

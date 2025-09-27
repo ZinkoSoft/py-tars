@@ -19,6 +19,8 @@ ECHO_SUPPRESS_MATCH = int(os.getenv("ECHO_SUPPRESS_MATCH", "1"))
 TTS_BASE_MUTE_MS = int(os.getenv("TTS_BASE_MUTE_MS", "1200"))
 TTS_PER_CHAR_MS = float(os.getenv("TTS_PER_CHAR_MS", "45"))
 TTS_MAX_MUTE_MS = int(os.getenv("TTS_MAX_MUTE_MS", "12000"))
+WAKE_EVENT_FALLBACK_DELAY_MS = int(os.getenv("WAKE_EVENT_FALLBACK_DELAY_MS", "250"))
+WAKE_EVENT_FALLBACK_TTL_MS = int(os.getenv("WAKE_EVENT_FALLBACK_TTL_MS", "3500"))
 NOISE_MIN_DURATION_MS = int(os.getenv("NOISE_MIN_DURATION_MS", "400"))
 NOISE_MIN_RMS = int(os.getenv("NOISE_MIN_RMS", "180"))
 # Adaptive noise floor parameters

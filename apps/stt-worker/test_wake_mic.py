@@ -45,6 +45,7 @@ async def test_wake_mic_unmute_triggers_mute_ttl():
     worker.recent_unmute_time = 0.0
     worker.fallback_unmute_task = None
     worker._wake_ttl_task = None
+    worker._wake_fallback_task = None
 
     payload = orjson.dumps({"action": "unmute", "reason": "wake", "ttl_ms": 20})
     await stt_main.STTWorker._handle_wake_mic(worker, payload)
@@ -71,6 +72,7 @@ async def test_wake_mic_mute_triggers_unmute_ttl():
     worker.recent_unmute_time = 0.0
     worker.fallback_unmute_task = None
     worker._wake_ttl_task = None
+    worker._wake_fallback_task = None
 
     payload = orjson.dumps({"action": "mute", "reason": "wake", "ttl_ms": 10})
     await stt_main.STTWorker._handle_wake_mic(worker, payload)
@@ -82,3 +84,38 @@ async def test_wake_mic_mute_triggers_unmute_ttl():
         worker._wake_ttl_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await worker._wake_ttl_task
+
+
+@pytest.mark.asyncio
+async def test_wake_event_fallback_unmutes_when_mic_stays_muted(monkeypatch):
+    stt_main = _load_stt_module()
+    worker = object.__new__(stt_main.STTWorker)
+    dummy = DummyCapture()
+    dummy.is_muted = True
+    worker.audio_capture = dummy
+    worker.pending_tts = True
+    worker.recent_unmute_time = 0.0
+    worker.fallback_unmute_task = None
+    worker._wake_ttl_task = None
+    worker._wake_fallback_task = None
+
+    monkeypatch.setattr(stt_main, "WAKE_EVENT_FALLBACK_DELAY_MS", 5)
+    monkeypatch.setattr(stt_main, "WAKE_EVENT_FALLBACK_TTL_MS", 20)
+
+    payload = orjson.dumps({"type": "wake"})
+    await stt_main.STTWorker._handle_wake_event(worker, payload)
+
+    await asyncio.sleep(0.02)
+
+    assert worker.audio_capture.unmute_calls == ["wake-event/wake"]
+    assert worker.pending_tts is False
+    assert worker._wake_ttl_task is not None
+
+    if worker._wake_ttl_task:
+        worker._wake_ttl_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await worker._wake_ttl_task
+    if worker._wake_fallback_task:
+        worker._wake_fallback_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await worker._wake_fallback_task
