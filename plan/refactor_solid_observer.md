@@ -143,9 +143,9 @@ This plan operationalizes the outcomes captured in `py-tars_SOLID-review.md`.
    - ✅ Add regression tests under `apps/router/tests/` that exercise the dispatcher flow with the new contracts. *(Dispatcher queue guardrails + typed wake-mode assertions live under `apps/router/tests/`.)*
 - **STT Worker**
    - [x] Emit `FinalTranscript`/`PartialTranscript` from `src/tars/contracts/v1/stt.py` and rely on the shared publisher adapter for MQTT.
-   - [ ] Consume wake/health contracts from `src/tars/contracts/v1/` where relevant (e.g., suppressions/ready signals).
-   - [ ] Wrap VAD/transcription orchestration in a port-aware service under `src/tars/domain/stt.py`.
-   - [ ] Backfill unit tests for suppression heuristics using the shared contracts to guarantee schema parity.
+   - [x] Consume wake/health contracts from `src/tars/contracts/v1/` where relevant (e.g., suppressions/ready signals).
+   - [x] Wrap VAD/transcription orchestration in a port-aware service under `src/tars/domain/stt.py`.
+   - [x] Backfill unit tests for suppression heuristics using the shared contracts to guarantee schema parity.
 - **TTS Worker**
    - [ ] Accept `TTSSay` models from `src/tars/contracts/v1/tts.py` and funnel speech synthesis through a dispatcher-aware consumer.
    - [ ] Publish `tts/status` as a typed health/event contract and expose aggregation via domain services.
