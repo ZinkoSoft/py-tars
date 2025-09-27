@@ -56,12 +56,7 @@ services:
   tts:
     build:
       context: ..
-      dockerfile: docker/app.Dockerfile
-      args:
-        PY_VERSION: "3.11"
-        APP_PATH: apps/tts-worker
-        CONTRACTS_PATH: packages/tars-core
-        APP_MODULE: tars_tts_worker.app_main
+      dockerfile: apps/tts-worker/Dockerfile
     image: tars/tts:dev
     container_name: tars-tts
     environment:
@@ -70,7 +65,7 @@ services:
     depends_on:
       mqtt:
         condition: service_healthy
-    command: ["sh","-lc","python -m tars_tts_worker.app_main"]
+  # Image entrypoint handles startup
     restart: unless-stopped
     # Example of mounting voices/models if needed
     # volumes:
@@ -79,12 +74,7 @@ services:
   stt:
     build:
       context: ..
-      dockerfile: docker/app.Dockerfile
-      args:
-        PY_VERSION: "3.11"
-        APP_PATH: apps/stt-worker
-        CONTRACTS_PATH: packages/tars-core
-        APP_MODULE: tars_stt_worker.app_main
+      dockerfile: apps/stt-worker/Dockerfile
     image: tars/stt:dev
     container_name: tars-stt
     environment:
@@ -93,7 +83,7 @@ services:
     depends_on:
       mqtt:
         condition: service_healthy
-    command: ["sh","-lc","python -m tars_stt_worker.app_main"]
+  # Image entrypoint handles startup
     restart: unless-stopped
     # devices:
     #   - "/dev/snd"   # if capturing audio from host
