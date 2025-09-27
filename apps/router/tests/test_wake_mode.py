@@ -13,24 +13,39 @@ if SRC_DIR.exists():
 
 from tars.contracts.envelope import Envelope  # type: ignore[import]
 from tars.contracts.registry import register  # type: ignore[import]
-from tars.contracts.v1 import FinalTranscript, WakeEvent  # type: ignore[import]
+from tars.contracts.v1 import (  # type: ignore[import]
+    EVENT_TYPE_LLM_REQUEST,
+    EVENT_TYPE_SAY,
+    FinalTranscript,
+    LLMRequest,
+    TtsSay,
+    WakeEvent,
+)
 from tars.domain.ports import Publisher  # type: ignore[import]
 from tars.domain.router import RouterPolicy, RouterSettings  # type: ignore[import]
 from tars.runtime.ctx import Ctx  # type: ignore[import]
 
 
+_EVENT_MODEL_MAP = {
+    EVENT_TYPE_SAY: TtsSay,
+    EVENT_TYPE_LLM_REQUEST: LLMRequest,
+}
+
+
 class DummyPublisher(Publisher):
     def __init__(self) -> None:
-        self.messages: list[Tuple[str, dict]] = []
+        self.messages: list[Tuple[str, object]] = []
 
     async def publish(self, topic: str, payload: bytes, qos: int = 0, retain: bool = False) -> None:  # pragma: no cover - trivial
         envelope = Envelope.model_validate_json(payload)
-        self.messages.append((topic, envelope.data))
+        model_cls = _EVENT_MODEL_MAP.get(envelope.type)
+        parsed = model_cls.model_validate(envelope.data) if model_cls else envelope.data
+        self.messages.append((topic, parsed))
 
     def clear(self) -> None:
         self.messages.clear()
 
-    def decoded(self) -> list[Tuple[str, dict]]:
+    def decoded(self) -> list[Tuple[str, object]]:
         return list(self.messages)
 
 
@@ -84,14 +99,18 @@ async def test_wake_then_llm_request(router_policy: Tuple[RouterPolicy, RouterSe
     await policy.handle_wake_event(WakeEvent(type="wake"), ctx)
     decoded = publisher.decoded()
     assert decoded and decoded[0][0] == settings.topic_tts_say
-    assert decoded[0][1]["text"] == "Ready."
-    assert decoded[0][1].get("wake_ack") is True
+    say = decoded[0][1]
+    assert isinstance(say, TtsSay)
+    assert say.text == "Ready."
+    assert say.wake_ack is True
     publisher.clear()
 
     await policy.handle_stt_final(FinalTranscript(text="What's the weather today?"), ctx)
     decoded = publisher.decoded()
     assert decoded and decoded[0][0] == settings.topic_llm_req
-    assert decoded[0][1]["text"] == "What's the weather today?"
+    llm_req = decoded[0][1]
+    assert isinstance(llm_req, LLMRequest)
+    assert llm_req.text == "What's the weather today?"
 
 
 @pytest.mark.asyncio
@@ -105,7 +124,9 @@ async def test_wake_inline_rule(router_policy: Tuple[RouterPolicy, RouterSetting
     await policy.handle_stt_final(FinalTranscript(text="Hey Tars what time is it"), ctx)
     decoded = publisher.decoded()
     assert decoded and decoded[0][0] == settings.topic_tts_say
-    assert "It is" in decoded[0][1]["text"]
+    say = decoded[0][1]
+    assert isinstance(say, TtsSay)
+    assert "It is" in say.text
 
 
 @pytest.mark.asyncio
@@ -119,20 +140,26 @@ async def test_live_mode_enable_disable(router_policy: Tuple[RouterPolicy, Route
     await policy.handle_stt_final(FinalTranscript(text="enter live mode"), ctx)
     decoded = publisher.decoded()
     assert decoded and decoded[0][0] == settings.topic_tts_say
-    assert decoded[0][1]["text"] == "Live mode on."
+    say = decoded[0][1]
+    assert isinstance(say, TtsSay)
+    assert say.text == "Live mode on."
     assert policy.live_mode is True
     publisher.clear()
 
     await policy.handle_stt_final(FinalTranscript(text="tell me a joke"), ctx)
     decoded = publisher.decoded()
     assert decoded and decoded[0][0] == settings.topic_llm_req
-    assert decoded[0][1]["text"] == "tell me a joke"
+    llm_req = decoded[0][1]
+    assert isinstance(llm_req, LLMRequest)
+    assert llm_req.text == "tell me a joke"
     publisher.clear()
 
     await policy.handle_stt_final(FinalTranscript(text="exit live mode"), ctx)
     decoded = publisher.decoded()
     assert decoded and decoded[0][0] == settings.topic_tts_say
-    assert decoded[0][1]["text"] == "Live mode off."
+    say = decoded[0][1]
+    assert isinstance(say, TtsSay)
+    assert say.text == "Live mode off."
     assert policy.live_mode is False
     publisher.clear()
 

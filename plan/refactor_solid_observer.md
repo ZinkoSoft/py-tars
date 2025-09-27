@@ -10,6 +10,13 @@ This plan operationalizes the outcomes captured in `py-tars_SOLID-review.md`.
 
 ---
 
+## Progress Snapshot *(27 Sep 2025)*
+- ✅ Router dispatcher now runs behind a bounded `asyncio.Queue` with configurable overflow strategies, structured logging, and handler timeouts. Tests cover the new backpressure rules and are wired into `apps/router/tests`.
+- ✅ Router composition root passes `RouterStreamSettings` into the dispatcher so queue size and timeout knobs are driven by environment config.
+- ✅ Structured logging groundwork in router/runtime is in place (JSON logs with correlation metadata) from earlier phases.
+- ✅ Router policy publishes only typed contracts, and the wake-mode regressions now assert against `TtsSay`/`LLMRequest` models instead of raw dict payloads.
+- ✅ Shared MQTT adapters (`src/tars/adapters/mqtt_asyncio.py`) expose configurable dedupe options, and router tests exercise the subscriber behavior to guard regressions.
+
 ## Phase 1 – Stabilize Contracts (Week 1)
 **Objectives**
 - Define typed message schemas and enforce runtime validation.
@@ -56,7 +63,7 @@ This plan operationalizes the outcomes captured in `py-tars_SOLID-review.md`.
 - Harden wake/mic state machine using new abstractions.
 
 **Tasks**
-1. Add bounded queues/backpressure controls inside adapters; guarantee `await` on publishes.
+1. ✅ Add bounded queues/backpressure controls inside adapters; guarantee `await` on publishes. *(Router dispatcher updated with bounded queue + overflow strategies and tests in `apps/router/tests/test_runtime_dispatcher.py`.)*
 2. Debounce `stt/partial` messages; treat `stt/final` as the routing trigger.
 3. Revisit wake/mic logic with `message_id` semantics, TTL tasks, and idempotent handling.
 4. Standardize `system/health/+` payload schema and emit periodic heartbeats.
@@ -121,18 +128,18 @@ This plan operationalizes the outcomes captured in `py-tars_SOLID-review.md`.
 ---
 
 ## Quick Wins (Immediate Next Steps)
-- Land the router migration onto `src/tars/runtime.dispatcher` using the new typed contracts for STT, TTS, LLM, wake, and health events.
-- Replace ad-hoc MQTT payload dicts with `src/tars/contracts/v1/*` models inside router handlers and tests, deleting the legacy `apps/shared/models.py` clones as they fall out of use.
-- Stand up MQTT publisher/subscriber adapters under `src/tars/adapters/mqtt_asyncio.py` (or similar) and point `apps/router/main.py` at them as the first composition root.
+- ✅ Land the router migration onto `src/tars/runtime.dispatcher` using the new typed contracts for STT, TTS, LLM, wake, and health events. *(Dispatcher now orchestrates subscriptions with typed models and backpressure.)*
+- ✅ Replace ad-hoc MQTT payload dicts with `src/tars/contracts/v1/*` models inside router handlers and tests, deleting the legacy `apps/shared/models.py` clones as they fall out of use. *(Router wake-mode tests now validate `TtsSay`/`LLMRequest` models, ensuring typed round-trips.)*
+- ✅ Stand up MQTT publisher/subscriber adapters under `src/tars/adapters/mqtt_asyncio.py` (or similar) and point `apps/router/main.py` at them as the first composition root. *(Adapters now ship with a typed options object and dedicated tests under `apps/router/tests/test_mqtt_adapter.py`.)*
 - Align the LLM worker with `src/tars/contracts/v1/llm` (including the shared `BaseLLMMessage`) to keep provider responses consistent with the router expectations.
 - Turn on strict mypy + ruff checks for the `src/tars` packages so regressions are caught while we migrate callers over module by module.
 
 ## Migration Checklist – `src/tars/` Adoption
 - **Router**
    - [ ] Replace topic string switches with a subscription table backed by `src/tars/runtime/subscription.py` and `Dispatcher`.
-   - [ ] Deserialize inbound MQTT payloads with `src/tars/contracts/v1/{stt,tts,llm,wake,health}` and publish outbound messages through the typed helpers.
+   - ✅ Deserialize inbound MQTT payloads with `src/tars/contracts/v1/{stt,tts,llm,wake,health}` and publish outbound messages through the typed helpers. *(Policy and dispatcher paths now operate purely on typed models.)*
    - [ ] Move rule evaluation and streaming boundary management into `src/tars/domain/policy.py`, leaving `apps/router/main.py` as a thin composition root.
-   - [ ] Add regression tests under `apps/router/tests/` that exercise the dispatcher flow with the new contracts.
+   - ✅ Add regression tests under `apps/router/tests/` that exercise the dispatcher flow with the new contracts. *(Dispatcher queue guardrails + typed wake-mode assertions live under `apps/router/tests/`.)*
 - **STT Worker**
    - [ ] Emit `FinalTranscript`/`PartialTranscript` from `src/tars/contracts/v1/stt.py` and rely on the shared publisher adapter for MQTT.
    - [ ] Consume wake/health contracts from `src/tars/contracts/v1/` where relevant (e.g., suppressions/ready signals).

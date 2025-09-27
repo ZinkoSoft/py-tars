@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from collections import OrderedDict
 from collections.abc import AsyncIterable
+from dataclasses import dataclass
 from typing import Optional
 
 import asyncio_mqtt as mqtt
@@ -10,6 +11,13 @@ from pydantic import ValidationError
 
 from tars.contracts.envelope import Envelope
 from tars.domain.ports import Publisher, Subscriber
+
+@dataclass(slots=True)
+class MQTTSubscriberOptions:
+    """Configuration for MQTT subscriber behavior."""
+
+    dedupe_ttl: float = 30.0
+    dedupe_max_entries: int = 2048
 
 
 class AsyncioMQTTPublisher(Publisher):
@@ -29,13 +37,13 @@ class AsyncioMQTTSubscriber(Subscriber):
         self,
         client: mqtt.Client,
         *,
-        dedupe_ttl: float = 30.0,
-        dedupe_max_entries: int = 2048,
+        options: MQTTSubscriberOptions | None = None,
     ) -> None:
         self._client = client
+        opts = options or MQTTSubscriberOptions()
         self._dedupe = (
-            MessageDeduplicator(ttl=dedupe_ttl, max_entries=dedupe_max_entries)
-            if dedupe_ttl > 0 and dedupe_max_entries > 0
+            MessageDeduplicator(ttl=opts.dedupe_ttl, max_entries=opts.dedupe_max_entries)
+            if opts.dedupe_ttl > 0 and opts.dedupe_max_entries > 0
             else None
         )
 
