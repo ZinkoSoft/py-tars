@@ -37,78 +37,6 @@ from tars.runtime.dispatcher import Dispatcher  # type: ignore[import]
 from tars.runtime.subscription import Sub  # type: ignore[import]
 
 
-def _env_bool(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.lower() in {"1", "true", "yes", "on"}
-
-
-def _env_int(name: str, default: int) -> int:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    try:
-        return int(value)
-    except ValueError:
-        return default
-
-
-def _env_float(name: str, default: float) -> float:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    try:
-        return float(value)
-    except ValueError:
-        return default
-
-
-def load_settings() -> RouterSettings:
-    defaults = RouterSettings()
-    return RouterSettings(
-        mqtt_url=os.getenv("MQTT_URL", defaults.mqtt_url),
-        online_announce=_env_bool("ONLINE_ANNOUNCE", defaults.online_announce),
-        online_text=os.getenv("ONLINE_ANNOUNCE_TEXT", defaults.online_text),
-        topic_health_tts=os.getenv("TOPIC_HEALTH_TTS", defaults.topic_health_tts),
-        topic_health_stt=os.getenv("TOPIC_HEALTH_STT", defaults.topic_health_stt),
-    topic_health_router=os.getenv("TOPIC_HEALTH_ROUTER", defaults.topic_health_router),
-        topic_stt_final=os.getenv("TOPIC_STT_FINAL", defaults.topic_stt_final),
-        topic_tts_say=os.getenv("TOPIC_TTS_SAY", defaults.topic_tts_say),
-        topic_llm_req=os.getenv("TOPIC_LLM_REQUEST", defaults.topic_llm_req),
-        topic_llm_resp=os.getenv("TOPIC_LLM_RESPONSE", defaults.topic_llm_resp),
-        topic_llm_stream=os.getenv("TOPIC_LLM_STREAM", defaults.topic_llm_stream),
-        topic_llm_cancel=os.getenv("TOPIC_LLM_CANCEL", defaults.topic_llm_cancel),
-        topic_wake_event=os.getenv("TOPIC_WAKE_EVENT", defaults.topic_wake_event),
-        router_llm_tts_stream=_env_bool("ROUTER_LLM_TTS_STREAM", defaults.router_llm_tts_stream),
-        stream_min_chars=_env_int("ROUTER_STREAM_MIN_CHARS", _env_int("STREAM_MIN_CHARS", defaults.stream_min_chars)),
-        stream_max_chars=_env_int("ROUTER_STREAM_MAX_CHARS", _env_int("STREAM_MAX_CHARS", defaults.stream_max_chars)),
-        stream_boundary_chars=os.getenv(
-            "ROUTER_STREAM_BOUNDARY_CHARS",
-            os.getenv("STREAM_BOUNDARY_CHARS", defaults.stream_boundary_chars),
-        ),
-        stream_boundary_only=_env_bool("ROUTER_STREAM_BOUNDARY_ONLY", defaults.stream_boundary_only),
-        stream_hard_max_chars=_env_int("ROUTER_STREAM_HARD_MAX_CHARS", defaults.stream_hard_max_chars),
-        wake_phrases_raw=os.getenv("ROUTER_WAKE_PHRASES", os.getenv("WAKE_PHRASES", defaults.wake_phrases_raw)),
-        wake_window_sec=_env_float("ROUTER_WAKE_WINDOW_SEC", defaults.wake_window_sec),
-        wake_ack_enabled=_env_bool("ROUTER_WAKE_ACK_ENABLED", defaults.wake_ack_enabled),
-        wake_ack_text=os.getenv("ROUTER_WAKE_ACK_TEXT", defaults.wake_ack_text),
-        wake_ack_choices_raw=os.getenv("ROUTER_WAKE_ACK_CHOICES", os.getenv("WAKE_ACK_CHOICES", defaults.wake_ack_choices_raw)),
-        wake_ack_style=os.getenv("ROUTER_WAKE_ACK_STYLE", defaults.wake_ack_style),
-        wake_reprompt_text=os.getenv("ROUTER_WAKE_REPROMPT_TEXT", defaults.wake_reprompt_text),
-        wake_interrupt_text=os.getenv("ROUTER_WAKE_INTERRUPT_TEXT", defaults.wake_interrupt_text),
-        wake_resume_text=os.getenv("ROUTER_WAKE_RESUME_TEXT", defaults.wake_resume_text),
-        wake_cancel_text=os.getenv("ROUTER_WAKE_CANCEL_TEXT", defaults.wake_cancel_text),
-        wake_timeout_text=os.getenv("ROUTER_WAKE_TIMEOUT_TEXT", defaults.wake_timeout_text),
-        live_mode_default=_env_bool("ROUTER_LIVE_MODE_DEFAULT", defaults.live_mode_default),
-        live_mode_enter_phrase=os.getenv("ROUTER_LIVE_MODE_ENTER_PHRASE", defaults.live_mode_enter_phrase),
-        live_mode_exit_phrase=os.getenv("ROUTER_LIVE_MODE_EXIT_PHRASE", defaults.live_mode_exit_phrase),
-        live_mode_enter_ack=os.getenv("ROUTER_LIVE_MODE_ENTER_ACK", defaults.live_mode_enter_ack),
-        live_mode_exit_ack=os.getenv("ROUTER_LIVE_MODE_EXIT_ACK", defaults.live_mode_exit_ack),
-        live_mode_active_hint=os.getenv("ROUTER_LIVE_MODE_ACTIVE_HINT", defaults.live_mode_active_hint),
-        live_mode_inactive_hint=os.getenv("ROUTER_LIVE_MODE_INACTIVE_HINT", defaults.live_mode_inactive_hint),
-    )
-
 
 def parse_mqtt(url: str) -> tuple[str, int, str | None, str | None]:
     parsed = urlparse(url)
@@ -166,7 +94,7 @@ def _build_subscriptions(settings: RouterSettings, policy: RouterPolicy) -> Iter
 
 
 async def run_router() -> None:
-    settings = load_settings()
+    settings = RouterSettings.from_env()
     logging.basicConfig(
         level=os.getenv("LOG_LEVEL", "INFO"),
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Tuple
+from typing import Mapping, Tuple
+
+from tars.runtime import env as runtime_env
 
 
 @dataclass(slots=True)
@@ -85,3 +87,88 @@ class RouterSettings:
             "system.health.stt": self.topic_health_stt,
             "system.health.router": self.topic_health_router,
         }
+
+    @classmethod
+    def from_env(
+        cls,
+        *,
+        env: Mapping[str, str] | None = None,
+    ) -> "RouterSettings":
+        defaults = cls()
+        get_str = runtime_env.get_str
+        get_bool = runtime_env.get_bool
+        get_int = runtime_env.get_int
+        get_float = runtime_env.get_float
+
+        return cls(
+            mqtt_url=get_str("MQTT_URL", defaults.mqtt_url, env=env),
+            online_announce=get_bool("ONLINE_ANNOUNCE", defaults.online_announce, env=env),
+            online_text=get_str("ONLINE_ANNOUNCE_TEXT", defaults.online_text, env=env),
+            topic_health_tts=get_str("TOPIC_HEALTH_TTS", defaults.topic_health_tts, env=env),
+            topic_health_stt=get_str("TOPIC_HEALTH_STT", defaults.topic_health_stt, env=env),
+            topic_health_router=get_str("TOPIC_HEALTH_ROUTER", defaults.topic_health_router, env=env),
+            topic_stt_final=get_str("TOPIC_STT_FINAL", defaults.topic_stt_final, env=env),
+            topic_tts_say=get_str("TOPIC_TTS_SAY", defaults.topic_tts_say, env=env),
+            topic_llm_req=get_str("TOPIC_LLM_REQUEST", defaults.topic_llm_req, env=env),
+            topic_llm_resp=get_str("TOPIC_LLM_RESPONSE", defaults.topic_llm_resp, env=env),
+            topic_llm_stream=get_str("TOPIC_LLM_STREAM", defaults.topic_llm_stream, env=env),
+            topic_llm_cancel=get_str("TOPIC_LLM_CANCEL", defaults.topic_llm_cancel, env=env),
+            topic_wake_event=get_str("TOPIC_WAKE_EVENT", defaults.topic_wake_event, env=env),
+            router_llm_tts_stream=get_bool("ROUTER_LLM_TTS_STREAM", defaults.router_llm_tts_stream, env=env),
+            stream_min_chars=get_int(
+                "ROUTER_STREAM_MIN_CHARS",
+                defaults.stream_min_chars,
+                env=env,
+                aliases=("STREAM_MIN_CHARS",),
+            ),
+            stream_max_chars=get_int(
+                "ROUTER_STREAM_MAX_CHARS",
+                defaults.stream_max_chars,
+                env=env,
+                aliases=("STREAM_MAX_CHARS",),
+            ),
+            stream_boundary_chars=get_str(
+                "ROUTER_STREAM_BOUNDARY_CHARS",
+                defaults.stream_boundary_chars,
+                env=env,
+                aliases=("STREAM_BOUNDARY_CHARS",),
+            ),
+            stream_boundary_only=get_bool(
+                "ROUTER_STREAM_BOUNDARY_ONLY",
+                defaults.stream_boundary_only,
+                env=env,
+            ),
+            stream_hard_max_chars=get_int(
+                "ROUTER_STREAM_HARD_MAX_CHARS",
+                defaults.stream_hard_max_chars,
+                env=env,
+            ),
+            wake_phrases_raw=get_str(
+                "ROUTER_WAKE_PHRASES",
+                defaults.wake_phrases_raw,
+                env=env,
+                aliases=("WAKE_PHRASES",),
+            ),
+            wake_window_sec=get_float("ROUTER_WAKE_WINDOW_SEC", defaults.wake_window_sec, env=env),
+            wake_ack_enabled=get_bool("ROUTER_WAKE_ACK_ENABLED", defaults.wake_ack_enabled, env=env),
+            wake_ack_text=get_str("ROUTER_WAKE_ACK_TEXT", defaults.wake_ack_text, env=env),
+            wake_ack_choices_raw=get_str(
+                "ROUTER_WAKE_ACK_CHOICES",
+                defaults.wake_ack_choices_raw,
+                env=env,
+                aliases=("WAKE_ACK_CHOICES",),
+            ),
+            wake_ack_style=get_str("ROUTER_WAKE_ACK_STYLE", defaults.wake_ack_style, env=env),
+            wake_reprompt_text=get_str("ROUTER_WAKE_REPROMPT_TEXT", defaults.wake_reprompt_text, env=env),
+            wake_interrupt_text=get_str("ROUTER_WAKE_INTERRUPT_TEXT", defaults.wake_interrupt_text, env=env),
+            wake_resume_text=get_str("ROUTER_WAKE_RESUME_TEXT", defaults.wake_resume_text, env=env),
+            wake_cancel_text=get_str("ROUTER_WAKE_CANCEL_TEXT", defaults.wake_cancel_text, env=env),
+            wake_timeout_text=get_str("ROUTER_WAKE_TIMEOUT_TEXT", defaults.wake_timeout_text, env=env),
+            live_mode_default=get_bool("ROUTER_LIVE_MODE_DEFAULT", defaults.live_mode_default, env=env),
+            live_mode_enter_phrase=get_str("ROUTER_LIVE_MODE_ENTER_PHRASE", defaults.live_mode_enter_phrase, env=env),
+            live_mode_exit_phrase=get_str("ROUTER_LIVE_MODE_EXIT_PHRASE", defaults.live_mode_exit_phrase, env=env),
+            live_mode_enter_ack=get_str("ROUTER_LIVE_MODE_ENTER_ACK", defaults.live_mode_enter_ack, env=env),
+            live_mode_exit_ack=get_str("ROUTER_LIVE_MODE_EXIT_ACK", defaults.live_mode_exit_ack, env=env),
+            live_mode_active_hint=get_str("ROUTER_LIVE_MODE_ACTIVE_HINT", defaults.live_mode_active_hint, env=env),
+            live_mode_inactive_hint=get_str("ROUTER_LIVE_MODE_INACTIVE_HINT", defaults.live_mode_inactive_hint, env=env),
+        )
