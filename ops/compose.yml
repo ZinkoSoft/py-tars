@@ -165,3 +165,7 @@ networks:
   default:
     name: tars-net
     driver: bridge
+
+volumes:
+  wake-cache:
+    driver: local
