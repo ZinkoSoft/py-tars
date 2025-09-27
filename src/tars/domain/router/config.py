@@ -7,6 +7,13 @@ from tars.runtime import env as runtime_env
 
 
 @dataclass(slots=True)
+class RouterStreamSettings:
+    queue_maxsize: int = 256
+    queue_overflow: str = "drop_oldest"  # drop_oldest | drop_new | block
+    handler_timeout_sec: float = 30.0
+
+
+@dataclass(slots=True)
 class RouterSettings:
     mqtt_url: str = "mqtt://tars:pass@127.0.0.1:1883"
     online_announce: bool = True
@@ -45,6 +52,7 @@ class RouterSettings:
     live_mode_exit_ack: str = "Live mode disabled."
     live_mode_active_hint: str = "Live mode is already active."
     live_mode_inactive_hint: str = "Live mode is already off."
+    stream_settings: RouterStreamSettings = field(default_factory=RouterStreamSettings)
     wake_phrases: Tuple[str, ...] = field(init=False)
     wake_ack_choices: Tuple[str, ...] = field(init=False)
 
@@ -99,6 +107,24 @@ class RouterSettings:
         get_bool = runtime_env.get_bool
         get_int = runtime_env.get_int
         get_float = runtime_env.get_float
+
+        stream_settings = RouterStreamSettings(
+            queue_maxsize=runtime_env.get_int(
+                "ROUTER_QUEUE_MAXSIZE",
+                defaults.stream_settings.queue_maxsize,
+                env=env,
+            ),
+            queue_overflow=runtime_env.get_str(
+                "ROUTER_QUEUE_OVERFLOW",
+                defaults.stream_settings.queue_overflow,
+                env=env,
+            ),
+            handler_timeout_sec=runtime_env.get_float(
+                "ROUTER_HANDLER_TIMEOUT",
+                defaults.stream_settings.handler_timeout_sec,
+                env=env,
+            ),
+        )
 
         return cls(
             mqtt_url=get_str("MQTT_URL", defaults.mqtt_url, env=env),
@@ -171,4 +197,5 @@ class RouterSettings:
             live_mode_exit_ack=get_str("ROUTER_LIVE_MODE_EXIT_ACK", defaults.live_mode_exit_ack, env=env),
             live_mode_active_hint=get_str("ROUTER_LIVE_MODE_ACTIVE_HINT", defaults.live_mode_active_hint, env=env),
             live_mode_inactive_hint=get_str("ROUTER_LIVE_MODE_INACTIVE_HINT", defaults.live_mode_inactive_hint, env=env),
+            stream_settings=stream_settings,
         )

@@ -104,7 +104,15 @@ async def run_router() -> None:
                 def ctx_factory(_envelope: Envelope) -> Ctx:
                     return Ctx(pub=publisher, policy=policy, logger=logger, metrics=metrics)
 
-                dispatcher = Dispatcher(subscriber, subs, ctx_factory)
+                dispatcher = Dispatcher(
+                    subscriber,
+                    subs,
+                    ctx_factory,
+                    logger=logger,
+                    queue_maxsize=settings.stream_settings.queue_maxsize,
+                    overflow_strategy=settings.stream_settings.queue_overflow,
+                    handler_timeout=settings.stream_settings.handler_timeout_sec,
+                )
                 ctx = Ctx(pub=publisher, policy=policy, logger=logger, metrics=metrics)
                 await ctx.publish("system.health.router", HealthPing(ok=True, event="ready"), qos=1)
                 backoff = 1.0
