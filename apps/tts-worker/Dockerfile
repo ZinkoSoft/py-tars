@@ -14,15 +14,16 @@ RUN pip install --upgrade pip && pip install piper-tts
 
 WORKDIR /app
 COPY apps/tts-worker/requirements.txt ./requirements.txt
-RUN pip install -r requirements.txt
+COPY packages/tars-core /tmp/tars-core
+RUN pip install -r requirements.txt && \
+    pip install /tmp/tars-core && \
+    rm -rf /tmp/tars-core
 
 # Copy voice models from mounted read-only source to writable container location
 RUN mkdir -p /voices
 COPY apps/tts-worker/main.py ./
 COPY apps/tts-worker/tts_worker ./tts_worker
 COPY apps/tts-worker/external_services ./external_services
-COPY src /app/src
-ENV PYTHONPATH="/app/src:${PYTHONPATH}"
 
 # At runtime, copy voice models with proper permissions
 ENTRYPOINT ["/bin/sh", "-c", "if [ -d /voice-models ] && [ \"$(ls -A /voice-models 2>/dev/null)\" ]; then cp -r /voice-models/* /voices/ && chmod -R 644 /voices/*; else echo 'No voice models mounted at /voice-models'; fi; if [ ! -f /voices/TARS.onnx ]; then echo 'WARNING: /voices/TARS.onnx not found'; fi; exec python main.py"]

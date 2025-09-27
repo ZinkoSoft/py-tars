@@ -14,8 +14,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Python dependencies
 WORKDIR /app
 COPY apps/stt-worker/requirements.txt ./requirements.txt
+COPY packages/tars-core /tmp/tars-core
 RUN pip install --upgrade pip && \
-    pip install -r requirements.txt
+    pip install -r requirements.txt && \
+    pip install /tmp/tars-core && \
+    rm -rf /tmp/tars-core
 
 # Copy application modules
 COPY apps/stt-worker/main.py ./main.py
@@ -27,8 +30,6 @@ COPY apps/stt-worker/transcriber.py ./transcriber.py
 COPY apps/stt-worker/mqtt_utils.py ./mqtt_utils.py
 COPY apps/stt-worker/suppression.py ./suppression.py
 COPY apps/stt-worker/audio_preproc.py ./audio_preproc.py
-COPY src /app/src
-ENV PYTHONPATH="/app/src:${PYTHONPATH}"
 
 # Create directories for models
 RUN mkdir -p /app/models /host-models
