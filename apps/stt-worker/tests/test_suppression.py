@@ -8,12 +8,6 @@ from types import ModuleType
 import numpy as np
 import pytest
 
-SRC_DIR = Path(__file__).resolve().parents[3] / "src"
-if SRC_DIR.exists():
-    src_path = str(SRC_DIR)
-    if src_path not in sys.path:
-        sys.path.insert(0, src_path)
-
 from tars.contracts.v1.stt import FinalTranscript  # type: ignore[import]
 
 SAMPLE_RATE = 16_000

@@ -1,17 +1,9 @@
 from __future__ import annotations
 
-import sys
 import time
-from pathlib import Path
 from typing import Any, List, Tuple
 
 import pytest
-
-SRC_DIR = Path(__file__).resolve().parents[3] / "src"
-if SRC_DIR.exists():
-    src_path = str(SRC_DIR)
-    if src_path not in sys.path:
-        sys.path.insert(0, src_path)
 
 from tars.contracts.envelope import Envelope  # type: ignore[import]
 from tars.contracts.v1 import (  # type: ignore[import]

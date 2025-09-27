@@ -6,10 +6,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt ./
+COPY apps/memory-worker/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY memory_worker ./memory_worker
+COPY apps/memory-worker/memory_worker ./memory_worker
+COPY src /app/src
+ENV PYTHONPATH="/app/src:${PYTHONPATH}"
 
 ENV PYTHONUNBUFFERED=1
 ENV HF_HOME=/data/model_cache \

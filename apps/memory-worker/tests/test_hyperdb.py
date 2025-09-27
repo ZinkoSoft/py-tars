@@ -1,17 +1,10 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Iterable
 
 import numpy as np
 import pytest
-
-SRC_DIR = Path(__file__).resolve().parents[3] / "src"
-if SRC_DIR.exists():
-    src_path = str(SRC_DIR)
-    if src_path not in sys.path:
-        sys.path.insert(0, src_path)
 
 from memory_worker.hyperdb import HyperConfig, HyperDB  # type: ignore[import]
 

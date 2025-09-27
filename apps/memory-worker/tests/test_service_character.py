@@ -6,12 +6,6 @@ from typing import Any
 
 import pytest
 
-SRC_DIR = Path(__file__).resolve().parents[3] / "src"
-if SRC_DIR.exists():
-    src_path = str(SRC_DIR)
-    if src_path not in sys.path:
-        sys.path.insert(0, src_path)
-
 import types
 
 if "sentence_transformers" not in sys.modules:

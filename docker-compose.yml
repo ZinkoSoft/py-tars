@@ -11,7 +11,9 @@ services:
     restart: unless-stopped
 
   stt:
-    build: ./apps/stt-worker
+    build:
+      context: .
+      dockerfile: apps/stt-worker/Dockerfile
     container_name: tars-stt
     network_mode: host
     env_file: .env
@@ -62,7 +64,9 @@ services:
     restart: unless-stopped
 
   router:
-    build: ./apps/router
+    build:
+      context: .
+      dockerfile: apps/router/Dockerfile
     container_name: tars-router
     network_mode: host
     env_file: .env
@@ -86,7 +90,9 @@ services:
     restart: unless-stopped
 
   tts:
-    build: ./apps/tts-worker
+    build:
+      context: .
+      dockerfile: apps/tts-worker/Dockerfile
     container_name: tars-tts
     network_mode: host
     env_file: .env
@@ -147,7 +153,9 @@ services:
     restart: unless-stopped
 
   memory:
-    build: ./apps/memory-worker
+    build:
+      context: .
+      dockerfile: apps/memory-worker/Dockerfile
     container_name: tars-memory
     network_mode: host
     env_file: .env
@@ -177,7 +185,9 @@ services:
     restart: unless-stopped
 
   llm:
-    build: ./apps/llm-worker
+    build:
+      context: .
+      dockerfile: apps/llm-worker/Dockerfile
     container_name: tars-llm
     network_mode: host
     env_file: .env

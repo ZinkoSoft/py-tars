@@ -7,20 +7,12 @@ Coordinates audio capture, VAD, transcription, MQTT I/O, and optional FFT publis
 import asyncio
 import logging
 import os
-import sys
 import time
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 import orjson
 from pydantic import BaseModel, ValidationError
-
-SRC_DIR = Path(__file__).resolve().parents[2] / "src"
-if SRC_DIR.exists():
-    src_path = str(SRC_DIR)
-    if src_path not in sys.path:
-        sys.path.insert(0, src_path)
 
 from audio_fanout import AudioFanoutPublisher
 from config import (

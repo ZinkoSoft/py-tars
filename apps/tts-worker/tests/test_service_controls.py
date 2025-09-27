@@ -1,17 +1,6 @@
 import asyncio
 import signal
-import sys
 import time
-from pathlib import Path
-
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-SRC_DIR = Path(__file__).resolve().parents[3] / "src"
-if SRC_DIR.exists():
-    src_path = str(SRC_DIR)
-    if src_path not in sys.path:
-        sys.path.insert(0, src_path)
 
 import pytest
 

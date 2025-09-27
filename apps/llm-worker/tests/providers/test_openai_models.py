@@ -5,12 +5,6 @@ from pathlib import Path
 
 import pytest
 
-SRC_DIR = Path(__file__).resolve().parents[4] / "src"
-if SRC_DIR.exists():
-    src_path = str(SRC_DIR)
-    if src_path not in sys.path:
-        sys.path.insert(0, src_path)
-
 PROVIDER_DIR = Path(__file__).resolve().parents[2]
 if str(PROVIDER_DIR) not in sys.path:
     sys.path.insert(0, str(PROVIDER_DIR))

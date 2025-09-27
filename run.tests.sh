@@ -23,6 +23,11 @@ install_requirements() {
   info "Upgrading pip/setuptools/wheel"
   pip install --upgrade pip setuptools wheel
 
+  if [[ -f "${ROOT_DIR}/packages/tars-core/pyproject.toml" ]]; then
+    info "Installing tars-core package (editable)"
+    pip install -e "${ROOT_DIR}/packages/tars-core"
+  fi
+
   if [[ -f "${ROOT_DIR}/apps/router/pyproject.toml" ]]; then
     info "Installing router package (editable)"
     pip install -e "${ROOT_DIR}/apps/router"
@@ -62,8 +67,6 @@ run_tests() {
   else
     pytest_args=("$@")
   fi
-
-  export PYTHONPATH="${ROOT_DIR}:${PYTHONPATH:-}"
   info "Running pytest at repo root: ${pytest_args[*]}"
   pytest "${pytest_args[@]}"
 }

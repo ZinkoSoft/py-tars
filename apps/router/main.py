@@ -2,19 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import os
-import sys
-from pathlib import Path
 from typing import Iterable
 from urllib.parse import urlparse
 
 import asyncio_mqtt as mqtt
 from asyncio_mqtt import MqttError
-
-SRC_DIR = Path(__file__).resolve().parents[2] / "src"
-if SRC_DIR.exists():
-    src_path = str(SRC_DIR)
-    if src_path not in sys.path:
-        sys.path.insert(0, src_path)
 
 from tars.adapters.mqtt_asyncio import AsyncioMQTTPublisher, AsyncioMQTTSubscriber  # type: ignore[import]
 from tars.contracts.envelope import Envelope  # type: ignore[import]

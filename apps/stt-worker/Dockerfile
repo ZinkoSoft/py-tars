@@ -13,12 +13,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python dependencies
 WORKDIR /app
-COPY requirements.txt .
+COPY apps/stt-worker/requirements.txt ./requirements.txt
 RUN pip install --upgrade pip && \
     pip install -r requirements.txt
 
 # Copy application modules
-COPY main.py config.py audio_capture.py audio_fanout.py vad.py transcriber.py mqtt_utils.py suppression.py audio_preproc.py ./
+COPY apps/stt-worker/main.py ./main.py
+COPY apps/stt-worker/config.py ./config.py
+COPY apps/stt-worker/audio_capture.py ./audio_capture.py
+COPY apps/stt-worker/audio_fanout.py ./audio_fanout.py
+COPY apps/stt-worker/vad.py ./vad.py
+COPY apps/stt-worker/transcriber.py ./transcriber.py
+COPY apps/stt-worker/mqtt_utils.py ./mqtt_utils.py
+COPY apps/stt-worker/suppression.py ./suppression.py
+COPY apps/stt-worker/audio_preproc.py ./audio_preproc.py
+COPY src /app/src
+ENV PYTHONPATH="/app/src:${PYTHONPATH}"
 
 # Create directories for models
 RUN mkdir -p /app/models /host-models

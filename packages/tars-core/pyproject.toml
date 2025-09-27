@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tars-core"
+version = "0.1.0"
+description = "Shared runtime, contracts, and utilities for the TARS voice stack."
+requires-python = ">=3.11"
+dependencies = [
+  "asyncio-mqtt==0.16.2",
+  "paho-mqtt<2.0",
+  "orjson>=3.11.0",
+  "pydantic>=2.9.0",
+  "typing-extensions>=4.12.0",
+]
+readme = "README.md"
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.2",
+]
+
+[tool.setuptools.package-dir]
+"" = "src"

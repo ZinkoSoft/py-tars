@@ -10,11 +10,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY pyproject.toml ./
+COPY apps/router/pyproject.toml ./pyproject.toml
 # Use pip to install deps specified in pyproject (simple approach)
 RUN pip install --upgrade pip && \
     pip install .[all] 2>/dev/null || true && \
     pip install asyncio-mqtt orjson uvloop
 
-COPY main.py .
+COPY src /app/src
+ENV PYTHONPATH="/app/src:${PYTHONPATH}"
+
+COPY apps/router/main.py ./main.py
 CMD ["python", "main.py"]

@@ -9,10 +9,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY requirements.txt /app/requirements.txt
+COPY apps/llm-worker/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY . /app
+COPY apps/llm-worker/ /app/
+COPY src /app/src
+ENV PYTHONPATH="/app/src:${PYTHONPATH}"
 
 ENV LOG_LEVEL=INFO
 
