@@ -19,7 +19,6 @@ if SRC_DIR.exists():
 
 from tars.adapters.mqtt_asyncio import AsyncioMQTTPublisher, AsyncioMQTTSubscriber  # type: ignore[import]
 from tars.contracts.envelope import Envelope  # type: ignore[import]
-from tars.contracts.registry import register  # type: ignore[import]
 from tars.contracts.v1 import (  # type: ignore[import]
     FinalTranscript,
     HealthPing,
@@ -31,6 +30,7 @@ from tars.contracts.v1 import (  # type: ignore[import]
 from tars.domain.router import RouterPolicy, RouterSettings  # type: ignore[import]
 from tars.runtime.ctx import Ctx  # type: ignore[import]
 from tars.runtime.dispatcher import Dispatcher  # type: ignore[import]
+from tars.runtime.registry import register_topics  # type: ignore[import]
 from tars.runtime.subscription import Sub  # type: ignore[import]
 
 
@@ -84,8 +84,7 @@ async def run_router() -> None:
     )
     logger = logging.getLogger("router")
 
-    for event_type, topic in settings.as_topic_map().items():
-        register(event_type, topic)
+    register_topics(settings.as_topic_map())
 
     policy = RouterPolicy(settings)
     host, port, username, password = parse_mqtt(settings.mqtt_url)
