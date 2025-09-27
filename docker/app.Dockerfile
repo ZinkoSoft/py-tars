@@ -6,6 +6,7 @@
 #   - APP_PATH     : Path to the app (e.g., apps/router)
 #   - CONTRACTS_PATH: Path to contracts package (default packages/tars-contracts)
 #   - APP_MODULE   : Python module to run with `python -m` (e.g., tars_router.app_main)
+#   - APP_CMD      : Optional shell command to run instead of APP_MODULE (e.g., "uvicorn server:app --host 0.0.0.0 --port 5010")
 #
 # Compose can override the final `command:` to use a console_script instead.
 
@@ -39,11 +40,16 @@ RUN python -m build /src/app
 # ---------- Runtime: install wheels and run ----------
 FROM base AS runtime
 ARG APP_MODULE=tars_router.app_main
+ARG APP_CMD=""
 ENV APP_MODULE=${APP_MODULE}
+ENV APP_CMD=${APP_CMD}
 COPY --from=builder /src/contracts/dist/*.whl /wheels/
 COPY --from=builder /src/app/dist/*.whl /wheels/
 RUN pip install --no-cache-dir /wheels/*.whl
+COPY docker/start-app.sh /usr/local/bin/start-app
+RUN chmod +x /usr/local/bin/start-app
 USER app
-ENTRYPOINT ["/usr/bin/tini","--"]
-# Compose can override command. Defaults to `python -m <APP_MODULE>`
-CMD sh -lc "python -m $APP_MODULE"
+ENTRYPOINT ["/usr/bin/tini","--","/usr/local/bin/start-app"]
+# Compose can override command. start-app respects explicit commands, APP_CMD, or APP_MODULE (in that order).
+# If neither is provided, the container idles (tail -f /dev/null) so services like the web UI can defer startup.
+CMD []

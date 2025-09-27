@@ -7,7 +7,7 @@
 #
 # Repo assumptions (monorepo layout):
 #   /apps/router, /apps/tts-worker, /apps/stt-worker
-#   /packages/tars-contracts
+#   /packages/tars-core
 #   /docker/app.Dockerfile  (this file references it)
 #
 # Notes:
@@ -38,7 +38,7 @@ services:
       args:
         PY_VERSION: "3.11"
         APP_PATH: apps/router
-        CONTRACTS_PATH: packages/tars-contracts
+        CONTRACTS_PATH: packages/tars-core
         APP_MODULE: tars_router.app_main
     image: tars/router:dev
     container_name: tars-router
@@ -60,7 +60,7 @@ services:
       args:
         PY_VERSION: "3.11"
         APP_PATH: apps/tts-worker
-        CONTRACTS_PATH: packages/tars-contracts
+        CONTRACTS_PATH: packages/tars-core
         APP_MODULE: tars_tts_worker.app_main
     image: tars/tts:dev
     container_name: tars-tts
@@ -83,7 +83,7 @@ services:
       args:
         PY_VERSION: "3.11"
         APP_PATH: apps/stt-worker
-        CONTRACTS_PATH: packages/tars-contracts
+        CONTRACTS_PATH: packages/tars-core
         APP_MODULE: tars_stt_worker.app_main
     image: tars/stt:dev
     container_name: tars-stt
@@ -97,6 +97,68 @@ services:
     restart: unless-stopped
     # devices:
     #   - "/dev/snd"   # if capturing audio from host
+
+  wake-activation:
+    build:
+      context: ..
+      dockerfile: docker/app.Dockerfile
+      args:
+        PY_VERSION: "3.11"
+        APP_PATH: apps/wake-activation
+        CONTRACTS_PATH: packages/tars-core
+        APP_MODULE: wake_activation
+    image: tars/wake-activation:dev
+    container_name: tars-wake-activation
+    environment:
+      MQTT_HOST: mqtt
+      MQTT_PORT: "1883"
+      LOG_LEVEL: "INFO"
+      WAKE_AUDIO_FANOUT: /tmp/tars/audio-fanout.sock
+      WAKE_MODEL_PATH: /models/openwakeword/hey_tars.tflite
+    depends_on:
+      mqtt:
+        condition: service_healthy
+      stt:
+        condition: service_started
+    volumes:
+      - ../models/openwakeword:/models/openwakeword:ro
+      - wake-cache:/tmp/tars
+    restart: unless-stopped
+
+  ui-web:
+    build:
+      context: ..
+      dockerfile: apps/ui-web/Dockerfile
+    image: tars/ui-web:dev
+    container_name: tars-ui-web
+    environment:
+      MQTT_HOST: mqtt
+      MQTT_PORT: "1883"
+      HOST: 0.0.0.0
+      PORT: "5010"
+    depends_on:
+      mqtt:
+        condition: service_healthy
+    restart: unless-stopped
+
+  llm:
+    build:
+      context: ..
+      dockerfile: apps/llm-worker/Dockerfile
+    image: tars/llm:dev
+    container_name: tars-llm
+    environment:
+      MQTT_HOST: mqtt
+      MQTT_PORT: "1883"
+      LOG_LEVEL: "INFO"
+      LLM_PROVIDER: openai
+      LLM_MODEL: gpt-4o-mini
+      LLM_MAX_TOKENS: "512"
+      LLM_TEMPERATURE: "0.7"
+    depends_on:
+      mqtt:
+        condition: service_healthy
+    restart: unless-stopped
 
 # Optional: define multiple network(s)
 networks:
