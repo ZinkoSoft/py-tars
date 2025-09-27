@@ -10,8 +10,6 @@ from urllib.parse import urlparse
 
 import asyncio_mqtt as mqtt
 from asyncio_mqtt import MqttError
-import orjson
-from pydantic import ValidationError
 
 SRC_DIR = Path(__file__).resolve().parents[2] / "src"
 if SRC_DIR.exists():
@@ -30,7 +28,6 @@ from tars.contracts.v1 import (  # type: ignore[import]
     LLMStreamDelta,
     WakeEvent,
 )
-from tars.domain.ports import Publisher  # type: ignore[import]
 from tars.domain.router import RouterPolicy, RouterSettings  # type: ignore[import]
 from tars.runtime.ctx import Ctx  # type: ignore[import]
 from tars.runtime.dispatcher import Dispatcher  # type: ignore[import]
@@ -46,21 +43,6 @@ def parse_mqtt(url: str) -> tuple[str, int, str | None, str | None]:
         parsed.username,
         parsed.password,
     )
-
-
-class LegacyJSONPublisher(Publisher):
-    """Unwrap dispatcher envelopes into legacy MQTT payloads."""
-
-    def __init__(self, delegate: Publisher) -> None:
-        self._delegate = delegate
-
-    async def publish(self, topic: str, payload: bytes, qos: int = 0, retain: bool = False) -> None:
-        try:
-            envelope = Envelope.model_validate_json(payload)
-            data = envelope.data
-        except ValidationError:
-            data = orjson.loads(payload)
-        await self._delegate.publish(topic, orjson.dumps(data), qos=qos, retain=retain)
 
 
 def _build_subscriptions(settings: RouterSettings, policy: RouterPolicy) -> Iterable[Sub]:
@@ -120,7 +102,7 @@ async def run_router() -> None:
                 client_id="tars-router",
             ) as client:
                 logger.info("router.mqtt.connected", extra={"host": host, "port": port})
-                publisher = LegacyJSONPublisher(AsyncioMQTTPublisher(client))
+                publisher = AsyncioMQTTPublisher(client)
                 subscriber = AsyncioMQTTSubscriber(client)
                 subs = _build_subscriptions(settings, policy)
 
