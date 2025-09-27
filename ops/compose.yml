@@ -1,0 +1,105 @@
+# ops/compose.yaml
+# Usage:
+#   docker compose -f ops/compose.yaml up --build
+#
+# This file reuses ONE generic Dockerfile (docker/app.Dockerfile) for all apps.
+# Each service passes different build args (APP_PATH, APP_MODULE) to build its image.
+#
+# Repo assumptions (monorepo layout):
+#   /apps/router, /apps/tts-worker, /apps/stt-worker
+#   /packages/tars-contracts
+#   /docker/app.Dockerfile  (this file references it)
+#
+# Notes:
+# - The apps implement retry-on-connect to MQTT; strict health ordering isn't required.
+# - If you provide console scripts in pyproject.toml, you can replace `command:` with them.
+
+name: tars-stack
+
+services:
+  mqtt:
+    image: eclipse-mosquitto:2
+    container_name: tars-mqtt
+    ports:
+      - "1883:1883"
+    # volumes:
+    #   - ./mosquitto:/mosquitto   # optional: supply custom config/persistence
+    # Simple TCP healthcheck (requires /bin/sh from mosquitto image)
+    healthcheck:
+      test: ["CMD-SHELL", "sh -c 'echo > /dev/tcp/127.0.0.1/1883'"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  router:
+    build:
+      context: ..                      # root of the repo
+      dockerfile: docker/app.Dockerfile
+      args:
+        PY_VERSION: "3.11"
+        APP_PATH: apps/router
+        CONTRACTS_PATH: packages/tars-contracts
+        APP_MODULE: tars_router.app_main
+    image: tars/router:dev
+    container_name: tars-router
+    environment:
+      MQTT_HOST: mqtt
+      MQTT_PORT: "1883"
+    depends_on:
+      mqtt:
+        condition: service_healthy
+    # If router defines a console script `tars-router`, you can use:
+    # command: ["tars-router"]
+    command: ["sh","-lc","python -m tars_router.app_main"]
+    restart: unless-stopped
+
+  tts:
+    build:
+      context: ..
+      dockerfile: docker/app.Dockerfile
+      args:
+        PY_VERSION: "3.11"
+        APP_PATH: apps/tts-worker
+        CONTRACTS_PATH: packages/tars-contracts
+        APP_MODULE: tars_tts_worker.app_main
+    image: tars/tts:dev
+    container_name: tars-tts
+    environment:
+      MQTT_HOST: mqtt
+      MQTT_PORT: "1883"
+    depends_on:
+      mqtt:
+        condition: service_healthy
+    command: ["sh","-lc","python -m tars_tts_worker.app_main"]
+    restart: unless-stopped
+    # Example of mounting voices/models if needed
+    # volumes:
+    #   - ./assets/voices:/voices:ro
+
+  stt:
+    build:
+      context: ..
+      dockerfile: docker/app.Dockerfile
+      args:
+        PY_VERSION: "3.11"
+        APP_PATH: apps/stt-worker
+        CONTRACTS_PATH: packages/tars-contracts
+        APP_MODULE: tars_stt_worker.app_main
+    image: tars/stt:dev
+    container_name: tars-stt
+    environment:
+      MQTT_HOST: mqtt
+      MQTT_PORT: "1883"
+    depends_on:
+      mqtt:
+        condition: service_healthy
+    command: ["sh","-lc","python -m tars_stt_worker.app_main"]
+    restart: unless-stopped
+    # devices:
+    #   - "/dev/snd"   # if capturing audio from host
+
+# Optional: define multiple network(s)
+networks:
+  default:
+    name: tars-net
+    driver: bridge

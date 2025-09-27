@@ -1,0 +1,21 @@
+from __future__ import annotations
+
+import uuid
+from pydantic import BaseModel, Field
+
+EVENT_TYPE_STT_FINAL = "stt.final"
+EVENT_TYPE_STT_PARTIAL = "stt.partial"
+
+
+class FinalTranscript(BaseModel):
+    """Transcription result emitted by STT service."""
+
+    message_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    text: str
+    lang: str = "en"
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    utt_id: str | None = None
+    ts: float | None = None
+    is_final: bool = True
+
+    model_config = {"extra": "forbid"}

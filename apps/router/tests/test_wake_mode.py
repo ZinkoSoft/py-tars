@@ -1,26 +1,42 @@
-import orjson
+import logging
+import sys
+from pathlib import Path
+from typing import Tuple
+
 import pytest
 
-from apps.router.main import Config, RouterService
+SRC_DIR = Path(__file__).resolve().parents[3] / "src"
+if SRC_DIR.exists():
+    src_path = str(SRC_DIR)
+    if src_path not in sys.path:
+        sys.path.insert(0, src_path)
+
+from tars.contracts.envelope import Envelope  # type: ignore[import]
+from tars.contracts.registry import register  # type: ignore[import]
+from tars.contracts.v1 import FinalTranscript, WakeEvent  # type: ignore[import]
+from tars.domain.ports import Publisher  # type: ignore[import]
+from tars.domain.router import RouterPolicy, RouterSettings  # type: ignore[import]
+from tars.runtime.ctx import Ctx  # type: ignore[import]
 
 
-class DummyClient:
+class DummyPublisher(Publisher):
     def __init__(self) -> None:
-        self.messages = []
+        self.messages: list[Tuple[str, dict]] = []
 
-    async def publish(self, topic: str, payload: bytes) -> None:  # pragma: no cover - simple mock
-        self.messages.append((topic, payload))
+    async def publish(self, topic: str, payload: bytes, qos: int = 0, retain: bool = False) -> None:  # pragma: no cover - trivial
+        envelope = Envelope.model_validate_json(payload)
+        self.messages.append((topic, envelope.data))
 
     def clear(self) -> None:
         self.messages.clear()
 
-    def decoded(self):
-        return [(topic, orjson.loads(payload)) for topic, payload in self.messages]
+    def decoded(self) -> list[Tuple[str, dict]]:
+        return list(self.messages)
 
 
 @pytest.fixture()
-def router_service() -> RouterService:
-    cfg = Config(
+def router_policy() -> Tuple[RouterPolicy, RouterSettings]:
+    settings = RouterSettings(
         wake_ack_text="Ready.",
         wake_ack_choices_raw="Ready.",
         wake_reprompt_text="",
@@ -33,95 +49,109 @@ def router_service() -> RouterService:
         live_mode_active_hint="Already on.",
         live_mode_inactive_hint="Already off.",
     )
-    return RouterService(cfg)
+    for event_type, topic in settings.as_topic_map().items():
+        register(event_type, topic)
+    return RouterPolicy(settings), settings
+
+
+def _make_ctx(policy: RouterPolicy) -> tuple[Ctx, DummyPublisher]:
+    publisher = DummyPublisher()
+    logger = logging.getLogger("router-test")
+    return Ctx(pub=publisher, policy=policy, logger=logger), publisher
 
 
 def test_default_ack_choices_when_blank() -> None:
-    cfg = Config(wake_ack_text="", wake_ack_choices_raw="", wake_ack_enabled=True)
-    assert cfg.wake_ack_choices == ("Hmm?", "Huh?", "Yes?")
-    assert cfg.wake_ack_text == "Hmm?"
+    settings = RouterSettings(wake_ack_text="", wake_ack_choices_raw="", wake_ack_enabled=True)
+    assert settings.wake_ack_choices == ("Hmm?", "Huh?", "Yes?")
+    assert settings.wake_ack_text == "Hmm?"
 
 
 @pytest.mark.asyncio
-async def test_drop_without_wake(router_service: RouterService) -> None:
-    client = DummyClient()
-    payload = orjson.dumps({"text": "What's the weather today?"})
-    await router_service.handle_stt_final(client, payload)
-    assert client.messages == []
+async def test_drop_without_wake(router_policy: Tuple[RouterPolicy, RouterSettings]) -> None:
+    policy, _settings = router_policy
+    ctx, publisher = _make_ctx(policy)
+
+    transcript = FinalTranscript(text="What's the weather today?")
+    await policy.handle_stt_final(transcript, ctx)
+    assert publisher.messages == []
 
 
 @pytest.mark.asyncio
-async def test_wake_then_llm_request(router_service: RouterService) -> None:
-    client = DummyClient()
-    await router_service.handle_wake_event(client, orjson.dumps({"type": "wake"}))
-    decoded = client.decoded()
-    assert decoded and decoded[0][0] == router_service.cfg.topic_tts_say
+async def test_wake_then_llm_request(router_policy: Tuple[RouterPolicy, RouterSettings]) -> None:
+    policy, settings = router_policy
+    ctx, publisher = _make_ctx(policy)
+
+    await policy.handle_wake_event(WakeEvent(type="wake"), ctx)
+    decoded = publisher.decoded()
+    assert decoded and decoded[0][0] == settings.topic_tts_say
     assert decoded[0][1]["text"] == "Ready."
     assert decoded[0][1].get("wake_ack") is True
-    client.clear()
+    publisher.clear()
 
-    await router_service.handle_stt_final(client, orjson.dumps({"text": "What's the weather today?"}))
-    decoded = client.decoded()
-    assert decoded and decoded[0][0] == router_service.cfg.topic_llm_req
+    await policy.handle_stt_final(FinalTranscript(text="What's the weather today?"), ctx)
+    decoded = publisher.decoded()
+    assert decoded and decoded[0][0] == settings.topic_llm_req
     assert decoded[0][1]["text"] == "What's the weather today?"
 
 
 @pytest.mark.asyncio
-async def test_wake_inline_rule(router_service: RouterService) -> None:
-    client = DummyClient()
-    await router_service.handle_wake_event(client, orjson.dumps({"type": "wake"}))
-    client.clear()
+async def test_wake_inline_rule(router_policy: Tuple[RouterPolicy, RouterSettings]) -> None:
+    policy, settings = router_policy
+    ctx, publisher = _make_ctx(policy)
 
-    await router_service.handle_stt_final(client, orjson.dumps({"text": "Hey Tars what time is it"}))
-    decoded = client.decoded()
-    assert decoded and decoded[0][0] == router_service.cfg.topic_tts_say
+    await policy.handle_wake_event(WakeEvent(type="wake"), ctx)
+    publisher.clear()
+
+    await policy.handle_stt_final(FinalTranscript(text="Hey Tars what time is it"), ctx)
+    decoded = publisher.decoded()
+    assert decoded and decoded[0][0] == settings.topic_tts_say
     assert "It is" in decoded[0][1]["text"]
 
 
 @pytest.mark.asyncio
-async def test_live_mode_enable_disable(router_service: RouterService) -> None:
-    client = DummyClient()
-    await router_service.handle_wake_event(client, orjson.dumps({"type": "wake"}))
-    client.clear()
+async def test_live_mode_enable_disable(router_policy: Tuple[RouterPolicy, RouterSettings]) -> None:
+    policy, settings = router_policy
+    ctx, publisher = _make_ctx(policy)
 
-    # Enable live mode within wake window
-    await router_service.handle_stt_final(client, orjson.dumps({"text": "enter live mode"}))
-    decoded = client.decoded()
-    assert decoded and decoded[0][0] == router_service.cfg.topic_tts_say
+    await policy.handle_wake_event(WakeEvent(type="wake"), ctx)
+    publisher.clear()
+
+    await policy.handle_stt_final(FinalTranscript(text="enter live mode"), ctx)
+    decoded = publisher.decoded()
+    assert decoded and decoded[0][0] == settings.topic_tts_say
     assert decoded[0][1]["text"] == "Live mode on."
-    assert router_service.live_mode is True
-    client.clear()
+    assert policy.live_mode is True
+    publisher.clear()
 
-    # Live mode should allow routing without wake
-    await router_service.handle_stt_final(client, orjson.dumps({"text": "tell me a joke"}))
-    decoded = client.decoded()
-    assert decoded and decoded[0][0] == router_service.cfg.topic_llm_req
+    await policy.handle_stt_final(FinalTranscript(text="tell me a joke"), ctx)
+    decoded = publisher.decoded()
+    assert decoded and decoded[0][0] == settings.topic_llm_req
     assert decoded[0][1]["text"] == "tell me a joke"
-    client.clear()
+    publisher.clear()
 
-    # Disable live mode
-    await router_service.handle_stt_final(client, orjson.dumps({"text": "exit live mode"}))
-    decoded = client.decoded()
-    assert decoded and decoded[0][0] == router_service.cfg.topic_tts_say
+    await policy.handle_stt_final(FinalTranscript(text="exit live mode"), ctx)
+    decoded = publisher.decoded()
+    assert decoded and decoded[0][0] == settings.topic_tts_say
     assert decoded[0][1]["text"] == "Live mode off."
-    assert router_service.live_mode is False
-    client.clear()
+    assert policy.live_mode is False
+    publisher.clear()
 
-    # After disabling, utterances without wake should drop
-    await router_service.handle_stt_final(client, orjson.dumps({"text": "tell me a joke"}))
-    assert client.messages == []
+    await policy.handle_stt_final(FinalTranscript(text="tell me a joke"), ctx)
+    assert publisher.messages == []
 
 
 @pytest.mark.asyncio
-async def test_timeout_event_closes_window(router_service: RouterService) -> None:
-    client = DummyClient()
-    await router_service.handle_wake_event(client, orjson.dumps({"type": "wake"}))
-    assert router_service.wake_session_active is True
-    client.clear()
+async def test_timeout_event_closes_window(router_policy: Tuple[RouterPolicy, RouterSettings]) -> None:
+    policy, settings = router_policy
+    ctx, publisher = _make_ctx(policy)
 
-    await router_service.handle_wake_event(client, orjson.dumps({"type": "timeout"}))
-    assert router_service.wake_session_active is False
-    client.clear()
+    await policy.handle_wake_event(WakeEvent(type="wake"), ctx)
+    assert policy.wake_session_active is True
+    publisher.clear()
 
-    await router_service.handle_stt_final(client, orjson.dumps({"text": "Tell me something"}))
-    assert client.messages == []
+    await policy.handle_wake_event(WakeEvent(type="timeout"), ctx)
+    assert policy.wake_session_active is False
+    publisher.clear()
+
+    await policy.handle_stt_final(FinalTranscript(text="Tell me something"), ctx)
+    assert publisher.messages == []
