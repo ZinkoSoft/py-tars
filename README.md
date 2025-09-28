@@ -8,6 +8,8 @@ A modular **AI “brain” stack** for the Orange Pi 5 Max that handles:
 
 Motion and battery subsystems (ESP32-S3, LiPo pack, etc.) can connect later through MQTT topics.
 
+**🆕 Current Capabilities:** This system now includes complete wake word detection, LLM integration with multiple providers, memory & RAG systems, real-time web UI, and support for both local and cloud-based STT/TTS services.
+
 ---
 
 ## 🧩 Architecture
@@ -17,7 +19,7 @@ Motion and battery subsystems (ESP32-S3, LiPo pack, etc.) can connect later thro
                       ↓        ↑                         ↑
                Wake Activation  │                         │
                       ↓        │                         │
-                   Memory Worker ← ← ← ← ← ← ← ← ← ← ← ← ← ← 
+                   Memory Worker ← ← ← ← ← ← ← ← ← ← ← ← ← ←
                       ↓
                UI (Web/PyGame)
 ```
