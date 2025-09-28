@@ -107,6 +107,7 @@ class STTWorker:
         self._publisher: AsyncioMQTTPublisher | None = None
         self.service: STTService | None = None
         self._enable_partials = False
+        self._resume_after_tts = False
 
     async def initialize(self) -> None:
         if os.path.exists("/host-models"):
@@ -209,6 +210,10 @@ class STTWorker:
             logger.error("Invalid %s payload: %s", model.__name__, exc)
             return None
 
+    def _remember_tts_resume_state(self) -> None:
+        if not self.audio_capture.is_muted and not self._resume_after_tts:
+            self._resume_after_tts = True
+
     async def _handle_tts_status(self, payload: bytes) -> None:
         status = self._decode_event(payload, TtsStatus, event_type=EVENT_TYPE_TTS_STATUS)
         if status is None:
@@ -224,22 +229,35 @@ class STTWorker:
                 if self.audio_capture.is_muted:
                     self.audio_capture.unmute("tts wake_ack start")
                     self.recent_unmute_time = time.time()
+                self._resume_after_tts = False
                 return
             self.state.last_tts_text = text.strip()
+            self._remember_tts_resume_state()
             self.pending_tts = True
             self.audio_capture.mute("tts speaking_start")
             if self.fallback_unmute_task and not self.fallback_unmute_task.done():
                 self.fallback_unmute_task.cancel()
+            self.fallback_unmute_task = None
         elif status.event == "speaking_end":
             if wake_ack:
                 logger.debug("Wake ack speaking_end received; no mute adjustments needed")
+                self._resume_after_tts = False
                 return
 
             async def delayed_unmute() -> None:
                 await asyncio.sleep(0.2)
                 self.pending_tts = False
-                self.audio_capture.unmute("tts speaking_end")
-                self.recent_unmute_time = time.time()
+                resume = self._resume_after_tts
+                self._resume_after_tts = False
+                if resume:
+                    self.audio_capture.unmute("tts speaking_end")
+                    self.recent_unmute_time = time.time()
+                else:
+                    logger.debug("Skipping TTS auto-unmute; microphone was muted before playback")
+
+            if self.fallback_unmute_task and not self.fallback_unmute_task.done():
+                self.fallback_unmute_task.cancel()
+            self.fallback_unmute_task = None
 
             asyncio.create_task(delayed_unmute())
 
@@ -254,25 +272,35 @@ class STTWorker:
             self.pending_tts = False
             self.audio_capture.unmute("wake/ack")
             self.recent_unmute_time = time.time()
+            self._resume_after_tts = False
             return
         if not text:
             return
 
         self.state.last_tts_text = text
+        self._remember_tts_resume_state()
         self.pending_tts = True
         self.audio_capture.mute("tts say")
         if self.fallback_unmute_task and not self.fallback_unmute_task.done():
             self.fallback_unmute_task.cancel()
+        self.fallback_unmute_task = None
 
         async def fallback_unmute_tts() -> None:
             try:
                 await asyncio.sleep(TTS_MAX_MUTE_MS / 1000.0)
                 if self.audio_capture.is_muted and self.pending_tts:
                     self.pending_tts = False
-                    self.audio_capture.unmute("tts say fallback-timeout")
-                    self.recent_unmute_time = time.time()
+                    resume = self._resume_after_tts
+                    self._resume_after_tts = False
+                    if resume:
+                        self.audio_capture.unmute("tts say fallback-timeout")
+                        self.recent_unmute_time = time.time()
+                    else:
+                        logger.debug("Skipping fallback TTS auto-unmute; microphone was muted before playback")
             except asyncio.CancelledError:  # pragma: no cover - task cleanup
                 pass
+            finally:
+                self.fallback_unmute_task = None
 
         self.fallback_unmute_task = asyncio.create_task(fallback_unmute_tts())
 
