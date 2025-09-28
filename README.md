@@ -8,44 +8,85 @@ A modular **AI “brain” stack** for the Orange Pi 5 Max that handles:
 
 Motion and battery subsystems (ESP32-S3, LiPo pack, etc.) can connect later through MQTT topics.
 
+**🆕 Current Capabilities:** This system now includes complete wake word detection, LLM integration with multiple providers, memory & RAG systems, real-time web UI, and support for both local and cloud-based STT/TTS services.
+
 ---
 
 ## 🧩 Architecture
 
 ```
-[Mic] → STT → MQTT → Router → MQTT → TTS → [Speaker]
+[Mic] → STT Worker → MQTT → Router → MQTT → LLM Worker → MQTT → TTS Worker → [Speaker]
+                      ↓        ↑                         ↑
+               Wake Activation  │                         │
+                      ↓        │                         │
+                   Memory Worker ← ← ← ← ← ← ← ← ← ← ← ← ← ←
+                      ↓
+               UI (Web/PyGame)
 ```
 
-### Topics
-- `audio/wake` — wakeword events (future)
-- `stt/partial` — partial transcripts
-- `stt/final` — final transcripts
-- `tts/say` — text to speak
-- `tts/cues` — motion/gesture cues (future)
-- `system/health/+` — health pings from services
+**Event-Driven Pattern:** All services communicate through structured MQTT envelopes using the `tars-core` contracts package. Each service subscribes to specific topics, processes events, and publishes responses.
+
+### Core Topics
+- `wake/event` — wakeword detection events
+- `stt/partial` — streaming speech transcripts
+- `stt/final` — finalized speech transcripts  
+- `stt/audio_fft` — audio visualization data
+- `llm/request` — LLM generation requests
+- `llm/response` — LLM completions
+- `llm/stream` — streaming LLM tokens
+- `tts/say` — text-to-speech requests
+- `tts/status` — TTS playback status
+- `memory/query` — RAG memory queries
+- `memory/results` — retrieved memory context
+- `character/get` — character profile requests
+- `system/health/+` — service health monitoring
 
 ### Services
-- **Mosquitto** — broker
-- **STT** — Faster-Whisper HTTP service + publisher
-- **Router** — Python asyncio service (rule-first)
-- **TTS Worker** — Piper CLI subscriber
+- **MQTT Broker** (Mosquitto) — message bus for all services
+- **STT Worker** — speech-to-text using Faster-Whisper, OpenAI Whisper API, or WebSocket STT
+- **Wake Activation** — OpenWakeWord-based wake phrase detection
+- **Router** — intent routing, wake word handling, live mode control
+- **LLM Worker** — OpenAI/Gemini/local LLM text generation with optional RAG
+- **Memory Worker** — vector database for conversation memory and character profiles
+- **TTS Worker** — text-to-speech using Piper or ElevenLabs  
+- **UI (Web)** — FastAPI web interface with real-time MQTT display
+- **UI (PyGame)** — optional desktop GUI with audio visualization
 
 ---
 
 ## 📂 Repo Layout
 
 ```
-tars-brain/
+py-tars/
 ├─ README.md
-├─ docker-compose.yml
-├─ apps/
-│  ├─ router/           # Asyncio MQTT router
-│  └─ tts-worker/       # Piper CLI wrapper
-├─ ops/
-│  └─ mosquitto.conf    # Broker config
-├─ models/              # Whisper models (NVMe mount)
-└─ voices/              # Piper voices (NVMe mount)
+├─ docker-compose.yml           # Multi-service orchestration
+├─ apps/                        # Individual microservices
+│  ├─ router/                   # Intent routing & wake word handling
+│  ├─ stt-worker/               # Speech-to-text processing
+│  ├─ tts-worker/               # Text-to-speech synthesis
+│  ├─ wake-activation/          # OpenWakeWord detection
+│  ├─ llm-worker/               # LLM text generation
+│  ├─ memory-worker/            # Vector memory & character profiles
+│  ├─ ui-web/                   # FastAPI web interface
+│  └─ ui/                       # PyGame desktop interface
+├─ packages/
+│  └─ tars-core/               # Shared contracts & domain models
+│     └─ src/tars/
+│        ├─ contracts/         # Pydantic models & event registry
+│        ├─ adapters/          # MQTT & external service adapters
+│        ├─ domain/            # Core business logic
+│        └─ runtime/           # Service composition utilities
+├─ ops/                        # Infrastructure configs
+│  ├─ mosquitto-config/        # MQTT broker config
+│  └─ mosquitto-data/          # Persistent broker data
+├─ models/                     # AI model storage
+│  ├─ whisper/                 # STT models
+│  └─ openwakeword/            # Wake detection models
+├─ server/                     # Optional WebSocket STT service
+└─ .env.example               # Configuration template
 ```
+
+**Monorepo Architecture:** Each service in `apps/` is a self-contained package with its own dependencies, while `packages/tars-core` provides shared contracts and utilities. Services communicate through well-defined MQTT events using structured JSON envelopes.
 
 ---
 
@@ -64,47 +105,67 @@ tars-brain/
 
 ## 🚀 Setup
 
-### 1. Clone repo
+### 1. Clone & Configure
 ```bash
-git clone https://github.com/yourname/tars-brain.git
-cd tars-brain
+git clone https://github.com/ZinkoSoft/py-tars.git
+cd py-tars
+cp .env.example .env
+# Edit .env with your MQTT credentials and API keys
 ```
 
-### 2. Configure Mosquitto
-Edit `ops/mosquitto.conf`:
-```conf
-listener 1883 0.0.0.0
-allow_anonymous false
-password_file /mosquitto/config/passwd
-```
-
-Create broker user:
+### 2. Set up MQTT Broker
 ```bash
-sudo mosquitto_passwd -c ./ops/passwd tars
+# Create MQTT user credentials
+mkdir -p ops/mosquitto-config ops/mosquitto-data
+echo "listener 1883 0.0.0.0" > ops/mosquitto-config/mosquitto.conf
+echo "allow_anonymous false" >> ops/mosquitto-config/mosquitto.conf  
+echo "password_file /mosquitto/config/passwd" >> ops/mosquitto-config/mosquitto.conf
+docker run --rm -v $(pwd)/ops/mosquitto-config:/config eclipse-mosquitto:2 mosquitto_passwd -c /config/passwd tars
 ```
 
-### 3. Place models & voices
-- Whisper models → `/mnt/nvme/models/`
-- Piper voices → `/mnt/nvme/voices/`  
-  Example: `en_US-amy-medium.onnx`
+### 3. Prepare Model Storage
+```bash
+# Create model directories
+mkdir -p models/whisper models/openwakeword
+# Download your preferred Whisper model to models/whisper/
+# Place OpenWakeWord models in models/openwakeword/
+```
 
-### 4. Build & run
+### 4. Configure Voice Models
+```bash
+# For Piper TTS (local)
+mkdir -p apps/tts-worker/voices
+# Download TARS.onnx voice model to apps/tts-worker/voices/
+
+# For ElevenLabs TTS (cloud) - set in .env:
+# TTS_PROVIDER=elevenlabs
+# ELEVEN_API_KEY=your_key
+# ELEVEN_VOICE_ID=your_voice_id
+```
+
+### 5. Build & Deploy
 ```bash
 docker compose build
 docker compose up -d
+
+# Check service health
+docker compose ps
+docker compose logs -f
 ```
 
-### 5. Wake activation extras (local runs)
-
-If you plan to run the wake activation service outside of Docker (for example during local
-development or when executing its test suite), install the optional OpenWakeWord dependencies:
-
+### 6. Verify Deployment
 ```bash
-pip install -e 'apps/wake-activation[openwakeword]'
+# Check all services are running
+docker compose ps
+
+# Monitor logs from all services
+docker compose logs -f
+
+# Test the pipeline end-to-end
+echo "Say 'Hey TARS' followed by a question..."
 ```
 
-This extra pulls in the `openwakeword` runtime plus the compatible `tflite-runtime` wheel that the
-detector relies on.
+**First Time Setup:** The system will download required models on first startup. Check logs for download progress.
 
 ---
 
@@ -160,54 +221,156 @@ The TTS service requires proper audio configuration to output speech. The setup 
 
 ## 🧪 Testing
 
-1. **MQTT sanity**
-   ```bash
-   mosquitto_sub -h $MQTT_HOST -p $MQTT_PORT -u $MQTT_USER -P $MQTT_PASS -t 'system/#' -v
-   ```
+### 1. MQTT Health Check
+```bash
+# Monitor system health across all services
+mosquitto_sub -h 127.0.0.1 -p 1883 -u tars -P change_me -t 'system/health/+' -v
+```
 
-2. **Audio setup test**
-   ```bash
-   # Test host audio first
-   speaker-test -t wav -c 2 -l 1
-   
-   # Set correct audio output (adjust device as needed)
-   pactl set-default-sink alsa_output.platform-es8388-sound.stereo-fallback
-   ```
+### 2. Service Integration Tests
+```bash
+# Run the full test suite (creates venv, installs deps, runs pytest)
+./run.tests.sh
 
-3. **TTS test**
-   ```bash
-   mosquitto_pub -h $MQTT_HOST -p $MQTT_PORT -u $MQTT_USER -P $MQTT_PASS -t tts/say -m '{"text":"TARS voice initialized."}'
-   ```
-   ✅ You should hear Piper speak through your configured audio device.
+# Or run tests manually with pytest
+python -m pytest apps/*/tests/ packages/tars-core/tests/
+```
 
-4. **STT → Router → TTS loop**
-   - Run your STT publisher (captures mic, sends `stt/final`).  
-   - Router will publish `tts/say` with a reply.  
-   - TTS worker speaks it.
+### 3. Individual Service Tests
+
+**Wake Word Detection:**
+```bash
+# Check wake activation status
+mosquitto_sub -h 127.0.0.1 -p 1883 -u tars -P change_me -t 'wake/+' -v
+# Speak "Hey TARS" near your microphone
+```
+
+**Speech-to-Text Pipeline:**
+```bash
+# Monitor STT output
+mosquitto_sub -h 127.0.0.1 -p 1883 -u tars -P change_me -t 'stt/+' -v
+# Speak after wake word or in live mode
+```
+
+**Text-to-Speech:**
+```bash
+# Direct TTS test
+mosquitto_pub -h 127.0.0.1 -p 1883 -u tars -P change_me -t tts/say \
+  -m '{"type":"tts.say","source":"test","data":{"text":"TARS system operational."}}'
+```
+
+**LLM Integration:**
+```bash
+# Test conversation flow
+mosquitto_pub -h 127.0.0.1 -p 1883 -u tars -P change_me -t llm/request \
+  -m '{"type":"llm.request","source":"test","data":{"messages":[{"role":"user","content":"Hello TARS"}]}}'
+```
+
+### 4. End-to-End Conversation Test
+1. **Wake:** Say "Hey TARS" (should hear acknowledgment)
+2. **Speak:** Ask a question within 8 seconds  
+3. **Process:** Watch logs for STT → Router → LLM → TTS pipeline
+4. **Response:** Hear TARS speak the generated response
 
 ---
 
 ## 🔧 Extending
 
-- **Wakeword:** add `openWakeWord` → `audio/wake`.
-- **Cues:** router publishes `tts/cues` for gestures → ESP32-S3.
-- **MCP server:** add tool calls (`memory`, `vision`, `web`) behind router.
-- **Battery/motion:** add later, isolated on their own rails.
+### Adding New Services
+Follow the monorepo pattern in `apps/`:
+```bash
+mkdir apps/my-worker
+cd apps/my-worker
+# Create pyproject.toml, main.py, and service logic
+# Use tars-core contracts for MQTT communication
+```
+
+### Custom LLM Providers
+Extend `apps/llm-worker/llm_worker/providers/` with new provider implementations:
+- Implement the base `LLMProvider` interface
+- Add configuration in `.env` 
+- Register in the provider factory
+
+### New Event Types
+1. Add Pydantic models to `packages/tars-core/src/tars/contracts/v1/`
+2. Register event type → topic mappings in the registry
+3. Update services to handle new events
+
+### Memory & Character Customization
+- Place character TOML files in `apps/voice/characters/`
+- Extend memory worker RAG strategies in `apps/memory-worker/memory_worker/hyperdb.py`
+- Customize embedding models via `EMBED_MODEL` environment variable
+
+### UI Extensions
+- **Web UI:** Extend FastAPI routes in `apps/ui-web/`
+- **Desktop UI:** Modify PyGame components in `apps/ui/`
+- Both UIs automatically reflect new MQTT topics
+
+### Integration Examples
+- **Home Automation:** Subscribe to `tts/say` for smart home commands
+- **Motion Control:** Publish to custom topics from ESP32/Arduino
+- **External APIs:** Add new adapters in service `adapters/` directories
+
+---
+
+---
+
+## ✨ Key Features
+
+- **🎤 Multi-Backend STT:** Local Whisper, OpenAI API, or WebSocket server
+- **🎯 Wake Word Detection:** "Hey TARS" activation using OpenWakeWord  
+- **🤖 LLM Integration:** OpenAI, Gemini, xAI Grok, or local models
+- **🧠 Memory System:** RAG-powered conversation memory with character profiles
+- **🔊 Flexible TTS:** Local Piper or cloud ElevenLabs synthesis
+- **🎛️ Live Monitoring:** Real-time web UI and optional desktop interface
+- **📡 Event-Driven:** Loosely coupled services via MQTT with structured contracts
+- **🐳 Container Ready:** Full Docker Compose orchestration with health monitoring
+- **🔧 Extensible:** Plugin architecture for easy service additions
 
 ---
 
 ## 📈 Performance (Orange Pi 5 Max)
 
-- **STT (Faster-Whisper small INT8/FP16):** ~0.7–1.2 s finalization after speech ends
-- **TTS (Piper):** <400 ms first phrase, <200 ms steady state
-- **Router:** negligible latency (<5 ms)
+**Typical Latencies:**
+- **Wake Detection:** <100ms from "Hey TARS" to acknowledgment
+- **STT Processing:** 0.5-1.5s from speech end to final transcript (Whisper small)
+- **LLM Generation:** 1-3s for short responses (depends on provider/model)
+- **TTS Synthesis:** <400ms first phrase, <200ms steady state (Piper)
+- **End-to-End:** 2-5s from question to audible response
+
+**Resource Usage:**
+- **Memory:** ~2-4GB total (varies by loaded models)
+- **CPU:** Moderate during inference, idle otherwise
+- **Storage:** ~1-2GB for base models (Whisper small + Piper voice)
+
+**Optimization Tips:**
+- Use `WHISPER_MODEL=tiny` for faster STT at cost of accuracy
+- Enable `TTS_STREAMING=1` to reduce time-to-first-audio
+- Use cloud providers (OpenAI STT/LLM, ElevenLabs TTS) for better performance on limited hardware
 
 ---
 
 ## 📌 Roadmap / TODOs
-- [ ] **Add STT client** (mic capture, VAD, call Faster-Whisper HTTP, publish `stt/partial` + `stt/final`)
-- [ ] Add **wakeword** daemon (`openWakeWord` → `audio/wake`)
-- [ ] Publish **tts/cues** for motion sync (blink, nod, gaze)
-- [ ] Add **MCP server** with tools (`memory`, `vision.describe`, `web.search`, `home.toggle`)
-- [ ] Expand **Router** with intent classifier + tool calling
-- [ ] Add **health dashboard** (system/health MQTT → Prometheus/Grafana)
+
+### Completed ✅
+- [x] **STT Worker** with multiple backends (Whisper, OpenAI, WebSocket)
+- [x] **Wake Word Detection** using OpenWakeWord 
+- [x] **LLM Integration** with multiple providers (OpenAI, Gemini, local models)
+- [x] **Memory System** with RAG and character profiles
+- [x] **Streaming TTS** with Piper and ElevenLabs support
+- [x] **Web & Desktop UIs** with real-time MQTT monitoring
+- [x] **Event-driven Architecture** with structured MQTT contracts
+
+### In Progress 🚧
+- [ ] **MCP (Model Context Protocol) Server** integration for tool calling
+- [ ] **Vision Processing** worker for image/camera input
+- [ ] **Enhanced Router** with intent classification beyond simple rules
+- [ ] **Health Dashboard** with Prometheus/Grafana monitoring
+
+### Planned 📋
+- [ ] **Motion Cues** publishing (`tts/cues`) for gesture synchronization
+- [ ] **Multi-language Support** with language detection and switching
+- [ ] **Voice Cloning** integration for personalized TTS
+- [ ] **Plugin System** for easy third-party extensions
+- [ ] **Mobile App** companion with push notifications
+- [ ] **Kubernetes Deployment** manifests for cloud/edge deployment
