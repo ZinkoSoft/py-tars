@@ -30,6 +30,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "final": "stt/final",
         "tts": "tts/status",
     },
+    "fft_ws": {
+        "enabled": True,
+        "url": "ws://127.0.0.1:8765/fft",
+        "retry_seconds": 5.0,
+    },
 }
 
 
@@ -79,6 +84,9 @@ def load_config() -> Dict[str, Any]:
         ("topics", "partial"): os.getenv("UI_PARTIAL_TOPIC"),
         ("topics", "final"): os.getenv("UI_FINAL_TOPIC"),
         ("topics", "tts"): os.getenv("UI_TTS_TOPIC"),
+        ("fft_ws", "enabled"): os.getenv("UI_FFT_WS_ENABLE"),
+        ("fft_ws", "url"): os.getenv("UI_FFT_WS_URL"),
+        ("fft_ws", "retry_seconds"): os.getenv("UI_FFT_WS_RETRY"),
     }
     for (section, key), val in env_map.items():
         if val is None:
@@ -87,6 +95,13 @@ def load_config() -> Dict[str, Any]:
         if (section, key) in {("ui", "width"), ("ui", "height"), ("ui", "fps"), ("ui", "num_bars")}:
             try:
                 val = int(val)
+            except Exception:
+                continue
+        if (section, key) == ("fft_ws", "enabled"):
+            val = str(val).strip().lower() in {"1", "true", "yes", "on"}
+        if (section, key) == ("fft_ws", "retry_seconds"):
+            try:
+                val = float(val)
             except Exception:
                 continue
         cfg.setdefault(section, {})[key] = val

@@ -15,3 +15,8 @@ audio = "stt/audio_fft"
 partial = "stt/partial"
 final = "stt/final"
 tts = "tts/status"
+
+[fft_ws]
+enabled = true
+url = "ws://127.0.0.1:8765/fft"
+retry_seconds = 5.0

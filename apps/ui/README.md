@@ -12,6 +12,13 @@ This app subscribes to MQTT topics published by the existing stack and renders a
 - `stt/final`: displays last transcript
 - `tts/status`: shows last AI response when `speaking_start` arrives
 
+## FFT stream
+The spectrum visual now pulls data from the STT worker's websocket hub (defaults to `ws://127.0.0.1:8765/fft`).
+
+- Enable the hub by setting `FFT_WS_ENABLE=1` for the STT worker.
+- Configure the UI via `[fft_ws]` in `ui.toml` or `UI_FFT_WS_URL` / `UI_FFT_WS_ENABLE` environment variables.
+- Set `[fft_ws].enabled = false` (or `UI_FFT_WS_ENABLE=0`) to fall back to the legacy `stt/audio_fft` MQTT topic if needed.
+
 ## Run (host, recommended on Pi)
 Install system packages, create a venv, install Python deps, and run directly.
 

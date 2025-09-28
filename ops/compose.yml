@@ -117,6 +117,14 @@ services:
       VAD_AGGRESSIVENESS: ${VAD_AGGRESSIVENESS:-3}
       SAMPLE_RATE: ${SAMPLE_RATE:-16000}
       AUDIO_FANOUT_PATH: ${WAKE_AUDIO_FANOUT:-/tmp/tars/audio-fanout.sock}
+      FFT_PUBLISH: ${FFT_PUBLISH:-1}
+      FFT_RATE_HZ: ${FFT_RATE_HZ:-12}
+      FFT_BINS: ${FFT_BINS:-64}
+      FFT_LOG_SCALE: ${FFT_LOG_SCALE:-1}
+      FFT_WS_ENABLE: ${FFT_WS_ENABLE:-0}
+      FFT_WS_HOST: ${FFT_WS_HOST:-0.0.0.0}
+      FFT_WS_PORT: ${FFT_WS_PORT:-8765}
+      FFT_WS_PATH: ${FFT_WS_PATH:-/fft}
     depends_on:
       mqtt:
         condition: service_started

@@ -61,6 +61,10 @@ FFT_TOPIC = os.getenv("FFT_TOPIC", "stt/audio_fft")
 FFT_RATE_HZ = float(os.getenv("FFT_RATE_HZ", "12"))
 FFT_BINS = int(os.getenv("FFT_BINS", "64"))
 FFT_LOG_SCALE = int(os.getenv("FFT_LOG_SCALE", "1"))
+FFT_WS_ENABLE = int(os.getenv("FFT_WS_ENABLE", "0"))
+FFT_WS_HOST = os.getenv("FFT_WS_HOST", "0.0.0.0")
+FFT_WS_PORT = int(os.getenv("FFT_WS_PORT", "8765"))
+FFT_WS_PATH = os.getenv("FFT_WS_PATH", "/fft")
 
 COMMON_WORDS: Set[str] = set(
     "the a an and of to you i it is that in we for on with this my your yes no thanks thank hello hi ok okay please what who where when why how can do are was were have has had just really sure right time date day weather play stop start open close tell give set make turn off on up down volume name today now current temperature".split()
@@ -141,6 +145,10 @@ __all__ = [
     "FFT_RATE_HZ",
     "FFT_BINS",
     "FFT_LOG_SCALE",
+    "FFT_WS_ENABLE",
+    "FFT_WS_HOST",
+    "FFT_WS_PORT",
+    "FFT_WS_PATH",
     "COMMON_WORDS",
     "OPENAI_API_KEY",
     "OPENAI_BASE_URL",

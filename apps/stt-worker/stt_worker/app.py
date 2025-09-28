@@ -27,6 +27,10 @@ from .config import (
     FFT_PUBLISH,
     FFT_RATE_HZ,
     FFT_TOPIC,
+    FFT_WS_ENABLE,
+    FFT_WS_HOST,
+    FFT_WS_PATH,
+    FFT_WS_PORT,
     LOG_LEVEL,
     MQTT_URL,
     PARTIAL_ALPHA_RATIO_MIN,
@@ -49,6 +53,7 @@ from .config import (
     WAKE_EVENT_FALLBACK_TTL_MS,
 )
 from .mqtt_utils import MQTTClientWrapper
+from .fft_ws import FFTWebSocketServer
 from .suppression import SuppressionEngine, SuppressionState
 from .transcriber import SpeechTranscriber
 from .vad import VADProcessor
@@ -108,6 +113,7 @@ class STTWorker:
         self.service: STTService | None = None
         self._enable_partials = False
         self._resume_after_tts = False
+        self._fft_ws: FFTWebSocketServer | None = None
 
     async def initialize(self) -> None:
         if os.path.exists("/host-models"):
@@ -138,6 +144,16 @@ class STTWorker:
             )
         else:
             logger.info("Streaming partial transcripts disabled")
+
+        if FFT_WS_ENABLE:
+            try:
+                self._fft_ws = FFTWebSocketServer(FFT_WS_HOST, FFT_WS_PORT, FFT_WS_PATH)
+                await self._fft_ws.start()
+            except Exception as exc:  # pragma: no cover - startup best effort
+                logger.error("Unable to start FFT websocket server: %s", exc)
+                self._fft_ws = None
+        else:
+            self._fft_ws = None
 
     async def publish_health(self, ok: bool, message: str = "") -> None:
         event_text = message or ("ready" if ok else "")
@@ -509,7 +525,7 @@ class STTWorker:
             )
             if self.service.partials_enabled:
                 self._partials_task = asyncio.create_task(self._partials_loop())
-            if FFT_PUBLISH:
+            if FFT_PUBLISH or self._fft_ws is not None:
                 self._fft_task = asyncio.create_task(self._fft_loop())
             await self.process_audio_stream()
         except Exception as exc:  # pragma: no cover - safety net
@@ -523,6 +539,15 @@ class STTWorker:
                 self._wake_fallback_task.cancel()
             if self._wake_ttl_task and not self._wake_ttl_task.done():
                 self._wake_ttl_task.cancel()
+            if self._fft_task and not self._fft_task.done():
+                self._fft_task.cancel()
+            self._fft_task = None
+            if self._fft_ws is not None:
+                try:
+                    await self._fft_ws.stop()
+                except Exception as exc:  # pragma: no cover - best effort cleanup
+                    logger.debug("Error shutting down FFT websocket: %s", exc)
+                self._fft_ws = None
             await self.mqtt.disconnect()
             self._publisher = None
             self.service = None
@@ -586,10 +611,17 @@ class STTWorker:
             pos = mag[: len(mag)]
             idx = np.linspace(0, len(pos) - 1, bins)
             down = np.interp(idx, np.arange(len(pos)), pos)
-            try:
-                await self.mqtt.safe_publish(FFT_TOPIC, {"fft": down.tolist(), "ts": now})
-            except Exception:  # pragma: no cover - best effort
-                pass
+            payload = {"fft": down.tolist(), "ts": now}
+            if FFT_PUBLISH:
+                try:
+                    await self.mqtt.safe_publish(FFT_TOPIC, payload)
+                except Exception:  # pragma: no cover - best effort
+                    pass
+            if self._fft_ws is not None:
+                try:
+                    await self._fft_ws.broadcast(payload)
+                except Exception as exc:  # pragma: no cover - best effort
+                    logger.debug("FFT websocket broadcast failed: %s", exc)
 
 
 def main() -> None:
