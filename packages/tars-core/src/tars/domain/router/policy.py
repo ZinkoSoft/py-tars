@@ -338,7 +338,7 @@ class RouterPolicy:
             return
         say = TtsSay(
             text=text,
-            voice="piper/en_US/amy",
+            voice=self.settings.tts_voice,
             lang="en",
             utt_id=utt_id,
             style=style,

@@ -18,6 +18,7 @@ class RouterSettings:
     mqtt_url: str = "mqtt://tars:pass@127.0.0.1:1883"
     online_announce: bool = True
     online_text: str = "System online."
+    tts_voice: str = "piper/en_US/amy"
     topic_health_tts: str = "system/health/tts"
     topic_health_stt: str = "system/health/stt"
     topic_health_router: str = "system/health/router"
@@ -64,6 +65,7 @@ class RouterSettings:
         self.wake_ack_enabled = bool(self.wake_ack_enabled)
         self.wake_ack_text = (self.wake_ack_text or "").strip()
         self.wake_ack_style = (self.wake_ack_style or "neutral").strip() or "neutral"
+        self.tts_voice = (self.tts_voice or "").strip() or "piper/en_US/amy"
         ack_choices = [p.strip() for p in self.wake_ack_choices_raw.split("|") if p.strip()]
         default_choices: Tuple[str, ...] = ("Hmm?", "Huh?", "Yes?")
         if not ack_choices:
@@ -140,6 +142,12 @@ class RouterSettings:
             topic_llm_stream=get_str("TOPIC_LLM_STREAM", defaults.topic_llm_stream, env=env),
             topic_llm_cancel=get_str("TOPIC_LLM_CANCEL", defaults.topic_llm_cancel, env=env),
             topic_wake_event=get_str("TOPIC_WAKE_EVENT", defaults.topic_wake_event, env=env),
+            tts_voice=get_str(
+                "ROUTER_TTS_VOICE",
+                defaults.tts_voice,
+                env=env,
+                aliases=("PIPER_VOICE",),
+            ),
             router_llm_tts_stream=get_bool("ROUTER_LLM_TTS_STREAM", defaults.router_llm_tts_stream, env=env),
             stream_min_chars=get_int(
                 "ROUTER_STREAM_MIN_CHARS",

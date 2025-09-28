@@ -94,6 +94,18 @@ docker compose build
 docker compose up -d
 ```
 
+### 5. Wake activation extras (local runs)
+
+If you plan to run the wake activation service outside of Docker (for example during local
+development or when executing its test suite), install the optional OpenWakeWord dependencies:
+
+```bash
+pip install -e 'apps/wake-activation[openwakeword]'
+```
+
+This extra pulls in the `openwakeword` runtime plus the compatible `tflite-runtime` wheel that the
+detector relies on.
+
 ---
 
 ## 🔊 Audio Setup

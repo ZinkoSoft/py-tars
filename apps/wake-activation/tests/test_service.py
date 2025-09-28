@@ -137,6 +137,7 @@ async def test_stt_mic_ttl_remutes_after_idle_timeout() -> None:
     worker.recent_unmute_time = 0.0
     worker.fallback_unmute_task = None
     worker._wake_ttl_task = None
+    worker._wake_fallback_task = None
 
     mic_payload = next(
         (payload for topic, payload, *_ in client.published if topic == cfg.mic_control_topic),

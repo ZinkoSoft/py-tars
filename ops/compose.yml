@@ -18,19 +18,19 @@ name: tars-stack
 
 services:
   mqtt:
+    env_file: ../.env
     image: eclipse-mosquitto:2
     container_name: tars-mqtt
     ports:
       - "1883:1883"
-    # volumes:
-    #   - ./mosquitto:/mosquitto   # optional: supply custom config/persistence
-    # Simple TCP healthcheck (requires /bin/sh from mosquitto image)
-    healthcheck:
-      test: ["CMD-SHELL", "sh -c 'echo > /dev/tcp/127.0.0.1/1883'"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto-data:/mosquitto/data
+      - ./mosquitto-config:/mosquitto/config
+      # volumes:
+      #   - ./mosquitto:/mosquitto   # optional: supply custom config/persistence
+    restart: unless-stopped
+    
   router:
     build:
       context: ..                      # root of the repo
@@ -39,18 +39,29 @@ services:
         PY_VERSION: "3.11"
         APP_PATH: apps/router
         CONTRACTS_PATH: packages/tars-core
-        APP_MODULE: tars_router.app_main
+        APP_MODULE: main
+    env_file: .env
     image: tars/router:dev
     container_name: tars-router
     environment:
+      MQTT_URL: mqtt://mqtt:1883
       MQTT_HOST: mqtt
       MQTT_PORT: "1883"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ROUTER_LLM_TTS_STREAM: ${ROUTER_LLM_TTS_STREAM:-1}
+      TOPIC_LLM_STREAM: ${TOPIC_LLM_STREAM:-llm/stream}
+      TOPIC_LLM_RESPONSE: ${TOPIC_LLM_RESPONSE:-llm/response}
+      TOPIC_LLM_CANCEL: ${TOPIC_LLM_CANCEL:-llm/cancel}
+      TOPIC_TTS_SAY: ${TOPIC_TTS_SAY:-tts/say}
+      ROUTER_STREAM_MIN_CHARS: ${STREAM_MIN_CHARS:-60}
+      ROUTER_STREAM_MAX_CHARS: ${STREAM_MAX_CHARS:-240}
+      ROUTER_STREAM_BOUNDARY_CHARS: ${STREAM_BOUNDARY_CHARS:-.!?;:}
+      ROUTER_TTS_VOICE: ${ROUTER_TTS_VOICE:-/voices/TARS.onnx}
     depends_on:
       mqtt:
-        condition: service_healthy
+        condition: service_started
     # If router defines a console script `tars-router`, you can use:
     # command: ["tars-router"]
-    command: ["sh","-lc","python -m tars_router.app_main"]
     restart: unless-stopped
 
   tts:
@@ -59,17 +70,26 @@ services:
       dockerfile: apps/tts-worker/Dockerfile
     image: tars/tts:dev
     container_name: tars-tts
+    env_file: .env
     environment:
+      MQTT_URL: mqtt://mqtt:1883
       MQTT_HOST: mqtt
       MQTT_PORT: "1883"
+      PIPER_VOICE: /voices/TARS.onnx
+      PULSE_RUNTIME_PATH: /run/user/1000/pulse
+      PULSE_SERVER: unix:/run/user/1000/pulse/native
+      TTS_STREAMING: ${TTS_STREAMING:-0}
+      TTS_PIPELINE: ${TTS_PIPELINE:-1}
+
     depends_on:
       mqtt:
-        condition: service_healthy
-  # Image entrypoint handles startup
+        condition: service_started
+    # Image entrypoint handles startup
     restart: unless-stopped
     # Example of mounting voices/models if needed
-    # volumes:
-    #   - ./assets/voices:/voices:ro
+    volumes:
+      - ../apps/tts-worker/voices:/voice-models:ro
+      - /run/user/1000/pulse:/run/user/1000/pulse:ro
 
   stt:
     build:
@@ -77,21 +97,41 @@ services:
       dockerfile: apps/stt-worker/Dockerfile
     image: tars/stt:dev
     container_name: tars-stt
+    env_file: .env
     environment:
+      # Broker URL assembled from global creds/host/port
+      MQTT_URL: mqtt://mqtt:1883
       MQTT_HOST: mqtt
       MQTT_PORT: "1883"
+      # Whisper model and logging
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Backend selection and remote WS URL (if STT_BACKEND=ws)
+      STT_BACKEND: ${STT_BACKEND:-whisper}
+      WS_URL: ${WS_URL:-ws://127.0.0.1:9000/stt}
+      PULSE_RUNTIME_PATH: /run/user/1000/pulse
+      PULSE_SERVER: unix:/run/user/1000/pulse/native
+      # Audio/VAD
+      SILENCE_THRESHOLD_MS: ${SILENCE_THRESHOLD_MS:-600}
+      CHUNK_DURATION_MS: ${CHUNK_DURATION_MS:-20}
+      VAD_AGGRESSIVENESS: ${VAD_AGGRESSIVENESS:-3}
+      SAMPLE_RATE: ${SAMPLE_RATE:-16000}
+      AUDIO_FANOUT_PATH: ${WAKE_AUDIO_FANOUT:-/tmp/tars/audio-fanout.sock}
     depends_on:
       mqtt:
-        condition: service_healthy
-  # Image entrypoint handles startup
+        condition: service_started
     restart: unless-stopped
-    # devices:
-    #   - "/dev/snd"   # if capturing audio from host
+    devices:
+      - /dev/snd:/dev/snd
+    volumes:
+      - /run/user/1000/pulse:/run/user/1000/pulse:ro
+      - ../models/whisper:/host-models
+      - wake-cache:/tmp/tars
 
   wake-activation:
     build:
       context: ..
-      dockerfile: docker/app.Dockerfile
+      dockerfile: apps/wake-activation/Dockerfile
       args:
         PY_VERSION: "3.11"
         APP_PATH: apps/wake-activation
@@ -99,15 +139,17 @@ services:
         APP_MODULE: wake_activation
     image: tars/wake-activation:dev
     container_name: tars-wake-activation
+    env_file: .env
     environment:
+      MQTT_URL: mqtt://mqtt:1883
       MQTT_HOST: mqtt
       MQTT_PORT: "1883"
-      LOG_LEVEL: "INFO"
-      WAKE_AUDIO_FANOUT: /tmp/tars/audio-fanout.sock
-      WAKE_MODEL_PATH: /models/openwakeword/hey_tars.tflite
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      WAKE_AUDIO_FANOUT: ${WAKE_AUDIO_FANOUT:-/tmp/tars/audio-fanout.sock}
+      WAKE_MODEL_PATH: ${WAKE_MODEL_PATH:-/models/openwakeword/hey_tars.tflite}
     depends_on:
       mqtt:
-        condition: service_healthy
+        condition: service_started
       stt:
         condition: service_started
     volumes:
@@ -119,16 +161,22 @@ services:
     build:
       context: ..
       dockerfile: apps/ui-web/Dockerfile
+      args:
+        SERVICE_PATH: apps/ui-web
     image: tars/ui-web:dev
     container_name: tars-ui-web
+    env_file: .env
     environment:
+      MQTT_URL: mqtt://mqtt:1883
       MQTT_HOST: mqtt
       MQTT_PORT: "1883"
       HOST: 0.0.0.0
       PORT: "5010"
+    ports:
+      - "5010:5010"
     depends_on:
       mqtt:
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
 
   llm:
@@ -137,7 +185,9 @@ services:
       dockerfile: apps/llm-worker/Dockerfile
     image: tars/llm:dev
     container_name: tars-llm
+    env_file: .env
     environment:
+      MQTT_URL: mqtt://mqtt:1883
       MQTT_HOST: mqtt
       MQTT_PORT: "1883"
       LOG_LEVEL: "INFO"
@@ -147,7 +197,7 @@ services:
       LLM_TEMPERATURE: "0.7"
     depends_on:
       mqtt:
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
 
 # Optional: define multiple network(s)

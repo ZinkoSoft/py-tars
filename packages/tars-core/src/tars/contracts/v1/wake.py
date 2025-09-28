@@ -13,6 +13,10 @@ class WakeEvent(BaseModel):
     message_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     type: str
     tts_id: str | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    energy: float | None = Field(default=None, ge=0.0)
+    cause: str | None = None
+    ts: float | None = None
 
     model_config = {"extra": "forbid"}
 
