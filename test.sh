@@ -1,1 +1,1 @@
-mosquitto_pub -h 127.0.0.1 -p 1883 -u tars -P change_me   -t tts/say -m '{"text":"Test line one."}'
+mosquitto_pub -h 127.0.0.1 -p 1883 -u tars -P change_me -q 1 -t tts/say -m '{"type":"tts.say","source":"manual-test","data":{"text":"Test line one.","voice":"/voices/TARS.onnx","utt_id":"manual-test"}}'

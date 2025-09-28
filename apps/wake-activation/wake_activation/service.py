@@ -193,15 +193,15 @@ class WakeActivationService:
 
     async def publish_wake_event(self, client: mqtt.Client, event: WakeEvent) -> None:
         await client.publish(self.cfg.wake_event_topic, orjson.dumps(event.model_dump()), qos=1)
-        self.log.debug("Published wake event: %s", event.model_dump())
+        self.log.info("Published wake event: %s", event.model_dump())
 
     async def send_mic_command(self, client: mqtt.Client, command: MicCommand) -> None:
         await client.publish(self.cfg.mic_control_topic, orjson.dumps(command.model_dump()), qos=1)
-        self.log.debug("Published mic command: %s", command.model_dump())
+        self.log.info("Published mic command: %s", command.model_dump())
 
     async def send_tts_command(self, client: mqtt.Client, command: TtsControl) -> None:
         await client.publish(self.cfg.tts_control_topic, orjson.dumps(command.model_dump()), qos=1)
-        self.log.debug("Published TTS control: %s", command.model_dump())
+        self.log.info("Published TTS control: %s", command.model_dump())
 
     def _parse_mqtt_url(self, url: str) -> Tuple[str, int, Optional[str], Optional[str]]:
         parsed = urlparse(url)

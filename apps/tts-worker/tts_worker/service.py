@@ -177,12 +177,13 @@ class TTSService:
                 async with client.messages() as messages:
                     async for msg in messages:
                         try:
-                            if msg.topic == SAY_TOPIC:
+                            logger.info("Received message on %s", msg.topic)
+                            if msg.topic.value == SAY_TOPIC:
                                 say = self._decode_event(msg.payload, TtsSay, event_type=EVENT_TYPE_SAY)
                                 if say is None:
                                     continue
                                 await self._domain.handle_say(say, callbacks)
-                            elif msg.topic == CONTROL_TOPIC:
+                            elif msg.topic.value == CONTROL_TOPIC:
                                 try:
                                     data = json.loads(msg.payload)
                                 except json.JSONDecodeError as exc:

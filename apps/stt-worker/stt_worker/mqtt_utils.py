@@ -194,7 +194,7 @@ class MQTTClientWrapper:
                     backoff = 0.5
                     async for msg in messages:
                         try:
-                            handler = self._handlers.get(msg.topic)
+                            handler = self._handlers.get(msg.topic.value)
                             if handler:
                                 await handler(msg.payload)
                         except Exception as e:
