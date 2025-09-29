@@ -56,18 +56,13 @@ class SpectrumBars:
         return max(0.0, fade)
 
     def render(self, surface: pygame.Surface, now: float, fonts: Mapping[str, pygame.font.Font]) -> None:
-        pygame.draw.rect(surface, self.background_color, self.rect, border_radius=6)
         intensity = self._current_intensity(now)
         self.alpha = intensity
         if intensity <= 0.0:
-            font = fonts.get("small")
-            if font is not None:
-                message = "Waiting for spectrum data..." if self.last_update is None else "Spectrum idle"
-                surface.blit(
-                    font.render(message, True, (220, 120, 120)),
-                    (self.rect.x, max(10, self.rect.y - 28)),
-                )
+            # Hidden when no activity
             return
+
+        pygame.draw.rect(surface, self.background_color, self.rect, border_radius=6)
 
         bar_width = self.rect.width / max(1, self.num_bars)
         for index, value in enumerate(self.values):

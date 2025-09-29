@@ -13,6 +13,7 @@ from fft_ws_client import FFTWebsocketClient
 from mqtt_bridge import MqttBridge
 from module.layout import Box, get_layout_dimensions, load_layout_config
 from module.spectrum import SpectrumBars
+from module.tars_idle import TarsIdle
 
 CFG = load_config()
 
@@ -105,6 +106,9 @@ class UI:
                 component = SpectrumBars(box, NUM_BARS)
                 self.components[key] = component
                 self.spectrum_component = component
+            elif key == "tars_idle":
+                component = TarsIdle(box)
+                self.components[key] = component
             else:
                 logger.info("Unhandled layout component '%s'", box.name)
 
@@ -113,7 +117,16 @@ class UI:
         now = time.monotonic()
         fonts = {"small": self.font, "large": self.big_font}
 
-        for component in self.components.values():
+        # Render background components first
+        if "tars_idle" in self.components:
+            try:
+                self.components["tars_idle"].render(self.screen, now, fonts)
+            except Exception as exc:  # pragma: no cover - defensive rendering guard
+                logger.error("Component tars_idle render failed: %s", exc)
+
+        for key, component in self.components.items():
+            if key == "tars_idle":
+                continue
             try:
                 component.render(self.screen, now, fonts)
             except Exception as exc:  # pragma: no cover - defensive rendering guard

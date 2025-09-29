@@ -1,21 +1,37 @@
 {
   "landscape": [
     {
+      "name": "tars_idle",
+      "x": 0.0,
+      "y": 0.0,
+      "width": 1.0,
+      "height": 1.0,
+      "expandable": false
+    },
+    {
       "name": "spectrum",
-      "x": 0.1,
-      "y": 0.55,
-      "width": 0.8,
-      "height": 0.35,
+      "x": 0.0,
+      "y": 0.0,
+      "width": 1.0,
+      "height": 1.0,
       "expandable": false
     }
   ],
   "portrait": [
     {
+      "name": "tars_idle",
+      "x": 0.0,
+      "y": 0.0,
+      "width": 1.0,
+      "height": 1.0,
+      "expandable": false
+    },
+    {
       "name": "spectrum",
-      "x": 0.1,
-      "y": 0.65,
-      "width": 0.8,
-      "height": 0.3,
+      "x": 0.0,
+      "y": 0.0,
+      "width": 1.0,
+      "height": 1.0,
       "expandable": false
     }
   ]
