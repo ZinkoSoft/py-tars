@@ -78,10 +78,32 @@ def test_stream_chunk_parsing() -> None:
     assert parsed.choices[0].delta.content == "partial"
 
 
+def test_stream_chunk_accepts_extra_fields() -> None:
+    raw = {
+        "id": "abc",
+        "object": "chat.completion.chunk",
+        "created": 123,
+        "model": "gpt-test",
+        "choices": [
+            {
+                "index": 0,
+                "delta": {
+                    "role": "assistant",
+                    "content": "Hi",
+                },
+                "finish_reason": None,
+                "logprobs": None,
+            }
+        ],
+    }
+    parsed = StreamChunk.model_validate(raw)
+    assert parsed.choices[0].delta.role == "assistant"
+    assert parsed.choices[0].delta.content == "Hi"
+
+
 @pytest.mark.parametrize(
     "invalid",
     [
-        {"unknown": "field"},
         {"choices": [{"delta": {"content": 123}}]},
     ],
 )

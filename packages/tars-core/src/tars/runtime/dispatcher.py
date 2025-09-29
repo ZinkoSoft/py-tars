@@ -8,6 +8,7 @@ import orjson
 from pydantic import ValidationError
 
 from tars.contracts.envelope import Envelope
+from tars.contracts.v1 import LLMResponse, LLMStreamDelta
 from tars.contracts.registry import resolve_event
 from tars.runtime.subscription import Sub
 
@@ -89,6 +90,12 @@ class Dispatcher:
                     self._log_decode_error(sub.topic, f"unknown_topic: {exc}")
                     continue
                 envelope = Envelope.new(event_type=event_type, data=payload_model)
+
+            if self._logger and sub.model in {LLMResponse, LLMStreamDelta}:
+                self._logger.info(
+                    "dispatcher.message",
+                    extra={"topic": sub.topic, "envelope_id": envelope.id},
+                )
 
             await self._enqueue(sub, envelope, payload_model)
 

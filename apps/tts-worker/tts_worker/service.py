@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+from contextlib import suppress
 from typing import Any, Optional
 from urllib.parse import urlparse
 
@@ -195,33 +197,54 @@ class TTSService:
                 await client.subscribe([(SAY_TOPIC, 0), (CONTROL_TOPIC, 0)])
                 logger.info("Subscribed to %s and %s, ready to process messages", SAY_TOPIC, CONTROL_TOPIC)
                 callbacks = self._build_callbacks(client)
-                await self._domain.preload_wake_cache()
-                async with client.messages() as messages:
-                    async for msg in messages:
+                logger.debug("Starting wake acknowledgement cache preload task")
+                preload_task: asyncio.Task[None] | None = None
+                try:
+                    preload_task = asyncio.create_task(self._domain.preload_wake_cache())
+
+                    def _handle_preload_result(task: asyncio.Task[None]) -> None:
                         try:
-                            logger.info("Received message on %s", msg.topic)
-                            if msg.topic.value == SAY_TOPIC:
-                                say = self._decode_event(msg.payload, TtsSay, event_type=EVENT_TYPE_SAY)
-                                if say is None:
-                                    continue
-                                await self._domain.handle_say(say, callbacks)
-                            elif msg.topic.value == CONTROL_TOPIC:
-                                try:
-                                    data = json.loads(msg.payload)
-                                except json.JSONDecodeError as exc:
-                                    logger.warning("Invalid tts/control payload: %s", exc)
-                                    continue
-                                try:
-                                    control = TTSControlMessage.from_dict(data)
-                                except ValueError as exc:
-                                    logger.warning("Invalid tts/control payload: %s", exc)
-                                    continue
-                                await self._domain.handle_control(control, callbacks)
-                            else:
-                                logger.debug("Ignoring unexpected topic %s", msg.topic)
-                        except Exception as exc:
-                            logger.error("Error processing message: %s", exc)
-                            await self._publish_event(EVENT_TYPE_HEALTH_TTS, HealthPing(ok=False, err=str(exc)), retain=True)
+                            task.result()
+                        except asyncio.CancelledError:
+                            logger.debug("Wake acknowledgement cache preload cancelled")
+                        except Exception as exc:  # pragma: no cover - defensive logging
+                            logger.warning("Wake acknowledgement cache preload failed", extra={"error": str(exc)})
+                        else:
+                            logger.info("Wake acknowledgement cache preload complete")
+
+                    preload_task.add_done_callback(_handle_preload_result)
+
+                    async with client.messages() as messages:
+                        async for msg in messages:
+                            try:
+                                logger.info("Received message on %s", msg.topic)
+                                if msg.topic.value == SAY_TOPIC:
+                                    say = self._decode_event(msg.payload, TtsSay, event_type=EVENT_TYPE_SAY)
+                                    if say is None:
+                                        continue
+                                    await self._domain.handle_say(say, callbacks)
+                                elif msg.topic.value == CONTROL_TOPIC:
+                                    try:
+                                        data = json.loads(msg.payload)
+                                    except json.JSONDecodeError as exc:
+                                        logger.warning("Invalid tts/control payload: %s", exc)
+                                        continue
+                                    try:
+                                        control = TTSControlMessage.from_dict(data)
+                                    except ValueError as exc:
+                                        logger.warning("Invalid tts/control payload: %s", exc)
+                                        continue
+                                    await self._domain.handle_control(control, callbacks)
+                                else:
+                                    logger.debug("Ignoring unexpected topic %s", msg.topic)
+                            except Exception as exc:
+                                logger.error("Error processing message: %s", exc)
+                                await self._publish_event(EVENT_TYPE_HEALTH_TTS, HealthPing(ok=False, err=str(exc)), retain=True)
+                finally:
+                    if preload_task is not None and not preload_task.done():
+                        preload_task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await preload_task
         except MqttError as exc:
             logger.info("MQTT disconnected: %s; shutting down gracefully", exc)
         finally:

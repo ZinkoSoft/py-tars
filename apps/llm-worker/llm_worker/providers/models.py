@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable, Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -9,7 +9,7 @@ class ChatMessage(BaseModel):
     role: str
     content: str
 
-    model_config = {"extra": "forbid"}
+    model_config = {"extra": "ignore"}
 
 
 class ChatCompletionRequest(BaseModel):
@@ -25,26 +25,37 @@ class ChatCompletionRequest(BaseModel):
 
 class ChoiceDelta(BaseModel):
     content: Optional[str] = None
+    role: Optional[str] = None
 
-    model_config = {"extra": "forbid"}
+    model_config = {"extra": "ignore"}
 
 
 class Choice(BaseModel):
+    index: int = 0
     delta: ChoiceDelta = Field(default_factory=ChoiceDelta)
+    finish_reason: Optional[str] = None
+    logprobs: Any | None = None
 
-    model_config = {"extra": "forbid"}
+    model_config = {"extra": "ignore"}
 
 
 class StreamChunk(BaseModel):
+    id: Optional[str] = None
+    object: Optional[str] = None
+    created: Optional[int] = None
+    model: Optional[str] = None
     choices: list[Choice] = Field(default_factory=list)
 
-    model_config = {"extra": "forbid"}
+    model_config = {"extra": "ignore"}
 
 
 class ChatCompletionChoice(BaseModel):
+    index: int = 0
     message: ChatMessage
+    finish_reason: Optional[str] = None
+    logprobs: Any | None = None
 
-    model_config = {"extra": "forbid"}
+    model_config = {"extra": "ignore"}
 
 
 class Usage(BaseModel):

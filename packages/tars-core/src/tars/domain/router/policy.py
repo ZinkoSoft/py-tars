@@ -243,7 +243,12 @@ class RouterPolicy:
             self._log_metrics(ctx)
 
     async def handle_llm_response(self, event: LLMResponse, ctx: Ctx) -> None:
+        ctx.logger.info("router.llm.response.raw", extra={"id": event.id or "", "error": bool(event.error)})
         text = (event.reply or "").strip()
+        ctx.logger.info(
+            "router.llm.response.received",
+            extra={"id": event.id or "", "len": len(text), "provider": event.provider, "model": event.model},
+        )
         if not text:
             return
         ctx.logger.info("router.llm.response", extra={"len": len(text)})
@@ -346,6 +351,15 @@ class RouterPolicy:
             stt_ts=stt_ts,
         )
         await ctx.publish(EVENT_TYPE_SAY, say, correlate=correlate, qos=1)
+        ctx.logger.info(
+            "router.tts.say",
+            extra={
+                "utt_id": utt_id,
+                "len": len(text),
+                "wake_ack": wake_ack,
+                "stream_mode": self.settings.router_llm_tts_stream,
+            },
+        )
         if self.metrics:
             self.metrics.record_tts_message()
             self._log_metrics(ctx)

@@ -313,6 +313,7 @@ class LLMService:
                         try:
                             if want_stream and getattr(self.provider, "name", "") == "openai":
                                 seq = 0
+                                full_chunks: list[str] = []
                                 logger.info("Starting streaming for id=%s via provider=%s (system_len=%s)", req_id, self.provider.name, len(system or ""))
                                 tts_buf = ""
                                 async for ch in self.provider.stream(
@@ -333,6 +334,8 @@ class LLMService:
                                         provider=self.provider.name,
                                         model=model,
                                     )
+                                    if delta_text:
+                                        full_chunks.append(delta_text)
                                     logger.debug("llm/stream id=%s seq=%d len=%d", req_id, seq, len(delta_text or ""))
                                     await self._publish_event(
                                         client,
@@ -382,6 +385,24 @@ class LLMService:
                                         payload=TtsSay(text=final_sent),
                                         correlate=correlation_id,
                                     )
+                                # Publish final accumulated response for downstream consumers
+                                final_text = "".join(full_chunks)
+                                logger.info("Publishing llm/response for id=%s (len=%d)", req_id, len(final_text or ""))
+                                resp = LLMResponse(
+                                    id=req_id,
+                                    reply=final_text or None,
+                                    provider=self.provider.name,
+                                    model=model,
+                                )
+                                logger.info("llm/response id=%s len=%d", req_id, len(final_text or ""))
+                                logger.info("sending event to response topic %s with event type of %s: payload %s", TOPIC_LLM_RESPONSE, EVENT_TYPE_LLM_RESPONSE, resp)
+                                await self._publish_event(
+                                    client,
+                                    event_type=EVENT_TYPE_LLM_RESPONSE,
+                                    topic=TOPIC_LLM_RESPONSE,
+                                    payload=resp,
+                                    correlate=correlation_id,
+                                )
                             else:
                                 result = await self.provider.generate(
                                     prompt,
