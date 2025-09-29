@@ -5,7 +5,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from tars.contracts.v1 import (
     EVENT_TYPE_LLM_REQUEST,
@@ -34,6 +34,8 @@ class RouterPolicy:
     ready: Dict[str, bool] = field(default_factory=lambda: {"tts": False, "stt": False})
     announced: bool = False
     llm_buf: Dict[str, str] = field(default_factory=dict)
+    llm_stream_segments: Dict[str, List[str]] = field(default_factory=dict)
+    llm_stream_completed: set[str] = field(default_factory=set)
     live_mode: bool = field(init=False)
     wake_active_until: float = 0.0
     wake_session_active: bool = False
@@ -238,6 +240,9 @@ class RouterPolicy:
         if rid and rid in self.llm_buf:
             ctx.logger.info("router.llm.cancel", extra={"id": rid})
             self.llm_buf.pop(rid, None)
+        if rid:
+            self.llm_stream_segments.pop(rid, None)
+            self.llm_stream_completed.discard(rid)
         if self.metrics:
             self.metrics.abandon_llm_request(rid)
             self._log_metrics(ctx)
@@ -245,22 +250,50 @@ class RouterPolicy:
     async def handle_llm_response(self, event: LLMResponse, ctx: Ctx) -> None:
         ctx.logger.info("router.llm.response.raw", extra={"id": event.id or "", "error": bool(event.error)})
         text = (event.reply or "").strip()
+        rid = (event.id or "").strip()
         ctx.logger.info(
             "router.llm.response.received",
             extra={"id": event.id or "", "len": len(text), "provider": event.provider, "model": event.model},
         )
+        stream_completed = bool(rid and rid in self.llm_stream_completed)
+        if self.settings.router_llm_tts_stream and rid and stream_completed:
+            segments = self.llm_stream_segments.pop(rid, [])
+            residual, matched = self._residual_after_stream(text, segments)
+            if matched and not residual:
+                ctx.logger.info(
+                    "router.llm.response.skip",
+                    extra={"id": rid, "reason": "already-streamed"},
+                )
+                self.llm_stream_completed.discard(rid)
+                return
+            if matched and residual:
+                ctx.logger.info(
+                    "router.llm.response.residual",
+                    extra={"id": rid, "len": len(residual)},
+                )
+                text = residual
+            elif segments:
+                ctx.logger.warning(
+                    "router.llm.response.desync",
+                    extra={"id": rid, "segments": len(segments), "len": len(text)},
+                )
+        else:
+            if rid:
+                self.llm_stream_segments.pop(rid, None)
         if not text:
             return
         ctx.logger.info("router.llm.response", extra={"len": len(text)})
         await self._speak(
             ctx,
             text=text,
-            utt_id=event.id or None,
+            utt_id=rid or None,
             correlate=ctx.id_from(event),
         )
-        if self.metrics:
-            self.metrics.record_llm_response(event.id or "")
+        if self.metrics and (not rid or rid not in self.llm_stream_completed):
+            self.metrics.record_llm_response(rid or "")
             self._log_metrics(ctx)
+        if rid:
+            self.llm_stream_completed.discard(rid)
 
     async def handle_llm_stream(self, event: LLMStreamDelta, ctx: Ctx) -> None:
         if not self.settings.router_llm_tts_stream:
@@ -268,6 +301,7 @@ class RouterPolicy:
         rid = (event.id or "").strip()
         if not rid:
             return
+        self.llm_stream_completed.discard(rid)
         delta = event.delta or ""
         done = bool(event.done)
         buf = self.llm_buf.get(rid, "")
@@ -286,6 +320,7 @@ class RouterPolicy:
                     if not sent:
                         break
                 ctx.logger.info("router.llm.stream.flush", extra={"len": len(sent), "id": rid})
+                self._record_stream_segment(rid, sent)
                 await self._speak(ctx, text=sent, utt_id=rid, correlate=ctx.id_from(event))
                 buf = remainder
                 flushed_any = True
@@ -299,16 +334,19 @@ class RouterPolicy:
                 sent, remainder = buf[:cut_idx].strip(), buf[cut_idx:].lstrip()
                 if sent:
                     ctx.logger.info("router.llm.stream.safety", extra={"len": len(sent), "id": rid})
+                    self._record_stream_segment(rid, sent)
                     await self._speak(ctx, text=sent, utt_id=rid, correlate=ctx.id_from(event))
                     self.llm_buf[rid] = remainder
         if done:
             final = self.llm_buf.pop(rid, "").strip()
             if final:
                 ctx.logger.info("router.llm.stream.final", extra={"len": len(final), "id": rid})
+                self._record_stream_segment(rid, final)
                 await self._speak(ctx, text=final, utt_id=rid, correlate=ctx.id_from(event))
             if self.metrics:
                 self.metrics.record_llm_response(rid)
                 self._log_metrics(ctx)
+            self.llm_stream_completed.add(rid)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -363,6 +401,25 @@ class RouterPolicy:
         if self.metrics:
             self.metrics.record_tts_message()
             self._log_metrics(ctx)
+
+    def _record_stream_segment(self, rid: str, segment: str) -> None:
+        seg = segment.strip()
+        if not rid or not seg:
+            return
+        self.llm_stream_segments.setdefault(rid, []).append(seg)
+
+    def _residual_after_stream(self, text: str, segments: List[str]) -> tuple[str, bool]:
+        remainder = text
+        for segment in segments:
+            seg = segment.strip()
+            if not seg:
+                continue
+            remainder = remainder.lstrip()
+            if remainder.startswith(seg):
+                remainder = remainder[len(seg) :]
+            else:
+                return text, False
+        return remainder.lstrip(), True
 
     @staticmethod
     def _normalize_command(text: str) -> str:

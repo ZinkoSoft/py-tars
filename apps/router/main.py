@@ -75,6 +75,16 @@ async def run_router() -> None:
 
     metrics = RouterMetrics()
     policy = RouterPolicy(settings, metrics=metrics)
+    logger.info(
+        "router.topics",
+        extra={
+            "llm_response": settings.topic_llm_resp,
+            "llm_stream": settings.topic_llm_stream,
+            "llm_request": settings.topic_llm_req,
+            "stt_final": settings.topic_stt_final,
+            "tts_say": settings.topic_tts_say,
+        },
+    )
     host, port, username, password = parse_mqtt(settings.mqtt_url)
     backoff = 1.0
 

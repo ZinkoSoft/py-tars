@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import asyncio_mqtt as mqtt
+import orjson
 from pydantic import ValidationError
 
 from tars.contracts.envelope import Envelope
@@ -99,4 +100,15 @@ class MessageDeduplicator:
             return None
         if not envelope.id:
             return None
-        return envelope.id
+        key_parts = [envelope.type, envelope.id]
+        if isinstance(envelope.data, dict):
+            seq = envelope.data.get("seq")
+            if isinstance(seq, int):
+                key_parts.append(f"seq={seq}")
+            else:
+                try:
+                    digest = orjson.dumps(envelope.data, option=orjson.OPT_SORT_KEYS)
+                except Exception:  # pragma: no cover - defensive
+                    digest = repr(envelope.data).encode()
+                key_parts.append(f"hash={hash(digest)}")
+        return "|".join(map(str, key_parts))
