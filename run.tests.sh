@@ -38,6 +38,11 @@ install_requirements() {
     pip install -e "${ROOT_DIR}/apps/wake-activation"
   fi
 
+  if [[ -f "${ROOT_DIR}/apps/stt-worker/pyproject.toml" ]]; then
+    info "Installing stt-worker package (editable)"
+    pip install -e "${ROOT_DIR}/apps/stt-worker"
+  fi
+
   local requirements=(
     "apps/stt-worker/requirements.txt"
     "apps/tts-worker/requirements.txt"

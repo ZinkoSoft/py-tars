@@ -47,6 +47,7 @@ from .config import (
     TTS_BASE_MUTE_MS,
     TTS_MAX_MUTE_MS,
     TTS_PER_CHAR_MS,
+    TTS_RESPONSE_WINDOW_SEC,
     UNMUTE_GUARD_MS,
     VAD_AGGRESSIVENESS,
     WAKE_EVENT_FALLBACK_DELAY_MS,
@@ -114,6 +115,8 @@ class STTWorker:
         self._enable_partials = False
         self._resume_after_tts = False
         self._fft_ws: FFTWebSocketServer | None = None
+        self._tts_response_window_task: asyncio.Task | None = None
+        self._stay_muted_until_wake = False
 
     async def initialize(self) -> None:
         if os.path.exists("/host-models"):
@@ -254,6 +257,10 @@ class STTWorker:
             if self.fallback_unmute_task and not self.fallback_unmute_task.done():
                 self.fallback_unmute_task.cancel()
             self.fallback_unmute_task = None
+            # Cancel any existing response window when new TTS starts
+            if self._tts_response_window_task and not self._tts_response_window_task.done():
+                self._tts_response_window_task.cancel()
+                self._tts_response_window_task = None
         elif status.event == "speaking_end":
             if wake_ack:
                 logger.debug("Wake ack speaking_end received; no mute adjustments needed")
@@ -271,11 +278,33 @@ class STTWorker:
                 else:
                     logger.debug("Skipping TTS auto-unmute; microphone was muted before playback")
 
+            # Always unmute for 10 seconds after TTS speaking ends (for follow-up conversation)
+            async def tts_response_unmute_window() -> None:
+                try:
+                    # Unmute immediately after TTS ends
+                    self.audio_capture.unmute("tts response window")
+                    self._stay_muted_until_wake = False  # Clear stay-muted flag for response window
+                    self.recent_unmute_time = time.time()
+                    logger.info("Microphone unmuted for %.1f-second response window after TTS", TTS_RESPONSE_WINDOW_SEC)
+
+                    # Keep unmuted for 10 seconds
+                    await asyncio.sleep(TTS_RESPONSE_WINDOW_SEC)
+
+                    # Only mute if no new TTS is pending and we're still in the response window
+                    if not self.pending_tts and not self._resume_after_tts:
+                        self.audio_capture.mute("tts response window timeout")
+                        self._stay_muted_until_wake = True  # Stay muted until next wake event
+                        logger.info("Response window timeout (%.1fs); microphone muted", TTS_RESPONSE_WINDOW_SEC)
+                except asyncio.CancelledError:
+                    pass
+
             if self.fallback_unmute_task and not self.fallback_unmute_task.done():
                 self.fallback_unmute_task.cancel()
             self.fallback_unmute_task = None
 
             asyncio.create_task(delayed_unmute())
+            # Start the 10-second response window
+            self._tts_response_window_task = asyncio.create_task(tts_response_unmute_window())
 
     async def _handle_tts_say(self, payload: bytes) -> None:
         say = self._decode_event(payload, TtsSay, event_type=EVENT_TYPE_SAY)
@@ -348,6 +377,7 @@ class STTWorker:
                 self.fallback_unmute_task.cancel()
                 self.fallback_unmute_task = None
             self.pending_tts = False
+            self._stay_muted_until_wake = False  # Clear stay-muted flag on wake unmute
             self.audio_capture.unmute(f"wake/{reason}")
             self.recent_unmute_time = time.time()
             logger.info("Microphone state after wake unmute: muted=%s", self.audio_capture.is_muted)
@@ -390,6 +420,7 @@ class STTWorker:
                     self.fallback_unmute_task.cancel()
                     self.fallback_unmute_task = None
                 self.pending_tts = False
+                self._stay_muted_until_wake = False  # Clear stay-muted flag on wake fallback
                 self.audio_capture.unmute(f"wake-event/{event_type}")
                 self.recent_unmute_time = time.time()
                 if ttl_ms > 0:
@@ -476,15 +507,17 @@ class STTWorker:
             )
             self.audio_capture.mute("post-transcription")
 
-            unmute_at = now + (TTS_MAX_MUTE_MS / 1000.0)
+            # Only schedule fallback unmute for successfully published transcriptions
+            unmute_at = time.time() + (TTS_MAX_MUTE_MS / 1000.0)
             if self.fallback_unmute_task and not self.fallback_unmute_task.done():
                 self.fallback_unmute_task.cancel()
 
             async def fallback_unmute(ts: float = unmute_at) -> None:
                 try:
                     await asyncio.sleep(max(0, ts - time.time()))
-                    if self.audio_capture.is_muted and not self.pending_tts:
+                    if self.audio_capture.is_muted and not self.pending_tts and not self._stay_muted_until_wake:
                         self.audio_capture.unmute("fallback-timeout")
+                        self.recent_unmute_time = time.time()
                 except asyncio.CancelledError:  # pragma: no cover
                     pass
 
@@ -539,6 +572,8 @@ class STTWorker:
                 self._wake_fallback_task.cancel()
             if self._wake_ttl_task and not self._wake_ttl_task.done():
                 self._wake_ttl_task.cancel()
+            if self._tts_response_window_task and not self._tts_response_window_task.done():
+                self._tts_response_window_task.cancel()
             if self._fft_task and not self._fft_task.done():
                 self._fft_task.cancel()
             self._fft_task = None
