@@ -64,9 +64,10 @@ class VADProcessor:
         if not self.is_speech:
             self.noise_floor = (1.0 - NOISE_FLOOR_ALPHA) * self.noise_floor + NOISE_FLOOR_ALPHA * rms
         else:
-            # During speech, avoid training the floor to high levels; optionally decay slightly toward current rms
+            # During speech, avoid training the floor to high levels; decay slowly toward current rms but more conservatively
+            decay_rate = NOISE_FLOOR_ALPHA * 0.1  # Much slower decay during speech
             self.noise_floor = max(
-                self.noise_floor * (1.0 - NOISE_FLOOR_ALPHA * 0.25),
+                self.noise_floor * (1.0 - decay_rate),
                 min(self.noise_floor, rms),
             )
         self.last_rms = rms

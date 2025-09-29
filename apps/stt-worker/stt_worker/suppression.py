@@ -119,17 +119,19 @@ class SuppressionEngine:
         alpha_ratio = alpha / total
         punct_ratio = punct / total
 
-        # Frame-level activity
+        # Frame-level activity (require minimum percentage of frames above threshold)
         active_frames = 0
         total_frames = max(1, len(utterance) // (frame_size * 2))
+        speech_threshold = NOISE_MIN_RMS * 0.8  # Slightly below main threshold for frame validation
         if total_frames > 0:
             for i in range(total_frames):
                 seg = utt_np[i * frame_size : (i + 1) * frame_size]
                 if seg.size:
                     seg_rms = float(np.sqrt(np.mean(seg.astype(np.float32) ** 2)))
-                    if seg_rms > (NOISE_MIN_RMS * 0.6):
+                    if seg_rms > speech_threshold:
                         active_frames += 1
         active_ratio = active_frames / float(total_frames)
+        min_active_ratio = 0.3  # Require at least 30% of frames to have speech-like energy
 
         # Syllable heuristic (optionally use syllapy if enabled)
         lowered = norm_text
@@ -162,6 +164,8 @@ class SuppressionEngine:
             info["reasons"].append(f"dur {duration_ms:.0f}ms < {NOISE_MIN_DURATION_MS}")
         if utt_rms < NOISE_MIN_RMS:
             info["reasons"].append(f"rms {utt_rms:.0f} < {NOISE_MIN_RMS}")
+        if active_ratio < min_active_ratio:
+            info["reasons"].append(f"active_ratio {active_ratio:.2f} < {min_active_ratio}")
         if len(raw_text) < NOISE_MIN_LENGTH:
             info["reasons"].append(f"len {len(raw_text)} < {NOISE_MIN_LENGTH}")
         if alpha_ratio < NOISE_MIN_ALPHA_RATIO:

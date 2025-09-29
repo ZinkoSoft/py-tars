@@ -447,7 +447,7 @@ class STTWorker:
                 np_chunk = np.frombuffer(chunk, dtype=np.int16)
                 if np_chunk.size:
                     rms = float(np.sqrt(np.mean(np_chunk.astype(np.float32) ** 2)))
-                    if rms < 120:
+                    if rms < 180:  # Match NOISE_MIN_RMS threshold
                         continue
 
             result = await service.process_chunk(chunk, now=now)
