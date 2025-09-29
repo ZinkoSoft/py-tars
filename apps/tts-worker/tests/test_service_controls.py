@@ -1,6 +1,7 @@
 import asyncio
 import signal
 import time
+from pathlib import Path
 
 import pytest
 
@@ -47,6 +48,17 @@ class DummySynth:
         self.calls.append({"text": text, "streaming": streaming, "pipeline": pipeline})
         return 0.0
 
+
+class DummyCachingSynth(DummySynth):
+    def __init__(self) -> None:
+        super().__init__()
+        self.wav_calls: list[tuple[str, str]] = []
+
+    def synth_to_wav(self, text: str, wav_path: str) -> None:
+        self.wav_calls.append((text, wav_path))
+        with open(wav_path, "wb") as f:
+            f.write(b"RIFFTEST")
+
 def make_callbacks(collected: list[TtsStatus]) -> TTSCallbacks:
     async def publish_status(
         event: str,
@@ -76,6 +88,9 @@ def make_service(
     aggregate_debounce_ms: int = 150,
     aggregate_single_wav: bool = True,
     wake_ack_synth: DummySynth | None = None,
+    wake_cache_dir: str | None = None,
+    wake_cache_max_entries: int = 8,
+    wake_ack_preload_texts: tuple[str, ...] | None = None,
 ) -> tuple[TTSDomainService, DummySynth, list[TtsStatus], TTSCallbacks]:
     config = TTSConfig(
         streaming_enabled=streaming_enabled,
@@ -83,6 +98,9 @@ def make_service(
         aggregate_enabled=aggregate_enabled,
         aggregate_debounce_ms=aggregate_debounce_ms,
         aggregate_single_wav=aggregate_single_wav,
+        wake_cache_dir=wake_cache_dir,
+        wake_cache_max_entries=wake_cache_max_entries,
+        wake_ack_preload_texts=wake_ack_preload_texts or (),
     )
     synth = DummySynth()
     service = TTSDomainService(synth, config, wake_synth=wake_ack_synth)
@@ -217,3 +235,81 @@ async def test_wake_ack_uses_fallback_synth() -> None:
     assert len(fallback.calls) == 1
     assert fallback.calls[0]["text"] == "Ping"
     assert len(primary.calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_wake_ack_cache_reuses_synth(tmp_path, monkeypatch) -> None:
+    cache_dir = tmp_path / "wake"
+    synth = DummyCachingSynth()
+    config = TTSConfig(
+        streaming_enabled=False,
+        pipeline_enabled=True,
+        aggregate_enabled=False,
+        aggregate_debounce_ms=150,
+        aggregate_single_wav=True,
+        wake_cache_dir=str(cache_dir),
+        wake_cache_max_entries=4,
+        wake_ack_preload_texts=(),
+    )
+    service = TTSDomainService(synth, config)
+    statuses: list[TtsStatus] = []
+    callbacks = make_callbacks(statuses)
+
+    popen_calls: list[list[str]] = []
+
+    class FakeProc:
+        def __init__(self) -> None:
+            self._returncode = 0
+
+        def wait(self, timeout: float | None = None) -> int:
+            return self._returncode
+
+        def poll(self) -> int:
+            return self._returncode
+
+    def fake_popen(args, stdin=None):  # type: ignore[override]
+        popen_calls.append(list(args))
+        return FakeProc()
+
+    monkeypatch.setattr("tars.domain.tts.subprocess.Popen", fake_popen)
+
+    await service.handle_say(TtsSay(text="Huh?", utt_id="wake1", wake_ack=True), callbacks)
+    await wait_for_condition(lambda: len(statuses) >= 2)
+
+    assert len(synth.wav_calls) == 1
+    assert synth.wav_calls[0][0] == "Huh?"
+    assert cache_dir.exists()
+    wav_files = list(cache_dir.glob("*.wav"))
+    assert len(wav_files) == 1
+    first_call_count = len(popen_calls)
+
+    await service.handle_say(TtsSay(text="Huh?", utt_id="wake2", wake_ack=True), callbacks)
+    await wait_for_condition(lambda: len(statuses) >= 4)
+
+    assert len(synth.wav_calls) == 1
+    assert len(popen_calls) == first_call_count + 1
+
+
+@pytest.mark.asyncio
+async def test_preload_wake_cache_generates_wavs(tmp_path) -> None:
+    cache_dir = tmp_path / "preload"
+    synth = DummyCachingSynth()
+    config = TTSConfig(
+        streaming_enabled=False,
+        pipeline_enabled=True,
+        aggregate_enabled=False,
+        aggregate_debounce_ms=150,
+        aggregate_single_wav=True,
+        wake_cache_dir=str(cache_dir),
+        wake_cache_max_entries=4,
+        wake_ack_preload_texts=("Huh?", "Hmm?"),
+    )
+    service = TTSDomainService(synth, config)
+
+    await service.preload_wake_cache()
+
+    assert cache_dir.exists()
+    wav_files = sorted(cache_dir.glob("*.wav"))
+    assert len(wav_files) == 2
+    texts = [call[0] for call in synth.wav_calls]
+    assert texts == ["Huh?", "Hmm?"]

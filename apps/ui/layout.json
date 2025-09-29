@@ -1,0 +1,22 @@
+{
+  "landscape": [
+    {
+      "name": "spectrum",
+      "x": 0.1,
+      "y": 0.55,
+      "width": 0.8,
+      "height": 0.35,
+      "expandable": false
+    }
+  ],
+  "portrait": [
+    {
+      "name": "spectrum",
+      "x": 0.1,
+      "y": 0.65,
+      "width": 0.8,
+      "height": 0.3,
+      "expandable": false
+    }
+  ]
+}

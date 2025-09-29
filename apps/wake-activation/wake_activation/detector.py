@@ -186,6 +186,8 @@ def create_wake_detector(
     threshold: float,
     min_retrigger_sec: float,
     energy_window_ms: int,
+    enable_speex_noise_suppression: bool,
+    vad_threshold: float,
 ) -> WakeDetector:
     """Create a wake detector backed by openWakeWord."""
 
@@ -203,8 +205,8 @@ def create_wake_detector(
         model = RuntimeOpenWakeWordModel(
             wakeword_models=[str(model_path)],
             inference_framework=inference_framework,
-            enable_speex_noise_suppression=False,
-            vad_threshold=0,
+            enable_speex_noise_suppression=enable_speex_noise_suppression,
+            vad_threshold=vad_threshold,
         )
     except ValueError as exc:  # pragma: no cover - depends on environment packages
         raise DetectorUnavailableError(str(exc)) from exc

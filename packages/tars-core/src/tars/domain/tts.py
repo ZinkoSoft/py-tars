@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import os
 import signal
 import subprocess
 import tempfile
+import threading
 import time
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from html import unescape
+from pathlib import Path
 from typing import Any, Awaitable, Callable, ClassVar, Literal, Optional, Protocol
 
 from bs4 import BeautifulSoup
@@ -45,6 +49,66 @@ class TTSConfig:
     aggregate_enabled: bool
     aggregate_debounce_ms: int
     aggregate_single_wav: bool
+    wake_cache_dir: str | None = None
+    wake_cache_max_entries: int = 8
+    wake_ack_preload_texts: tuple[str, ...] = ()
+
+
+@dataclass(slots=True)
+class WakeAckCache:
+    base_dir: Path
+    max_entries: int = 16
+    _lock: threading.Lock = field(init=False, repr=False)
+    _index: dict[str, Path] = field(init=False, repr=False, default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.base_dir.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+
+    def ensure(self, text: str, synth: Synthesizer) -> Path:
+        key = self._key(text)
+        target = self.base_dir / f"{key}.wav"
+        with self._lock:
+            if target.exists():
+                self._index[key] = target
+                return target
+            tmp = target.with_suffix(".tmp")
+            try:
+                synth.synth_to_wav(text, str(tmp))
+            except Exception:
+                with suppress(Exception):
+                    tmp.unlink()
+                raise
+            os.replace(tmp, target)
+            self._index[key] = target
+            self._prune_locked()
+            return target
+
+    def _key(self, text: str) -> str:
+        normalized = text.strip().lower()
+        return hashlib.sha1(normalized.encode("utf-8")).hexdigest()
+
+    def _prune_locked(self) -> None:
+        if self.max_entries <= 0:
+            return
+        self._cleanup_missing_locked()
+        if len(self._index) <= self.max_entries:
+            return
+        # Remove oldest files beyond the max_entries threshold
+        items = sorted(
+            self._index.items(),
+            key=lambda item: item[1].stat().st_mtime if item[1].exists() else 0.0,
+            reverse=True,
+        )
+        for key, path in items[self.max_entries :]:
+            with suppress(Exception):
+                path.unlink(missing_ok=True)
+            self._index.pop(key, None)
+
+    def _cleanup_missing_locked(self) -> None:
+        missing = [key for key, path in self._index.items() if not path.exists()]
+        for key in missing:
+            self._index.pop(key, None)
 
 
 @dataclass(slots=True)
@@ -101,6 +165,18 @@ class TTSDomainService:
         self._agg_stt_ts: float | None = None
         self._play_lock = asyncio.Lock()
         self._current_session: PlaybackSession | None = None
+        self._wake_cache: WakeAckCache | None = None
+        if config.wake_cache_dir:
+            try:
+                self._wake_cache = WakeAckCache(
+                    Path(config.wake_cache_dir),
+                    max_entries=max(1, int(config.wake_cache_max_entries)),
+                )
+            except Exception as exc:
+                logger.warning("Wake acknowledgement cache unavailable: %s", exc)
+                self._wake_cache = None
+        self._wake_preloaded = False
+        self._wake_preload_lock: asyncio.Lock | None = None
 
     async def handle_say(self, say: TtsSay, callbacks: TTSCallbacks) -> None:
         text = self.md_to_text(say.text or "")
@@ -267,7 +343,14 @@ class TTSDomainService:
                 t0 = time.time()
                 streaming = self._config.streaming_enabled if streaming_override is None else bool(streaming_override)
                 pipeline = self._config.pipeline_enabled if pipeline_override is None else bool(pipeline_override)
-                elapsed = await asyncio.to_thread(self._do_synth_and_play_blocking, synth, text, streaming, pipeline)
+                elapsed = await asyncio.to_thread(
+                    self._do_synth_and_play_blocking,
+                    synth,
+                    text,
+                    streaming,
+                    pipeline,
+                    wake_ack,
+                )
                 t1 = time.time()
                 if stt_ts is not None:
                     logger.info(
@@ -420,21 +503,27 @@ class TTSDomainService:
         trimmed = value.strip()
         return trimmed or None
 
-    def _do_synth_and_play_blocking(self, synth: Synthesizer, text: str, streaming: bool, pipeline: bool) -> float:
+    def _do_synth_and_play_blocking(
+        self,
+        synth: Synthesizer,
+        text: str,
+        streaming: bool,
+        pipeline: bool,
+        wake_ack: bool,
+    ) -> float:
         session = self._current_session
-        t0 = time.time()
         try:
+            if wake_ack and self._wake_cache is not None and hasattr(synth, "synth_to_wav"):
+                try:
+                    cache_path = self._wake_cache.ensure(text, synth)
+                except Exception as exc:
+                    logger.debug("Wake cache unavailable for '%s': %s", text, exc)
+                else:
+                    return self._play_wav_path(cache_path, session)
             if not streaming and hasattr(synth, "synth_to_wav"):
                 with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as f:
                     synth.synth_to_wav(text, f.name)
-                    try:
-                        proc = subprocess.Popen(["paplay", f.name])
-                    except FileNotFoundError:
-                        proc = subprocess.Popen(["aplay", f.name])
-                    if session is not None:
-                        session.player_proc = proc
-                    proc.wait()
-                return time.time() - t0
+                    return self._play_wav_path(Path(f.name), session)
             try:
                 return synth.synth_and_play(text, streaming=streaming, pipeline=pipeline)
             except TypeError:
@@ -442,6 +531,45 @@ class TTSDomainService:
         finally:
             if session is not None:
                 session.player_proc = None
+
+    def _play_wav_path(self, path: Path, session: PlaybackSession | None) -> float:
+        start = time.time()
+        try:
+            proc = subprocess.Popen(["paplay", str(path)])
+        except FileNotFoundError:
+            proc = subprocess.Popen(["aplay", str(path)])
+        if session is not None:
+            session.player_proc = proc
+        proc.wait()
+        return time.time() - start
+
+    async def preload_wake_cache(self) -> None:
+        cache = self._wake_cache
+        if cache is None:
+            return
+        lock = self._wake_preload_lock
+        if lock is None:
+            lock = asyncio.Lock()
+            self._wake_preload_lock = lock
+        async with lock:
+            if self._wake_preloaded:
+                return
+            texts = [t.strip() for t in self._config.wake_ack_preload_texts if t.strip()]
+            if not texts:
+                self._wake_preloaded = True
+                return
+            synth = self._wake_synth if self._wake_synth is not None else self._primary_synth
+            if not hasattr(synth, "synth_to_wav"):
+                logger.debug("Wake ack synth lacks synth_to_wav; skipping preload")
+                self._wake_preloaded = True
+                return
+            for text in texts:
+                try:
+                    await asyncio.to_thread(cache.ensure, text, synth)
+                    logger.info("Wake ack cache preloaded", extra={"text": text[:48]})
+                except Exception as exc:
+                    logger.warning("Wake ack preload failed", extra={"text": text[:48], "error": str(exc)})
+            self._wake_preloaded = True
 
     @staticmethod
     def md_to_text(md: str) -> str:

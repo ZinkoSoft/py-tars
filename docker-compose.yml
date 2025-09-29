@@ -116,6 +116,9 @@ services:
       # Streaming/pipeline controls for TTS
       - TTS_STREAMING=${TTS_STREAMING:-0}
       - TTS_PIPELINE=${TTS_PIPELINE:-1}
+      - TTS_WAKE_CACHE_ENABLE=${TTS_WAKE_CACHE_ENABLE:-1}
+      - TTS_WAKE_CACHE_DIR=${TTS_WAKE_CACHE_DIR:-/tmp/tars/wake-ack}
+      - TTS_WAKE_CACHE_MAX=${TTS_WAKE_CACHE_MAX:-16}
       # External provider (optional; set in .env, not here)
       # This service already uses env_file: .env, so you can configure these
       # directly in your .env. No need to uncomment or add them here.

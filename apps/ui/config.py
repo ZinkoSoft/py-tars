@@ -18,11 +18,16 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "url": "mqtt://tars:pass@127.0.0.1:1883",
     },
     "ui": {
-        "width": 800,
-        "height": 480,
+        "width": 480,
+        "height": 800,
         "fps": 30,
         "num_bars": 64,
         "font": "Arial",
+        "fullscreen": False,
+    },
+    "layout": {
+        "file": "layout.json",
+        "rotation": 0,
     },
     "topics": {
         "audio": "stt/audio_fft",
@@ -32,7 +37,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     },
     "fft_ws": {
         "enabled": True,
-        "url": "ws://127.0.0.1:8765/fft",
+        "url": "ws://0.0.0.0:8765/fft",
         "retry_seconds": 5.0,
     },
 }
@@ -80,6 +85,9 @@ def load_config() -> Dict[str, Any]:
         ("ui", "fps"): os.getenv("UI_FPS"),
         ("ui", "num_bars"): os.getenv("UI_NUM_BARS"),
         ("ui", "font"): os.getenv("UI_FONT"),
+        ("ui", "fullscreen"): os.getenv("UI_FULLSCREEN"),
+        ("layout", "file"): os.getenv("UI_LAYOUT_FILE"),
+        ("layout", "rotation"): os.getenv("UI_LAYOUT_ROTATION"),
         ("topics", "audio"): os.getenv("UI_AUDIO_TOPIC"),
         ("topics", "partial"): os.getenv("UI_PARTIAL_TOPIC"),
         ("topics", "final"): os.getenv("UI_FINAL_TOPIC"),
@@ -97,11 +105,18 @@ def load_config() -> Dict[str, Any]:
                 val = int(val)
             except Exception:
                 continue
+        if (section, key) == ("ui", "fullscreen"):
+            val = str(val).strip().lower() in {"1", "true", "yes", "on"}
         if (section, key) == ("fft_ws", "enabled"):
             val = str(val).strip().lower() in {"1", "true", "yes", "on"}
         if (section, key) == ("fft_ws", "retry_seconds"):
             try:
                 val = float(val)
+            except Exception:
+                continue
+        if (section, key) == ("layout", "rotation"):
+            try:
+                val = int(val)
             except Exception:
                 continue
         cfg.setdefault(section, {})[key] = val

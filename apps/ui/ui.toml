@@ -4,11 +4,16 @@
 url = "mqtt://tars:pass@127.0.0.1:1883"
 
 [ui]
-width = 800
-height = 480
+width = 480
+height = 800
 fps = 30
 num_bars = 64
 font = "Arial"
+fullscreen = true
+
+[layout]
+file = "layout.json"
+rotation = 90
 
 [topics]
 audio = "stt/audio_fft"
@@ -18,5 +23,5 @@ tts = "tts/status"
 
 [fft_ws]
 enabled = true
-url = "ws://127.0.0.1:8765/fft"
+url = "ws://stt:8765/fft"
 retry_seconds = 5.0

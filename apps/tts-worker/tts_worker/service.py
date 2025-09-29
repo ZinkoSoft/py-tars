@@ -16,6 +16,10 @@ from .config import (
     TTS_AGGREGATE_SINGLE_WAV,
     TTS_PIPELINE,
     TTS_STREAMING,
+    TTS_WAKE_ACK_TEXTS,
+    TTS_WAKE_CACHE_DIR,
+    TTS_WAKE_CACHE_ENABLE,
+    TTS_WAKE_CACHE_MAX,
 )
 from .piper_synth import set_player_observer, set_stop_checker
 
@@ -55,12 +59,29 @@ def parse_mqtt(url: str) -> tuple[str, int, Optional[str], Optional[str]]:
 class TTSService:
     def __init__(self, primary_synth: Any, *, wake_ack_synth: Any | None = None) -> None:
         self._publisher: AsyncioMQTTPublisher | None = None
+        wake_cache_dir = None
+        try:
+            enabled = bool(int(TTS_WAKE_CACHE_ENABLE))
+        except Exception:
+            enabled = True
+        if enabled:
+            candidate = (TTS_WAKE_CACHE_DIR or "").strip()
+            if candidate:
+                wake_cache_dir = candidate
+        try:
+            wake_cache_max = max(1, int(TTS_WAKE_CACHE_MAX))
+        except Exception:
+            wake_cache_max = 16
+
         config = TTSConfig(
             streaming_enabled=bool(TTS_STREAMING),
             pipeline_enabled=bool(TTS_PIPELINE),
             aggregate_enabled=bool(TTS_AGGREGATE),
             aggregate_debounce_ms=int(TTS_AGGREGATE_DEBOUNCE_MS),
             aggregate_single_wav=bool(TTS_AGGREGATE_SINGLE_WAV),
+            wake_cache_dir=wake_cache_dir,
+            wake_cache_max_entries=wake_cache_max,
+            wake_ack_preload_texts=tuple(TTS_WAKE_ACK_TEXTS),
         )
         self._domain = TTSDomainService(primary_synth, config, wake_synth=wake_ack_synth)
         set_player_observer(self._domain.on_player_spawn)
@@ -174,6 +195,7 @@ class TTSService:
                 await client.subscribe([(SAY_TOPIC, 0), (CONTROL_TOPIC, 0)])
                 logger.info("Subscribed to %s and %s, ready to process messages", SAY_TOPIC, CONTROL_TOPIC)
                 callbacks = self._build_callbacks(client)
+                await self._domain.preload_wake_cache()
                 async with client.messages() as messages:
                     async for msg in messages:
                         try:

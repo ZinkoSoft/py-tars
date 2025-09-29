@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import os
+import re
 
 
 def getenv(name: str, default: str) -> str:
     val = os.getenv(name)
     return default if val is None or val == "" else val
+
+
+def getenv_list(name: str, default: str) -> tuple[str, ...]:
+    raw = getenv(name, default)
+    if not raw:
+        return ()
+    parts = re.split(r"[|,]", raw)
+    return tuple(p.strip() for p in parts if p.strip())
 
 
 LOG_LEVEL = getenv("LOG_LEVEL", "INFO")
@@ -26,6 +35,15 @@ TTS_AGGREGATE = int(getenv("TTS_AGGREGATE", "1"))
 TTS_AGGREGATE_DEBOUNCE_MS = int(getenv("TTS_AGGREGATE_DEBOUNCE_MS", "150"))
 # When aggregating, synthesize as a single WAV (pipeline disabled) to avoid playback gaps
 TTS_AGGREGATE_SINGLE_WAV = int(getenv("TTS_AGGREGATE_SINGLE_WAV", "1"))
+
+# Cache wake acknowledgements as WAVs for fast replay
+TTS_WAKE_CACHE_ENABLE = int(getenv("TTS_WAKE_CACHE_ENABLE", "1"))
+TTS_WAKE_CACHE_DIR = getenv("TTS_WAKE_CACHE_DIR", "/tmp/tars/wake-ack")
+TTS_WAKE_CACHE_MAX = int(getenv("TTS_WAKE_CACHE_MAX", "16"))
+TTS_WAKE_ACK_TEXTS = getenv_list(
+    "TTS_WAKE_ACK_TEXTS",
+    getenv("ROUTER_WAKE_ACK_CHOICES", ""),
+)
 
 # External TTS provider selection and settings
 # Options: "piper" (default), "elevenlabs"

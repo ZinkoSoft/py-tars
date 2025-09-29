@@ -89,6 +89,8 @@ def test_create_wake_detector_missing_model(tmp_path: Path) -> None:
             threshold=0.5,
             min_retrigger_sec=1.0,
             energy_window_ms=750,
+            enable_speex_noise_suppression=False,
+            vad_threshold=0.0,
         )
 
 

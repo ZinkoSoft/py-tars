@@ -366,6 +366,8 @@ class WakeActivationService:
             threshold=config.wake_detection_threshold,
             min_retrigger_sec=config.min_retrigger_sec,
             energy_window_ms=config.detection_window_ms,
+            enable_speex_noise_suppression=config.enable_speex_noise_suppression,
+            vad_threshold=config.vad_threshold,
         )
 
     def _default_audio_client_factory(self, config: WakeActivationConfig, frame_samples: int) -> AudioFanoutClient:

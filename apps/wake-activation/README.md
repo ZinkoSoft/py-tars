@@ -31,6 +31,8 @@ Environment variables (defaults in parentheses):
 | `WAKE_MIN_RETRIGGER_SEC` (`1.0`) | Debounce successive detections within this window. |
 | `WAKE_INTERRUPT_WINDOW_SEC` (`2.5`) | Window to listen for cancel/stop after double wake. |
 | `WAKE_IDLE_TIMEOUT_SEC` (`3.0`) | Silence duration before the service emits a timeout event and TTL hint to re-mute the mic. |
+| `WAKE_SPEEX_NOISE_SUPPRESSION` (`0`) | Enable Speex noise suppression inside OpenWakeWord (`1`, `true`, or `yes` to enable). |
+| `WAKE_VAD_THRESHOLD` (`0.0`) | Optional OpenWakeWord VAD gate (0–1); detections require the VAD score to exceed this value. |
 | `WAKE_HEALTH_INTERVAL_SEC` (`15`) | Period between health heartbeats. |
 | `WAKE_EVENT_TOPIC` (`wake/event`) | MQTT topic for wake lifecycle events. |
 | `WAKE_MIC_TOPIC` (`wake/mic`) | MQTT topic for microphone control commands. |
@@ -46,6 +48,21 @@ pytest tests
 > `pip install -e ".[openwakeword]"` before running either locally or in Docker. The package pins
 > `numpy<2.0` because the bundled `tflite-runtime` wheels are not yet compatible with NumPy 2.x, and
 > the Docker image pre-fetches the OpenWakeWord feature resources (melspectrogram + VAD) at build time.
+
+> To take advantage of Speex suppression, install the Speex development headers and the
+> [`speexdsp-ns`](https://github.com/dscripka/openWakeWord/releases) wheel that matches your platform, for example:
+>
+> ```bash
+> sudo apt-get install libspeexdsp-dev
+> pip install https://github.com/dscripka/openWakeWord/releases/download/v0.1.1/speexdsp_ns-0.1.1-<platform>.whl
+> ```
+>
+> Then set `WAKE_SPEEX_NOISE_SUPPRESSION=1` in your environment.
+
+The provided Dockerfile for this service installs the x86_64 CPython 3.11 wheel by default. If you
+target a different Python version or architecture, override the `SPEEXDSP_NS_WHEEL_URL` build arg
+with the matching download from the
+[openWakeWord v0.1.1 release](https://github.com/dscripka/openWakeWord/releases/tag/v0.1.1).
 
 ## Regression fixtures
 

@@ -34,6 +34,10 @@ class WakeActivationConfig:
     detection_window_ms: int = field(default_factory=lambda: int(os.getenv("WAKE_DETECTION_WINDOW_MS", "750")))
     health_interval_sec: float = field(default_factory=lambda: float(os.getenv("WAKE_HEALTH_INTERVAL_SEC", "15")))
     log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
+    enable_speex_noise_suppression: bool = field(
+        default_factory=lambda: os.getenv("WAKE_SPEEX_NOISE_SUPPRESSION", "0").lower() in {"1", "true", "yes"}
+    )
+    vad_threshold: float = field(default_factory=lambda: float(os.getenv("WAKE_VAD_THRESHOLD", "0.0")))
 
     @classmethod
     def from_env(cls, env: Optional[Mapping[str, str]] = None) -> "WakeActivationConfig":
@@ -65,6 +69,12 @@ class WakeActivationConfig:
             detection_window_ms=int(_pop("WAKE_DETECTION_WINDOW_MS", str(cls().detection_window_ms))),
             health_interval_sec=float(_pop("WAKE_HEALTH_INTERVAL_SEC", str(cls().health_interval_sec))),
             log_level=_pop("LOG_LEVEL", cls().log_level),
+            enable_speex_noise_suppression=_pop(
+                "WAKE_SPEEX_NOISE_SUPPRESSION",
+                "1" if cls().enable_speex_noise_suppression else "0",
+            ).lower()
+            in {"1", "true", "yes"},
+            vad_threshold=float(_pop("WAKE_VAD_THRESHOLD", str(cls().vad_threshold))),
         )
         if data:
             unknown = ", ".join(sorted(data))

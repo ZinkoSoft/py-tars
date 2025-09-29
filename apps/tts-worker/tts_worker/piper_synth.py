@@ -121,6 +121,10 @@ class PiperSynth:
             total += self._file_playback(chunk)
         return total
 
+    def synth_to_wav(self, text: str, wav_path: str) -> None:
+        """Synthesize text to the provided WAV path."""
+        self._synth_to_wav(text, wav_path)
+
     # ----- Internals -----
     def _load_voice(self) -> None:
         assert PiperVoice is not None

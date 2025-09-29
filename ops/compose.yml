@@ -80,6 +80,9 @@ services:
       PULSE_SERVER: unix:/run/user/1000/pulse/native
       TTS_STREAMING: ${TTS_STREAMING:-0}
       TTS_PIPELINE: ${TTS_PIPELINE:-1}
+      TTS_WAKE_CACHE_ENABLE: ${TTS_WAKE_CACHE_ENABLE:-1}
+      TTS_WAKE_CACHE_DIR: ${TTS_WAKE_CACHE_DIR:-/tmp/tars/wake-ack}
+      TTS_WAKE_CACHE_MAX: ${TTS_WAKE_CACHE_MAX:-16}
 
     depends_on:
       mqtt:
@@ -117,11 +120,11 @@ services:
       VAD_AGGRESSIVENESS: ${VAD_AGGRESSIVENESS:-3}
       SAMPLE_RATE: ${SAMPLE_RATE:-16000}
       AUDIO_FANOUT_PATH: ${WAKE_AUDIO_FANOUT:-/tmp/tars/audio-fanout.sock}
-      FFT_PUBLISH: ${FFT_PUBLISH:-1}
+      FFT_PUBLISH: ${FFT_PUBLISH:-0}
       FFT_RATE_HZ: ${FFT_RATE_HZ:-12}
       FFT_BINS: ${FFT_BINS:-64}
       FFT_LOG_SCALE: ${FFT_LOG_SCALE:-1}
-      FFT_WS_ENABLE: ${FFT_WS_ENABLE:-0}
+      FFT_WS_ENABLE: ${FFT_WS_ENABLE:-1}
       FFT_WS_HOST: ${FFT_WS_HOST:-0.0.0.0}
       FFT_WS_PORT: ${FFT_WS_PORT:-8765}
       FFT_WS_PATH: ${FFT_WS_PATH:-/fft}
@@ -185,6 +188,34 @@ services:
     depends_on:
       mqtt:
         condition: service_started
+    restart: unless-stopped
+
+  ui:
+    build:
+      context: ../apps/ui
+      dockerfile: Dockerfile
+    image: tars/ui:dev
+    container_name: tars-ui
+    env_file: .env
+    environment:
+      MQTT_URL: mqtt://mqtt:1883
+      MQTT_HOST: mqtt
+      MQTT_PORT: "1883"
+      UI_CONFIG: /config/ui.toml
+      DISPLAY: ${DISPLAY:-:1}
+      SDL_VIDEODRIVER: ${SDL_VIDEODRIVER:-x11}
+      XAUTHORITY: ${XAUTHORITY:-/tmp/.docker_xauth}
+      FFT_WS_ENABLE: 1
+      FFT_WS_HOST: 0.0.0.0
+      FFT_WS_PORT: 8765
+      FFT_WS_PATH: /fft
+    depends_on:
+      mqtt:
+        condition: service_started
+    volumes:
+      - ../apps/ui/ui.toml:/config/ui.toml:ro
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /run/user/1000/gdm/Xauthority:${XAUTHORITY:-/tmp/.docker_xauth}:ro
     restart: unless-stopped
 
   llm:
