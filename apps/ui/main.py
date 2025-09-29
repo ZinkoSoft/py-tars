@@ -1,19 +1,16 @@
 """Pygame-based UI for TARS: displays spectrum, partials/finals, and TTS text."""
 import logging
 import queue
-import threading
 import time
 from pathlib import Path
 from typing import Any
 
-import orjson
-import paho.mqtt.client as mqtt
 import pygame
-from websockets.exceptions import ConnectionClosed
-from websockets.sync.client import connect
 
 from urllib.parse import urlparse
 from config import load_config
+from fft_ws_client import FFTWebsocketClient
+from mqtt_bridge import MqttBridge
 from module.layout import Box, get_layout_dimensions, load_layout_config
 from module.spectrum import SpectrumBars
 
@@ -61,119 +58,6 @@ host = u.hostname or "127.0.0.1"
 port = u.port or 1883
 username = u.username
 password = u.password
-
-class MqttBridge:
-    def __init__(self, event_queue: queue.Queue, *, subscribe_audio: bool) -> None:
-        self.client = mqtt.Client(client_id="tars-ui")
-        if username and password:
-            self.client.username_pw_set(username, password)
-        self.q = event_queue
-        self._subscribe_audio = subscribe_audio and bool(AUDIO_TOPIC)
-        self.client.on_message = self._on_message
-        self._thread: threading.Thread | None = None
-
-    def _on_message(self, client, userdata, msg):
-        try:
-            payload = orjson.loads(msg.payload)
-        except Exception:
-            payload = {}
-        try:
-            self.q.put_nowait((msg.topic, payload))
-        except queue.Full:
-            logger.debug("UI event queue full; dropping MQTT message from %s", msg.topic)
-
-    def start(self):
-        self.client.connect(host, port, 60)
-        topics = [(PARTIAL_TOPIC, 0), (FINAL_TOPIC, 0), (TTS_TOPIC, 0)]
-        if self._subscribe_audio:
-            topics.append((AUDIO_TOPIC, 0))
-        if topics:
-            self.client.subscribe(topics)
-        self._thread = threading.Thread(target=self.client.loop_forever, daemon=True)
-        self._thread.start()
-
-    def poll(self):
-        try:
-            return self.q.get_nowait()
-        except queue.Empty:
-            return None, None
-
-    def stop(self) -> None:
-        try:
-            self.client.disconnect()
-        except Exception:
-            pass
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=1.0)
-
-
-class FFTWebsocketClient:
-    def __init__(
-        self,
-        url: str,
-        target_topic: str,
-        event_queue: queue.Queue,
-        *,
-        retry_seconds: float = 5.0,
-    ) -> None:
-        self.url = url
-        self.target_topic = target_topic
-        self.q = event_queue
-        self.retry_seconds = max(1.0, float(retry_seconds))
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
-
-    def start(self) -> None:
-        if self._thread and self._thread.is_alive():
-            return
-        self._thread = threading.Thread(target=self._run, name="fft-ws", daemon=True)
-        self._thread.start()
-
-    def stop(self) -> None:
-        self._stop.set()
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=1.0)
-
-    def _run(self) -> None:
-        while not self._stop.is_set():
-            try:
-                logger.info("Connecting to FFT websocket %s", self.url)
-                with connect(
-                    self.url,
-                    ping_interval=20.0,
-                    ping_timeout=20.0,
-                    close_timeout=1.0,
-                ) as ws:
-                    logger.info("FFT websocket connected")
-                    while not self._stop.is_set():
-                        try:
-                            message = ws.recv()
-                        except ConnectionClosed as exc:
-                            logger.warning("FFT websocket closed: %s", exc)
-                            break
-                        if message is None:
-                            break
-                        try:
-                            data = orjson.loads(message)
-                        except Exception:
-                            continue
-                        try:
-                            self.q.put_nowait((self.target_topic, data))
-                        except queue.Full:
-                            logger.debug("UI event queue full; dropping websocket frame")
-            except Exception as exc:
-                if self._stop.is_set():
-                    break
-                logger.warning(
-                    "FFT websocket connection error: %s; retrying in %.1fs",
-                    exc,
-                    self.retry_seconds,
-                )
-                time.sleep(self.retry_seconds)
-            else:
-                if not self._stop.is_set():
-                    time.sleep(self.retry_seconds)
-
 
 class UI:
     def __init__(self):
@@ -262,7 +146,21 @@ class UI:
 def main():
     event_queue = queue.Queue(maxsize=256)
     use_ws = FFT_WS_ENABLED and bool(FFT_WS_URL)
-    bridge = MqttBridge(event_queue, subscribe_audio=not use_ws)
+    topics = {
+        "partial": PARTIAL_TOPIC,
+        "final": FINAL_TOPIC,
+        "tts": TTS_TOPIC,
+        "audio": AUDIO_TOPIC,
+    }
+    bridge = MqttBridge(
+        event_queue,
+        host=host,
+        port=port,
+        topics=topics,
+        username=username,
+        password=password,
+        subscribe_audio=not use_ws,
+    )
     bridge.start()
     fft_client: FFTWebsocketClient | None = None
     if use_ws:
