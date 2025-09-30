@@ -29,6 +29,11 @@ def env_bool(key: str, default: bool = False) -> bool:
     return v.lower() in ("1", "true", "yes", "on")
 
 
+def env_csv(key: str, default: str = "") -> list[str]:
+    raw = os.getenv(key, default)
+    return [item.strip() for item in raw.split(",") if item and item.strip()]
+
+
 MQTT_URL = env_str("MQTT_URL", "mqtt://127.0.0.1:1883")
 LOG_LEVEL = env_str("LLM_LOG_LEVEL", "INFO")
 
@@ -45,6 +50,10 @@ LLM_DEVICE = env_str("LLM_DEVICE", "cpu")
 # Provider creds/urls
 OPENAI_API_KEY = env_str("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = env_str("OPENAI_BASE_URL", "")
+OPENAI_RESPONSES_MODELS = env_csv(
+    "OPENAI_RESPONSES_MODELS",
+    "gpt-4.1*,gpt-4o-mini*,gpt-5*,gpt-5-mini,gpt-5-nano",
+)
 LLM_SERVER_URL = env_str("LLM_SERVER_URL", "")
 GEMINI_API_KEY = env_str("GEMINI_API_KEY", "")
 GEMINI_BASE_URL = env_str("GEMINI_BASE_URL", "")
