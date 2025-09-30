@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_DIR="${ROOT_DIR}/.venv"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Place virtualenv one level above the script (repo root)
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+VENV_DIR="${REPO_ROOT}/.venv"
 PYTHON_BIN="${PYTHON:-python3}"
 
 info() {
@@ -23,24 +25,24 @@ install_requirements() {
   info "Upgrading pip/setuptools/wheel"
   pip install --upgrade pip setuptools wheel
 
-  if [[ -f "${ROOT_DIR}/packages/tars-core/pyproject.toml" ]]; then
+  if [[ -f "${REPO_ROOT}/packages/tars-core/pyproject.toml" ]]; then
     info "Installing tars-core package (editable)"
-    pip install -e "${ROOT_DIR}/packages/tars-core"
+    pip install -e "${REPO_ROOT}/packages/tars-core"
   fi
 
-  if [[ -f "${ROOT_DIR}/apps/router/pyproject.toml" ]]; then
+  if [[ -f "${REPO_ROOT}/apps/router/pyproject.toml" ]]; then
     info "Installing router package (editable)"
-    pip install -e "${ROOT_DIR}/apps/router"
+    pip install -e "${REPO_ROOT}/apps/router"
   fi
 
-  if [[ -f "${ROOT_DIR}/apps/wake-activation/pyproject.toml" ]]; then
+  if [[ -f "${REPO_ROOT}/apps/wake-activation/pyproject.toml" ]]; then
     info "Installing wake activation package (editable)"
-    pip install -e "${ROOT_DIR}/apps/wake-activation"
+    pip install -e "${REPO_ROOT}/apps/wake-activation"
   fi
 
-  if [[ -f "${ROOT_DIR}/apps/stt-worker/pyproject.toml" ]]; then
+  if [[ -f "${REPO_ROOT}/apps/stt-worker/pyproject.toml" ]]; then
     info "Installing stt-worker package (editable)"
-    pip install -e "${ROOT_DIR}/apps/stt-worker"
+    pip install -e "${REPO_ROOT}/apps/stt-worker"
   fi
 
   local requirements=(
@@ -54,7 +56,7 @@ install_requirements() {
   )
 
   for rel_path in "${requirements[@]}"; do
-    local abs_path="${ROOT_DIR}/${rel_path}"
+    local abs_path="${REPO_ROOT}/${rel_path}"
     if [[ -f "${abs_path}" ]]; then
       info "Installing dependencies from ${rel_path}"
       pip install --upgrade -r "${abs_path}"

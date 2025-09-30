@@ -84,6 +84,7 @@ class FakeSuppressionEngine:
         utterance: bytes,
         sample_rate: int,
         frame_size: int,
+        in_response_window: bool = False,
     ) -> tuple[bool, dict[str, object]]:
         self.last_evaluated.append(text)
         if self.accept:
