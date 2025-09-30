@@ -4,26 +4,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libasound2 \
-    libx11-6 \
-    libxext6 \
-    libxrender1 \
-    libxrandr2 \
-    libxcursor1 \
-    libxi6 \
-    libsdl2-2.0-0 \
-    libsdl2-ttf-2.0-0 \
-    fonts-dejavu-core \
+    libsndfile1 \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY requirements.txt ./
+
+COPY server/stt-ws/requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY server/stt-ws/main.py .
 
-ENV UI_CONFIG="/config/ui.toml"
+EXPOSE 9000
 
 CMD ["python", "-u", "main.py"]

@@ -349,7 +349,7 @@ class CameraService:
                 # Log frame rate every 100 frames (include failure info)
                 if self.frame_count % 100 == 0:
                     actual_fps = 100 / (time.time() - (start_time - 99 * frame_interval))
-                    logger.info(f"Processed {self.frame_count} frames, ~{actual_fps:.1f} fps, backend: {self.backend}, failures: {self.consecutive_failures}")
+                    logger.debug(f"Processed {self.frame_count} frames, ~{actual_fps:.1f} fps, backend: {self.backend}, failures: {self.consecutive_failures}")
 
                 # Maintain frame rate
                 elapsed = time.time() - start_time

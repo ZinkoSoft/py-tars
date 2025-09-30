@@ -67,7 +67,7 @@ services:
   tts:
     build:
       context: ..
-      dockerfile: apps/tts-worker/Dockerfile
+      dockerfile: docker/specialized/tts-worker.Dockerfile
     image: tars/tts:dev
     container_name: tars-tts
     env_file: .env
@@ -97,7 +97,7 @@ services:
   stt:
     build:
       context: ..
-      dockerfile: apps/stt-worker/Dockerfile
+      dockerfile: docker/specialized/stt-worker.Dockerfile
     image: tars/stt:dev
     container_name: tars-stt
     env_file: .env
@@ -142,7 +142,7 @@ services:
   wake-activation:
     build:
       context: ..
-      dockerfile: apps/wake-activation/Dockerfile
+      dockerfile: docker/specialized/wake-activation.Dockerfile
       args:
         PY_VERSION: "3.11"
         APP_PATH: apps/wake-activation
@@ -171,7 +171,7 @@ services:
   ui-web:
     build:
       context: ..
-      dockerfile: apps/ui-web/Dockerfile
+      dockerfile: docker/specialized/ui-web.Dockerfile
       args:
         SERVICE_PATH: apps/ui-web
     image: tars/ui-web:dev
@@ -193,7 +193,7 @@ services:
   camera:
     build:
       context: ..
-      dockerfile: apps/camera-service/Dockerfile
+      dockerfile: docker/specialized/camera-service.Dockerfile
     image: tars/camera:dev
     container_name: tars-camera
     env_file: .env
@@ -222,8 +222,8 @@ services:
 
   ui:
     build:
-      context: ../apps/ui
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/specialized/ui.Dockerfile
     image: tars/ui:dev
     container_name: tars-ui
     env_file: .env
@@ -251,7 +251,7 @@ services:
   llm:
     build:
       context: ..
-      dockerfile: apps/llm-worker/Dockerfile
+      dockerfile: docker/specialized/llm-worker.Dockerfile
     image: tars/llm:dev
     container_name: tars-llm
     env_file: .env

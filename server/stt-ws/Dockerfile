@@ -1,21 +1,2 @@
-FROM python:3.11-slim
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libsndfile1 \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
-
-COPY main.py .
-
-EXPOSE 9000
-
-CMD ["python", "-u", "main.py"]
+# This Dockerfile has moved to ../../docker/specialized/stt-ws.Dockerfile
+# Keeping this stub to direct developers to the centralized location.

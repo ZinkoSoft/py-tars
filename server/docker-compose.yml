@@ -2,7 +2,9 @@ version: "3.8"
 
 services:
   stt-ws:
-    build: ./stt-ws
+    build:
+      context: ..
+      dockerfile: docker/specialized/stt-ws.Dockerfile
     container_name: tars-stt-ws
     network_mode: host
     env_file: .env

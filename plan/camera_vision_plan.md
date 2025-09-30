@@ -54,7 +54,7 @@ Goal: Deliver live video, still photo capture, and vision-assisted responses for
 ## 6) Configuration & Deployment
 
 - `.env` additions: `CAMERA_SIGNALLING_PORT`, `CAMERA_DATA_DIR`, `CAMERA_JETSON_URL`, `CAMERA_JETSON_TOKEN`, `TURN_URL`, `TURN_USER`, `TURN_PASS`.
-- Docker: new `apps/camera-service/Dockerfile`, host networking for low-latency camera access; mount `/dev/video*` or Picamera2 resources.
+- Docker: new `docker/specialized/camera-service.Dockerfile`, host networking for low-latency camera access; mount `/dev/video*` or Picamera2 resources.
 - Compose updates: add service, ensure dependencies on MQTT and optionally TURN; update `apps/ui-web` env to point to signaling endpoint.
 - Permissions: configure `udev` rules for camera access; ensure data dir writable; handle SELinux/AppArmor if applicable.
 

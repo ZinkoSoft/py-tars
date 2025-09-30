@@ -6,7 +6,7 @@
 - Simplify Compose configuration and CI linting for container builds.
 
 ## Current state snapshot (Sept 2025)
-- Per-service Dockerfiles live under each `apps/*/Dockerfile` and include bespoke system packages, voices, and entrypoints.
+- Per-service Dockerfiles previously lived under each `apps/*/Dockerfile`; they are being consolidated under `docker/specialized/*.Dockerfile` with stubs left in place to point to the new paths.
 - A reusable template already exists at `docker/app.Dockerfile` with `docker/start-app.sh` for wheel-based apps.
 - Compose targets each local Dockerfile directly; build contexts are the repo root.
 
@@ -51,13 +51,14 @@ docker/
 - Assets copied at runtime (`/host-models`, `/voice-models`) imply these images expect read-only volumes; the centralized template should preserve hooks for those copy steps.
 
 ### Phase 2 — Directory migration
-- [ ] Mirror existing Dockerfiles into the new `docker/images` or `docker/specialized` locations without altering instructions.
-- [ ] Update `docker-compose.yml` (and any overrides) to point to the relocated Dockerfiles.
-- [ ] Build all services locally to verify paths and COPY instructions remain valid.
+- [x] Mirror existing Dockerfiles into the new `docker/images` or `docker/specialized` locations without altering instructions.
+- [x] Update `docker-compose.yml` (and any overrides) to point to the relocated Dockerfiles.
+- [x] Build all services locally to verify paths and COPY instructions remain valid.
 
 ### Phase 3 — Template adoption
 - [x] Introduce `pyproject.toml` packaging for `llm-worker`, `memory-worker`, and `tts-worker` (wheel-ready for the shared template).
 - [x] Harmonize worker dependency pins (e.g., `orjson>=3.11`) with `tars-core` to avoid wheel install conflicts.
+- [x] Verify packaged workers export all runtime modules (e.g., add `llm_worker/providers/__init__.py`).
 - [ ] Refactor common base layers into `docker/images/base-python.Dockerfile`.
 - [ ] Update `docker/images/app.Dockerfile` to `FROM` the new base and expose documented build args.
 - [ ] Migrate eligible services to use the template by packaging via `pyproject.toml` and passing build args from Compose.
