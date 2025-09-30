@@ -27,11 +27,14 @@ import paho.mqtt.client as mqtt
 # Configuration from environment
 MQTT_URL = os.getenv("MQTT_URL", "mqtt://tars:pass@127.0.0.1:1883")
 CAMERA_FRAME_TOPIC = os.getenv("CAMERA_FRAME_TOPIC", "camera/frame")
+CAMERA_DEVICE_INDEX = int(os.getenv("CAMERA_DEVICE_INDEX", "0"))  # Camera device index (0, 1, 2, etc.)
 CAMERA_WIDTH = int(os.getenv("CAMERA_WIDTH", "640"))
 CAMERA_HEIGHT = int(os.getenv("CAMERA_HEIGHT", "480"))
 CAMERA_FPS = int(os.getenv("CAMERA_FPS", "10"))
 CAMERA_QUALITY = int(os.getenv("CAMERA_QUALITY", "80"))  # JPEG quality 1-100
 CAMERA_ROTATION = int(os.getenv("CAMERA_ROTATION", "0"))  # 0, 90, 180, 270
+CAMERA_TIMEOUT_MS = int(os.getenv("CAMERA_TIMEOUT_MS", "5000"))  # V4L2 capture timeout in ms
+CAMERA_RETRY_ATTEMPTS = int(os.getenv("CAMERA_RETRY_ATTEMPTS", "3"))  # Retry attempts on capture failure
 # MQTT rate limiting - publish to MQTT only every Nth frame to reduce noise
 CAMERA_MQTT_RATE = int(os.getenv("CAMERA_MQTT_RATE", "2"))  # Publish to MQTT every 2 seconds worth of frames
 # HTTP streaming configuration
@@ -53,6 +56,9 @@ class CameraService:
         self.frame_count = 0
         self.latest_frame = None
         self.frame_lock = threading.Lock()
+        self.backend = None  # Track which backend is being used
+        self.consecutive_failures = 0  # Track consecutive capture failures
+        self.last_successful_frame_time = None  # Track last successful frame
 
     async def start(self):
         """Initialize camera, MQTT, and HTTP server, then start streaming"""
@@ -75,7 +81,7 @@ class CameraService:
             self._publish_health(True)
 
             self.running = True
-            logger.info(f"Camera service started: {CAMERA_WIDTH}x{CAMERA_HEIGHT} @ {CAMERA_FPS}fps, HTTP on {HTTP_HOST}:{HTTP_PORT}")
+            logger.info(f"Camera service started: {CAMERA_WIDTH}x{CAMERA_HEIGHT} @ {CAMERA_FPS}fps, device {CAMERA_DEVICE_INDEX}, backend {self.backend}, HTTP on {HTTP_HOST}:{HTTP_PORT}")
 
             # Start HTTP server in background thread
             http_thread = threading.Thread(target=self._run_flask, daemon=True)
@@ -123,31 +129,71 @@ class CameraService:
         return u.hostname or "127.0.0.1", u.port or 1883, u.username, u.password
 
     def _setup_camera(self):
-        """Setup OpenCV camera capture"""
-        # Try different camera indices
-        for camera_index in [0, 1, 2]:
-            try:
-                cap = cv2.VideoCapture(camera_index)
-                if cap.isOpened():
+        """Setup OpenCV camera capture with configurable device index and V4L2 backend"""
+        try:
+            # Use device index from config
+            device_index = CAMERA_DEVICE_INDEX
+            logger.info(f"Attempting to open camera device index: {device_index}")
+
+            # Try with V4L2 backend first (Linux specific, more reliable)
+            self.camera = cv2.VideoCapture(device_index, cv2.CAP_V4L2)
+            if self.camera is not None and self.camera.isOpened():
+                # Set camera properties
+                self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
+                self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
+                self.camera.set(cv2.CAP_PROP_FPS, CAMERA_FPS)
+                
+                # Set timeout for V4L2 capture to avoid blocking
+                self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer to reduce latency
+                
+                # Verify settings were applied
+                actual_width = self.camera.get(cv2.CAP_PROP_FRAME_WIDTH)
+                actual_height = self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                actual_fps = self.camera.get(cv2.CAP_PROP_FPS)
+                
+                self.backend = "opencv_v4l2"
+                logger.info(f"Camera {device_index} opened with V4L2 backend: {actual_width}x{actual_height} @ {actual_fps}fps")
+                return self.camera
+            else:
+                if self.camera is not None:
+                    self.camera.release()
+                self.camera = None
+                
+                # Fallback: try without specifying backend
+                logger.warning(f"V4L2 backend failed for device {device_index}, trying default backend")
+                self.camera = cv2.VideoCapture(device_index)
+                if self.camera is not None and self.camera.isOpened():
                     # Set camera properties
-                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
-                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
-                    cap.set(cv2.CAP_PROP_FPS, CAMERA_FPS)
+                    self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
+                    self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
+                    self.camera.set(cv2.CAP_PROP_FPS, CAMERA_FPS)
+                    self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                     
                     # Verify settings were applied
-                    actual_width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-                    actual_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-                    actual_fps = cap.get(cv2.CAP_PROP_FPS)
+                    actual_width = self.camera.get(cv2.CAP_PROP_FRAME_WIDTH)
+                    actual_height = self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                    actual_fps = self.camera.get(cv2.CAP_PROP_FPS)
                     
-                    logger.info(f"Camera {camera_index}: {actual_width}x{actual_height} @ {actual_fps}fps")
-                    return cap
+                    self.backend = "opencv_default"
+                    logger.info(f"Camera {device_index} opened with default backend: {actual_width}x{actual_height} @ {actual_fps}fps")
+                    return self.camera
                 else:
-                    cap.release()
-            except Exception as e:
-                logger.warning(f"Failed to open camera {camera_index}: {e}")
-                continue
+                    if self.camera is not None:
+                        self.camera.release()
+                    self.camera = None
+                    self.backend = None
+                    
+        except Exception as e:
+            logger.error(f"Failed to setup camera device {device_index}: {e}")
+            if self.camera is not None:
+                try:
+                    self.camera.release()
+                except:
+                    pass
+            self.camera = None
+            self.backend = None
         
-        raise RuntimeError("No camera device found or accessible")
+        raise RuntimeError(f"No camera device found at index {device_index}")
 
     def _setup_flask(self) -> Flask:
         """Setup Flask app for MJPEG streaming"""
@@ -218,7 +264,7 @@ class CameraService:
             logger.error(f"Failed to publish health: {e}")
 
     async def _capture_loop(self):
-        """Main capture and publish loop"""
+        """Main capture and publish loop with robust error handling"""
         import io
         from PIL import Image
 
@@ -230,10 +276,35 @@ class CameraService:
             try:
                 start_time = time.time()
 
-                # Capture frame
-                ret, frame = self.camera.read()
-                if not ret:
-                    logger.warning("Failed to capture frame")
+                # Capture frame with retry logic
+                ret, frame = None, None
+                for attempt in range(CAMERA_RETRY_ATTEMPTS):
+                    try:
+                        ret, frame = self.camera.read()
+                        if ret and frame is not None:
+                            # Reset failure counter on successful capture
+                            self.consecutive_failures = 0
+                            self.last_successful_frame_time = time.time()
+                            break
+                        else:
+                            if attempt < CAMERA_RETRY_ATTEMPTS - 1:
+                                logger.debug(f"Capture attempt {attempt + 1} failed, retrying...")
+                                await asyncio.sleep(0.05)  # Brief pause before retry
+                    except Exception as e:
+                        logger.warning(f"Capture attempt {attempt + 1} exception: {e}")
+                        if attempt < CAMERA_RETRY_ATTEMPTS - 1:
+                            await asyncio.sleep(0.05)
+
+                if not ret or frame is None:
+                    self.consecutive_failures += 1
+                    logger.warning(f"Failed to capture frame after {CAMERA_RETRY_ATTEMPTS} attempts (consecutive failures: {self.consecutive_failures})")
+                    
+                    # If we have too many consecutive failures, try to reconnect camera
+                    if self.consecutive_failures >= 30:  # ~3 seconds at 10fps
+                        logger.error("Too many consecutive capture failures, attempting camera reconnection...")
+                        await self._reconnect_camera()
+                        self.consecutive_failures = 0
+                    
                     await asyncio.sleep(0.1)
                     continue
 
@@ -265,21 +336,20 @@ class CameraService:
                         "width": CAMERA_WIDTH,
                         "height": CAMERA_HEIGHT,
                         "quality": CAMERA_QUALITY,
-                        "mqtt_rate": CAMERA_MQTT_RATE
+                        "mqtt_rate": CAMERA_MQTT_RATE,
+                        "backend": self.backend,
+                        "consecutive_failures": self.consecutive_failures
                     }
 
                     self.mqtt_client.publish(CAMERA_FRAME_TOPIC, orjson.dumps(payload), qos=0)
                     logger.debug(f"Published frame {frame_counter} to MQTT")
 
-                # TODO: Send high-frequency frames via WebSocket endpoint
-                # For now, we'll implement MJPEG over HTTP as a simpler alternative
-
                 self.frame_count += 1
 
-                # Log frame rate every 100 frames
+                # Log frame rate every 100 frames (include failure info)
                 if self.frame_count % 100 == 0:
                     actual_fps = 100 / (time.time() - (start_time - 99 * frame_interval))
-                    logger.info(f"Processed {self.frame_count} frames, ~{actual_fps:.1f} fps, MQTT rate: {CAMERA_MQTT_RATE} fps")
+                    logger.info(f"Processed {self.frame_count} frames, ~{actual_fps:.1f} fps, backend: {self.backend}, failures: {self.consecutive_failures}")
 
                 # Maintain frame rate
                 elapsed = time.time() - start_time
@@ -290,6 +360,21 @@ class CameraService:
                 logger.error(f"Error in capture loop: {e}")
                 self._publish_health(False, str(e))
                 await asyncio.sleep(1.0)
+
+    async def _reconnect_camera(self):
+        """Attempt to reconnect the camera after failures"""
+        logger.info("Attempting camera reconnection...")
+        try:
+            if self.camera:
+                self.camera.release()
+                await asyncio.sleep(0.5)  # Give time for cleanup
+            
+            self.camera = self._setup_camera()
+            logger.info(f"Camera reconnected successfully with backend: {self.backend}")
+            self._publish_health(True, "reconnected")
+        except Exception as e:
+            logger.error(f"Camera reconnection failed: {e}")
+            self._publish_health(False, f"reconnection_failed: {e}")
 
 async def main():
     """Main entry point"""
