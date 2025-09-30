@@ -63,35 +63,50 @@ Motion and battery subsystems (ESP32-S3, LiPo pack, etc.) can connect later thro
 ```
 py-tars/
 ├─ README.md
-├─ docker-compose.yml           # Multi-service orchestration
-├─ apps/                        # Individual microservices
-│  ├─ router/                   # Intent routing & wake word handling
-│  ├─ stt-worker/               # Speech-to-text processing
-│  ├─ tts-worker/               # Text-to-speech synthesis
-│  ├─ wake-activation/          # OpenWakeWord detection
-│  ├─ llm-worker/               # LLM text generation
-│  ├─ memory-worker/            # Vector memory & character profiles
-│  ├─ camera-service/           # Live video streaming
-│  ├─ ui-web/                   # FastAPI web interface
-│  └─ ui/                       # PyGame desktop interface
+├─ .env.example                # Configuration template
+├─ apps/                       # Individual microservices (each with pyproject.toml)
+│  ├─ router/                  # Intent routing & wake word handling
+│  ├─ stt-worker/              # Speech-to-text processing
+│  ├─ tts-worker/              # Text-to-speech synthesis
+│  ├─ wake-activation/         # OpenWakeWord detection
+│  ├─ llm-worker/              # LLM text generation
+│  ├─ memory-worker/           # Vector memory & character profiles
+│  ├─ camera-service/          # Live video streaming
+│  ├─ ui-web/                  # FastAPI web interface
+│  ├─ ui/                      # PyGame desktop interface
+│  └─ voice/                   # Character profiles & voice configs
 ├─ packages/
-│  └─ tars-core/               # Shared contracts & domain models
+│  └─ tars-core/              # Shared contracts & domain models
 │     └─ src/tars/
-│        ├─ contracts/         # Pydantic models & event registry
-│        ├─ adapters/          # MQTT & external service adapters
-│        ├─ domain/            # Core business logic
-│        └─ runtime/           # Service composition utilities
-├─ ops/                        # Infrastructure configs
-│  ├─ mosquitto-config/        # MQTT broker config
-│  └─ mosquitto-data/          # Persistent broker data
-├─ models/                     # AI model storage
-│  ├─ whisper/                 # STT models
-│  └─ openwakeword/            # Wake detection models
-├─ server/                     # Optional WebSocket STT service
-└─ .env.example               # Configuration template
+│        ├─ contracts/        # Pydantic models & event registry
+│        ├─ adapters/         # MQTT & external service adapters
+│        ├─ domain/           # Core business logic
+│        └─ runtime/          # Service composition utilities
+├─ docker/                    # Centralized Docker build files
+│  ├─ specialized/            # Service-specific Dockerfiles
+│  ├─ images/                 # Shared base images (planned)
+│  ├─ app.Dockerfile          # Generic wheel-based app template
+│  └─ start-app.sh            # Generic app entrypoint
+├─ ops/                       # Infrastructure & orchestration
+│  ├─ compose.yml             # Main Docker Compose orchestration
+│  ├─ mosquitto-config/       # MQTT broker config
+│  └─ mosquitto-data/         # Persistent broker data
+├─ scripts/                   # Development & testing scripts
+│  ├─ run.tests.sh            # Test runner (creates venv, runs pytest)
+│  └─ test-camera.sh          # Camera service test helper
+├─ models/                    # AI model storage (gitignored)
+│  ├─ whisper/                # STT models
+│  └─ openwakeword/           # Wake detection models
+├─ data/                      # Runtime data & caches (gitignored)
+│  ├─ memory/                 # Memory worker storage
+│  └─ model_cache/            # Sentence-transformer embeddings
+└─ server/                    # Optional WebSocket STT service
+   └─ stt-ws/                 # Faster-Whisper WebSocket backend
 ```
 
-**Monorepo Architecture:** Each service in `apps/` is a self-contained package with its own dependencies, while `packages/tars-core` provides shared contracts and utilities. Services communicate through well-defined MQTT events using structured JSON envelopes.
+**Monorepo Architecture:** Each service in `apps/` is a self-contained Python package with its own `pyproject.toml` and dependencies. Services are built as wheels for efficient Docker image builds. The `packages/tars-core` package provides shared contracts, domain models, and utilities. All services communicate through well-defined MQTT events using structured JSON envelopes (via `orjson`).
+
+**Build System:** Services use modern Python packaging (`pyproject.toml` + `setuptools`) and are installed as wheels in Docker images. Dockerfiles are centralized in `docker/specialized/` for easier maintenance. The generic `docker/app.Dockerfile` template supports wheel-based builds for any service.
 
 ---
 
@@ -120,12 +135,12 @@ cp .env.example .env
 
 ### 2. Set up MQTT Broker
 ```bash
-# Create MQTT user credentials
-mkdir -p ops/mosquitto-config ops/mosquitto-data
-echo "listener 1883 0.0.0.0" > ops/mosquitto-config/mosquitto.conf
-echo "allow_anonymous false" >> ops/mosquitto-config/mosquitto.conf  
-echo "password_file /mosquitto/config/passwd" >> ops/mosquitto-config/mosquitto.conf
-docker run --rm -v $(pwd)/ops/mosquitto-config:/config eclipse-mosquitto:2 mosquitto_passwd -c /config/passwd tars
+# The ops/ directory already contains mosquitto configuration
+# Update credentials if needed:
+cd ops
+docker run --rm -v $(pwd)/mosquitto-config:/config eclipse-mosquitto:2 mosquitto_passwd -c /config/passwd tars
+# Enter your desired password when prompted
+cd ..
 ```
 
 ### 3. Prepare Model Storage
@@ -150,21 +165,30 @@ mkdir -p apps/tts-worker/voices
 
 ### 5. Build & Deploy
 ```bash
+# Build and start all services
+cd ops
 docker compose build
 docker compose up -d
 
 # Check service health
 docker compose ps
 docker compose logs -f
+
+# Or from repo root:
+docker compose -f ops/compose.yml up -d --build
 ```
 
 ### 6. Verify Deployment
 ```bash
 # Check all services are running
+cd ops
 docker compose ps
 
 # Monitor logs from all services
 docker compose logs -f
+
+# Monitor specific services
+docker compose logs -f stt router llm tts
 
 # Test the pipeline end-to-end
 echo "Say 'Hey TARS' followed by a question..."
@@ -234,11 +258,16 @@ mosquitto_sub -h 127.0.0.1 -p 1883 -u tars -P change_me -t 'system/health/+' -v
 
 ### 2. Service Integration Tests
 ```bash
-# Run the full test suite (creates venv, installs deps, runs pytest)
-./run.tests.sh
+# Run the full test suite (creates venv at repo root, installs deps, runs pytest)
+./scripts/run.tests.sh
 
-# Or run tests manually with pytest
-python -m pytest apps/*/tests/ packages/tars-core/tests/
+# Or activate the venv and run tests manually
+source .venv/bin/activate
+pytest -v
+
+# Run tests for specific services
+pytest apps/stt-worker/tests/
+pytest packages/tars-core/tests/
 ```
 
 ### 3. Individual Service Tests
@@ -285,10 +314,36 @@ mosquitto_pub -h 127.0.0.1 -p 1883 -u tars -P change_me -t llm/request \
 ### Adding New Services
 Follow the monorepo pattern in `apps/`:
 ```bash
-mkdir apps/my-worker
+mkdir -p apps/my-worker/my_worker
 cd apps/my-worker
-# Create pyproject.toml, main.py, and service logic
-# Use tars-core contracts for MQTT communication
+
+# Create pyproject.toml for packaging
+cat > pyproject.toml <<EOF
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tars-my-worker"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "asyncio-mqtt>=0.16.2",
+    "orjson>=3.11.0",
+    "tars-core",
+]
+
+[tool.setuptools.packages.find]
+where = [""]
+include = ["my_worker*"]
+EOF
+
+# Create service logic using tars-core contracts
+touch my_worker/__init__.py
+touch my_worker/main.py
+
+# Add Dockerfile in docker/specialized/my-worker.Dockerfile
+# Update ops/compose.yml to add your service
 ```
 
 ### Custom LLM Providers
@@ -362,16 +417,21 @@ Extend `apps/llm-worker/llm_worker/providers/` with new provider implementations
 ### Completed ✅
 - [x] **STT Worker** with multiple backends (Whisper, OpenAI, WebSocket)
 - [x] **Wake Word Detection** using OpenWakeWord 
-- [x] **LLM Integration** with multiple providers (OpenAI, Gemini, local models)
+- [x] **LLM Integration** with multiple providers (OpenAI, Gemini, xAI Grok, local models)
 - [x] **Memory System** with RAG and character profiles
 - [x] **Streaming TTS** with Piper and ElevenLabs support
 - [x] **Camera Service** with live video streaming via MQTT
 - [x] **Web & Desktop UIs** with real-time MQTT monitoring
 - [x] **Event-driven Architecture** with structured MQTT contracts
+- [x] **Centralized Docker Build** system with wheel-based packaging
+- [x] **Monorepo Packaging** with pyproject.toml for all services
+- [x] **Automated Testing** with pytest and async test support
 
 ### In Progress 🚧
+- [ ] **Base Docker Images** - refactor common layers into shared base image
+- [ ] **CI/CD Pipeline** - automated builds and tests on push
 - [ ] **MCP (Model Context Protocol) Server** integration for tool calling
-- [ ] **Vision Processing** worker for image/camera input
+- [ ] **Vision Processing** worker for image/camera input to LLM
 - [ ] **Enhanced Router** with intent classification beyond simple rules
 - [ ] **Health Dashboard** with Prometheus/Grafana monitoring
 
