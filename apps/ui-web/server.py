@@ -23,6 +23,8 @@ LLM_RESPONSE_TOPIC = os.getenv("UI_LLM_RESPONSE_TOPIC", "llm/response")
 # Memory topics
 MEM_QUERY = os.getenv("UI_MEMORY_QUERY", "memory/query")
 MEM_RESULTS = os.getenv("UI_MEMORY_RESULTS", "memory/results")
+# Camera topics (now served via MJPEG over HTTP)
+# CAMERA_FRAME_TOPIC = os.getenv("UI_CAMERA_FRAME_TOPIC", "camera/frame")
 
 app = FastAPI()
 logger = logging.getLogger("ui-web")
@@ -76,6 +78,7 @@ async def mqtt_bridge_task():
         LLM_STREAM_TOPIC,
         LLM_RESPONSE_TOPIC,
         MEM_RESULTS,
+        # Camera frames now served via MJPEG over HTTP, not MQTT
     ]
     while True:
         try:

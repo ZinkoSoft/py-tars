@@ -370,6 +370,7 @@
             } catch (e) { /* ignore */ }
             return;
           }
+          // Camera frames now handled via MJPEG over HTTP, not MQTT
         } catch(e) { /* ignore downstream handler errors */ }
       };
       ws.onclose = () => setTimeout(connect, 1000);
@@ -495,7 +496,7 @@
     }
 
     // Drawer controls
-    let currentDrawer = null; // 'mic' | 'memory' | 'stream' | null
+    let currentDrawer = null; // 'mic' | 'memory' | 'stream' | 'camera' | null
     function openDrawer(which) {
       if (currentDrawer === which) { return closeDrawer(); }
       closeDrawer(false);
@@ -507,12 +508,18 @@
       currentDrawer = which;
       if (which === 'stream') {
         renderMqttLog();
+      } else if (which === 'camera') {
+        startCameraStream();
       }
     }
     function closeDrawer(toggleBackdrop=true) {
       if (currentDrawer) {
         const el = document.getElementById(`drawer-${currentDrawer}`);
         el?.classList.remove('open');
+        // Stop camera stream when closing camera drawer
+        if (currentDrawer === 'camera') {
+          stopCameraStream();
+        }
       }
       if (toggleBackdrop) {
         document.getElementById('backdrop')?.classList.remove('show');
@@ -524,6 +531,47 @@
       if (e.key === 'Escape') closeDrawer();
     });
 
+    // Camera streaming functions
+    let cameraStreamActive = false;
+    function startCameraStream() {
+      const img = document.getElementById('camera-stream');
+      const status = document.getElementById('camera-status');
+      if (!img || !status) return;
+
+      status.textContent = 'Connecting to camera...';
+      img.style.display = 'none';
+
+      // Use MJPEG streaming over HTTP instead of WebSocket
+      // This is much more efficient than sending frames via MQTT/WebSocket
+      const cameraHost = window.location.hostname || 'localhost';
+      const cameraPort = '8080'; // Camera service HTTP port
+      img.src = `http://${cameraHost}:${cameraPort}/stream`;
+
+      img.onload = () => {
+        img.style.display = 'block';
+        status.textContent = 'Live MJPEG stream active';
+        cameraStreamActive = true;
+      };
+
+      img.onerror = () => {
+        status.textContent = 'Failed to connect to camera stream';
+        cameraStreamActive = false;
+      };
+    }
+
+    function stopCameraStream() {
+      cameraStreamActive = false;
+      const img = document.getElementById('camera-stream');
+      const status = document.getElementById('camera-status');
+      if (img) {
+        img.src = '';
+        img.style.display = 'none';
+      }
+      if (status) status.textContent = 'Stream stopped';
+    }
+
+    // Remove camera frame handling from WebSocket since we use MJPEG now
+
   window.addEventListener('load', ()=>{ connect(); drawSpectrum(); setStatus(); refreshMemory(); updateMqttSummary(); });
   </script>
   </head>
@@ -534,6 +582,7 @@
       <button class="btn" onclick="openDrawer('mic')">Microphone</button>
       <button class="btn" onclick="openDrawer('memory')">Memory</button>
       <button class="btn" onclick="openDrawer('stream')">MQTT Stream</button>
+      <button class="btn" onclick="openDrawer('camera')">Camera</button>
     </div>
   </header>
   <div id="container">
@@ -598,6 +647,18 @@
         <button onclick="clearMqttLog()">Clear</button>
       </div>
       <div id="mqtt-log"></div>
+    </div>
+  </aside>
+
+  <!-- Camera Drawer -->
+  <aside id="drawer-camera" class="drawer" aria-hidden="true">
+    <header>
+      <h2>Camera</h2>
+      <button class="close" onclick="closeDrawer()">Close</button>
+    </header>
+    <div class="content">
+      <div id="camera-status" style="color:var(--muted); margin-bottom:8px;">Connecting...</div>
+      <img id="camera-stream" style="width:100%; max-width:640px; border:1px solid var(--border); border-radius:6px;" alt="Camera feed" />
     </div>
   </aside>
 </body>

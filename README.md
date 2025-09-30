@@ -16,12 +16,14 @@ Motion and battery subsystems (ESP32-S3, LiPo pack, etc.) can connect later thro
 
 ```
 [Mic] → STT Worker → MQTT → Router → MQTT → LLM Worker → MQTT → TTS Worker → [Speaker]
-                      ↓        ↑                         ↑
-               Wake Activation  │                         │
-                      ↓        │                         │
+                      ↓         ↑                          ↑
+               Wake Activation  │                          │
+                      ↓         │                          │
                    Memory Worker ← ← ← ← ← ← ← ← ← ← ← ← ← ←
                       ↓
                UI (Web/PyGame)
+                      ↓
+               Camera Service
 ```
 
 **Event-Driven Pattern:** All services communicate through structured MQTT envelopes using the `tars-core` contracts package. Each service subscribes to specific topics, processes events, and publishes responses.
@@ -39,6 +41,7 @@ Motion and battery subsystems (ESP32-S3, LiPo pack, etc.) can connect later thro
 - `memory/query` — RAG memory queries
 - `memory/results` — retrieved memory context
 - `character/get` — character profile requests
+- `camera/frame` — occasional camera frames for monitoring (MQTT)
 - `system/health/+` — service health monitoring
 
 ### Services
@@ -49,7 +52,8 @@ Motion and battery subsystems (ESP32-S3, LiPo pack, etc.) can connect later thro
 - **LLM Worker** — OpenAI/Gemini/local LLM text generation with optional RAG
 - **Memory Worker** — vector database for conversation memory and character profiles
 - **TTS Worker** — text-to-speech using Piper or ElevenLabs  
-- **UI (Web)** — FastAPI web interface with real-time MQTT display
+- **Camera Service** — live video streaming via MQTT for mobile robot vision
+- **UI (Web)** — FastAPI web interface with real-time MQTT display and camera viewer
 - **UI (PyGame)** — optional desktop GUI with audio visualization
 
 ---
@@ -67,6 +71,7 @@ py-tars/
 │  ├─ wake-activation/          # OpenWakeWord detection
 │  ├─ llm-worker/               # LLM text generation
 │  ├─ memory-worker/            # Vector memory & character profiles
+│  ├─ camera-service/           # Live video streaming
 │  ├─ ui-web/                   # FastAPI web interface
 │  └─ ui/                       # PyGame desktop interface
 ├─ packages/
@@ -252,11 +257,12 @@ mosquitto_sub -h 127.0.0.1 -p 1883 -u tars -P change_me -t 'stt/+' -v
 # Speak after wake word or in live mode
 ```
 
-**Text-to-Speech:**
+**Camera Streaming:**
 ```bash
-# Direct TTS test
-mosquitto_pub -h 127.0.0.1 -p 1883 -u tars -P change_me -t tts/say \
-  -m '{"type":"tts.say","source":"test","data":{"text":"TARS system operational."}}'
+# Monitor camera frames
+mosquitto_sub -h 127.0.0.1 -p 1883 -u tars -P change_me -t 'camera/frame' -C 5
+# Check camera health
+mosquitto_sub -h 127.0.0.1 -p 1883 -u tars -P change_me -t 'system/health/camera' -v
 ```
 
 **LLM Integration:**
@@ -322,6 +328,7 @@ Extend `apps/llm-worker/llm_worker/providers/` with new provider implementations
 - **🤖 LLM Integration:** OpenAI, Gemini, xAI Grok, or local models
 - **🧠 Memory System:** RAG-powered conversation memory with character profiles
 - **🔊 Flexible TTS:** Local Piper or cloud ElevenLabs synthesis
+- **📹 Camera Streaming:** Live video feed for mobile robot vision
 - **🎛️ Live Monitoring:** Real-time web UI and optional desktop interface
 - **📡 Event-Driven:** Loosely coupled services via MQTT with structured contracts
 - **🐳 Container Ready:** Full Docker Compose orchestration with health monitoring
@@ -358,6 +365,7 @@ Extend `apps/llm-worker/llm_worker/providers/` with new provider implementations
 - [x] **LLM Integration** with multiple providers (OpenAI, Gemini, local models)
 - [x] **Memory System** with RAG and character profiles
 - [x] **Streaming TTS** with Piper and ElevenLabs support
+- [x] **Camera Service** with live video streaming via MQTT
 - [x] **Web & Desktop UIs** with real-time MQTT monitoring
 - [x] **Event-driven Architecture** with structured MQTT contracts
 
