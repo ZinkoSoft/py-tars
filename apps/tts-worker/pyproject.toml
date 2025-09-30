@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tars-tts-worker"
+version = "0.1.0"
+description = "Text-to-speech worker for the TARS voice assistant."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "asyncio-mqtt>=0.16.2",
+  "orjson>=3.11.0",
+  "paho-mqtt<2.0",
+  "markdown>=3.6",
+  "beautifulsoup4>=4.12.3",
+  "httpx>=0.27.0",
+  "piper-tts>=1.2.0",
+  "tars-core>=0.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2",
+  "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+tars-tts-worker = "tts_worker.__main__:main"
+
+[tool.setuptools]
+package-dir = {"" = "."}
+packages = ["tts_worker", "external_services"]
+include-package-data = false

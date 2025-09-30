@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tars-memory-worker"
+version = "0.1.0"
+description = "Memory worker providing retrieval and persona services for the TARS voice assistant."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "bm25s",
+  "pystemmer",
+  "hyperdb-python",
+  "scikit-learn",
+  "flashrank",
+  "asyncio-mqtt==0.16.2",
+  "paho-mqtt<2.0",
+  "orjson==3.11.3",
+  "numpy==1.26.4",
+  "sentence-transformers==2.2.2",
+  "huggingface_hub==0.16.4",
+  "torch==2.2.2",
+  "tars-core>=0.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2",
+  "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+tars-memory-worker = "memory_worker.__main__:main"
+
+[tool.setuptools]
+package-dir = {"" = "."}
+packages = ["memory_worker"]
+include-package-data = false

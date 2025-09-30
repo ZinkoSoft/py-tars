@@ -6,12 +6,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-COPY apps/memory-worker/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+COPY packages/tars-core /tmp/tars-core
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir /tmp/tars-core && \
+    rm -rf /tmp/tars-core
 
-COPY apps/memory-worker/memory_worker ./memory_worker
-COPY src /app/src
-ENV PYTHONPATH="/app/src:${PYTHONPATH}"
+# Install worker as a wheel so the image mirrors the centralized build process
+COPY apps/memory-worker/pyproject.toml /tmp/memory-worker/pyproject.toml
+COPY apps/memory-worker/README.md /tmp/memory-worker/README.md
+COPY apps/memory-worker/memory_worker /tmp/memory-worker/memory_worker
+RUN pip install --no-cache-dir /tmp/memory-worker && \
+    rm -rf /tmp/memory-worker
 
 ENV PYTHONUNBUFFERED=1
 ENV HF_HOME=/data/model_cache \

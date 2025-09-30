@@ -13,17 +13,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --upgrade pip && pip install piper-tts
 
 WORKDIR /app
-COPY apps/tts-worker/requirements.txt ./requirements.txt
 COPY packages/tars-core /tmp/tars-core
-RUN pip install -r requirements.txt && \
-    pip install /tmp/tars-core && \
-    rm -rf /tmp/tars-core
+RUN pip install --no-cache-dir /tmp/tars-core && rm -rf /tmp/tars-core
+
+# Install worker via wheel to align with centralized build pipeline
+COPY apps/tts-worker/pyproject.toml /tmp/tts-worker/pyproject.toml
+COPY apps/tts-worker/README.md /tmp/tts-worker/README.md
+COPY apps/tts-worker/tts_worker /tmp/tts-worker/tts_worker
+COPY apps/tts-worker/external_services /tmp/tts-worker/external_services
+RUN pip install --no-cache-dir /tmp/tts-worker && \
+    rm -rf /tmp/tts-worker
 
 # Copy voice models from mounted read-only source to writable container location
 RUN mkdir -p /voices
-COPY apps/tts-worker/main.py ./
-COPY apps/tts-worker/tts_worker ./tts_worker
-COPY apps/tts-worker/external_services ./external_services
 
 # At runtime, copy voice models with proper permissions
-ENTRYPOINT ["/bin/sh", "-c", "if [ -d /voice-models ] && [ \"$(ls -A /voice-models 2>/dev/null)\" ]; then cp -r /voice-models/* /voices/ && chmod -R 644 /voices/*; else echo 'No voice models mounted at /voice-models'; fi; if [ ! -f /voices/TARS.onnx ]; then echo 'WARNING: /voices/TARS.onnx not found'; fi; exec python main.py"]
+ENTRYPOINT ["/bin/sh", "-c", "if [ -d /voice-models ] && [ \"$(ls -A /voice-models 2>/dev/null)\" ]; then cp -r /voice-models/* /voices/ && chmod -R 644 /voices/*; else echo 'No voice models mounted at /voice-models'; fi; if [ ! -f /voices/TARS.onnx ]; then echo 'WARNING: /voices/TARS.onnx not found'; fi; exec python -m tts_worker"]
