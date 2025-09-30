@@ -96,7 +96,7 @@ class VADProcessor:
 
         if confident_speech:
             if not self.is_speech:
-                logger.debug("Speech started (VAD: %s, spectral: %s)", has_speech, speech_like)
+                logger.info("Speech started (VAD: %s, spectral: %s)", has_speech, speech_like if VAD_ENHANCED_ANALYSIS else "disabled")
                 self.is_speech = True
                 self.speech_buffer = []
             self.speech_buffer.append(audio_chunk)
@@ -106,7 +106,7 @@ class VADProcessor:
                 self.silence_count += 1
                 self.speech_buffer.append(audio_chunk)
                 if self.silence_count >= self.max_silence_chunks:
-                    logger.debug("Speech ended, captured %s chunks", len(self.speech_buffer))
+                    logger.info("Speech ended, captured %s chunks", len(self.speech_buffer))
                     utterance = b"".join(self.speech_buffer)
                     self.is_speech = False
                     self.speech_buffer = []
@@ -182,3 +182,13 @@ class VADProcessor:
         except Exception as e:
             logger.debug(f"Speech analysis failed: {e}")
             return {"is_speech_like": False}
+
+    def get_active_buffer(self) -> Optional[bytes]:
+        """Get the current active speech buffer for FFT analysis.
+
+        Returns the accumulated speech buffer if currently detecting speech,
+        None otherwise.
+        """
+        if self.is_speech and self.speech_buffer:
+            return b"".join(self.speech_buffer)
+        return None

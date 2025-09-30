@@ -41,6 +41,7 @@ class SuppressionEngine(Protocol):
         utterance: bytes,
         sample_rate: int,
         frame_size: int,
+        in_response_window: bool = False,
     ) -> tuple[bool, dict[str, Any]]: ...
 
     def register_publication(self, norm_text: str) -> None: ...
@@ -110,7 +111,7 @@ class STTService:
     def reset_partials(self) -> None:
         self._last_partial_text = ""
 
-    async def process_chunk(self, chunk: bytes, *, now: Optional[float] = None) -> STTProcessResult:
+    async def process_chunk(self, chunk: bytes, *, now: Optional[float] = None, in_response_window: bool = False) -> STTProcessResult:
         result = STTProcessResult()
         current_time = now if now is not None else time.time()
         if self.in_cooldown(current_time):
@@ -158,6 +159,7 @@ class STTService:
             processed,
             self._sample_rate,
             self._frame_size,
+            in_response_window=in_response_window,
         )
         if not accepted:
             reasons = info.get("reasons") if isinstance(info, dict) else None

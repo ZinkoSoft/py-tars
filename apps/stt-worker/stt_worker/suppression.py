@@ -91,6 +91,7 @@ class SuppressionEngine:
         utterance: bytes,
         sample_rate: int,
         frame_size: int,
+        in_response_window: bool = False,
     ) -> Tuple[bool, Dict[str, object]]:
         """Return (accepted, info) for a candidate transcription.
 
@@ -197,22 +198,37 @@ class SuppressionEngine:
         else:
             dict_ratio = 0.0
         if dict_ratio < DICT_MATCH_MIN_RATIO and len(raw_text) >= NOISE_MIN_LENGTH:
+            # During response windows, be more lenient with dictionary matching
+            min_ratio = 0.05 if in_response_window else DICT_MATCH_MIN_RATIO  # 5% vs 12% during response window
+            if dict_ratio < min_ratio:
+                matched_words = [w for w in word_tokens if w in COMMON_WORDS]
+                info["dict_ratio"] = round(dict_ratio, 3)
+                info["dict_tokens"] = len(word_tokens)
+                info["dict_matches"] = len(matched_words)
+                if matched_words:
+                    info["dict_matched_words"] = matched_words[:8]
+                logger.debug(
+                    "Suppression: dict_ratio gate ratio=%.2f<th=%.2f tokens=%d matches=%d matched=%s text='%s' response_window=%s",
+                    dict_ratio,
+                    min_ratio,
+                    len(word_tokens),
+                    len(matched_words),
+                    matched_words[:8],
+                    raw_text,
+                    in_response_window,
+                )
+                info["reasons"].append(f"dict_ratio {dict_ratio:.2f} < {min_ratio}")
+        elif in_response_window:
+            # During response windows, log successful dictionary matches for debugging
             matched_words = [w for w in word_tokens if w in COMMON_WORDS]
-            info["dict_ratio"] = round(dict_ratio, 3)
-            info["dict_tokens"] = len(word_tokens)
-            info["dict_matches"] = len(matched_words)
-            if matched_words:
-                info["dict_matched_words"] = matched_words[:8]
             logger.debug(
-                "Suppression: dict_ratio gate ratio=%.2f<th=%.2f tokens=%d matches=%d matched=%s text='%s'",
+                "Response window: dict_ratio=%.2f >= %.2f tokens=%d matches=%d text='%s'",
                 dict_ratio,
-                DICT_MATCH_MIN_RATIO,
+                0.05,
                 len(word_tokens),
                 len(matched_words),
-                matched_words[:8],
                 raw_text,
             )
-            info["reasons"].append(f"dict_ratio {dict_ratio:.2f} < {DICT_MATCH_MIN_RATIO}")
         if avg_no_speech is not None and avg_no_speech > NO_SPEECH_MAX:
             logger.debug(
                 "Suppression: no_speech gate prob=%.2f>th=%.2f text='%s'",

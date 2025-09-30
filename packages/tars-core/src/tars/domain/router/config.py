@@ -24,6 +24,7 @@ class RouterSettings:
     topic_health_router: str = "system/health/router"
     topic_stt_final: str = "stt/final"
     topic_tts_say: str = "tts/say"
+    topic_tts_status: str = "tts/status"
     topic_llm_req: str = "llm/request"
     topic_llm_resp: str = "llm/response"
     topic_llm_stream: str = "llm/stream"
@@ -88,6 +89,7 @@ class RouterSettings:
         return {
             "stt.final": self.topic_stt_final,
             "tts.say": self.topic_tts_say,
+            "tts.status": self.topic_tts_status,
             "llm.request": self.topic_llm_req,
             "llm.response": self.topic_llm_resp,
             "llm.stream": self.topic_llm_stream,
@@ -137,6 +139,7 @@ class RouterSettings:
             topic_health_router=get_str("TOPIC_HEALTH_ROUTER", defaults.topic_health_router, env=env),
             topic_stt_final=get_str("TOPIC_STT_FINAL", defaults.topic_stt_final, env=env),
             topic_tts_say=get_str("TOPIC_TTS_SAY", defaults.topic_tts_say, env=env),
+            topic_tts_status=get_str("TOPIC_TTS_STATUS", defaults.topic_tts_status, env=env),
             topic_llm_req=get_str("TOPIC_LLM_REQUEST", defaults.topic_llm_req, env=env),
             topic_llm_resp=get_str("TOPIC_LLM_RESPONSE", defaults.topic_llm_resp, env=env),
             topic_llm_stream=get_str("TOPIC_LLM_STREAM", defaults.topic_llm_stream, env=env),

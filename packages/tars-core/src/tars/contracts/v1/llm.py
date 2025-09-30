@@ -2,11 +2,21 @@ from __future__ import annotations
 
 import uuid
 from pydantic import BaseModel, Field
+from typing import List, Literal
 
 EVENT_TYPE_LLM_REQUEST = "llm.request"
 EVENT_TYPE_LLM_RESPONSE = "llm.response"
 EVENT_TYPE_LLM_STREAM = "llm.stream"
 EVENT_TYPE_LLM_CANCEL = "llm.cancel"
+
+
+class ConversationMessage(BaseModel):
+    """A message in the conversation history."""
+    role: Literal["user", "assistant"]
+    content: str
+    timestamp: float | None = None
+
+    model_config = {"extra": "forbid"}
 
 
 class BaseLLMMessage(BaseModel):
@@ -23,6 +33,7 @@ class LLMRequest(BaseLLMMessage):
     rag_k: int | None = None
     system: str | None = None
     params: dict | None = None
+    conversation_history: List[ConversationMessage] | None = None
 
 
 class LLMResponse(BaseLLMMessage):

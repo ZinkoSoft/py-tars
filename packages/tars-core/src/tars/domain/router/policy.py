@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 from tars.contracts.v1 import (
     EVENT_TYPE_LLM_REQUEST,
     EVENT_TYPE_SAY,
+    ConversationMessage,
     FinalTranscript,
     HealthPing,
     LLMCancel,
@@ -17,6 +18,7 @@ from tars.contracts.v1 import (
     LLMResponse,
     LLMStreamDelta,
     TtsSay,
+    TtsStatus,
     WakeEvent,
 )
 from tars.runtime.ctx import Ctx
@@ -39,6 +41,9 @@ class RouterPolicy:
     live_mode: bool = field(init=False)
     wake_active_until: float = 0.0
     wake_session_active: bool = False
+    response_window_active: bool = False
+    response_window_until: float = 0.0
+    conversation_history: List[ConversationMessage] = field(default_factory=list)
     _wake_regex: re.Pattern[str] = field(init=False)
     _wake_ack_cycle: Optional[itertools.cycle[str]] = field(init=False, default=None)
 
@@ -140,6 +145,13 @@ class RouterPolicy:
         else:
             ctx.logger.debug("router.wake.ignored", extra={"event": event_type})
 
+    async def handle_tts_status(self, event: TtsStatus, ctx: Ctx) -> None:
+        event_type = (event.event or "").lower()
+        if event_type == "speaking_end" and not event.wake_ack:
+            # Start a response window for conversational follow-ups
+            self._open_response_window()
+            ctx.logger.debug("router.response_window.opened", extra={"until": self.response_window_until})
+
     async def handle_stt_final(self, event: FinalTranscript, ctx: Ctx) -> None:
         text = (event.text or "").strip()
         if not text:
@@ -151,19 +163,26 @@ class RouterPolicy:
             ctx.logger.info("router.wake.expired")
             self._close_wake_window()
 
+        if self.response_window_active and now > self.response_window_until:
+            ctx.logger.debug("router.response_window.expired")
+            self._close_response_window()
+
         candidate_text = text
         remainder = self._strip_wake_phrase(text)
         if remainder:
             candidate_text = remainder
 
         window_active = self.wake_session_active
+        response_window_active = self.response_window_active
         gating_reason: Optional[str] = None
         if self.live_mode:
             gating_reason = "live-mode"
         elif window_active:
             gating_reason = "wake-event"
+        elif response_window_active:
+            gating_reason = "response-window"
 
-        if not self.live_mode and not window_active:
+        if not self.live_mode and not window_active and not response_window_active:
             ctx.logger.info("router.stt.dropped", extra={"reason": "no-wake"})
             return
 
@@ -210,6 +229,9 @@ class RouterPolicy:
         if window_active:
             self._close_wake_window()
 
+        if response_window_active:
+            self._close_response_window()
+
         ctx.logger.debug("router.stt.route", extra={"gating": gating_reason or "wake"})
 
         resp = self._rule_route(candidate_text)
@@ -225,10 +247,14 @@ class RouterPolicy:
             return
 
         req_id = event.utt_id or f"rt-{uuid.uuid4().hex[:8]}"
-        llm_req = LLMRequest(id=req_id, text=candidate_text, stream=True)
+        # Add user message to conversation history
+        self._add_user_message(candidate_text, event.ts)
+        # Include recent conversation history (limit to avoid token limits)
+        recent_history = self._get_recent_history(max_messages=10)
+        llm_req = LLMRequest(id=req_id, text=candidate_text, stream=True, conversation_history=recent_history)
         ctx.logger.info(
             "router.llm.request",
-            extra={"id": req_id, "len": len(candidate_text or ""), "reason": gating_reason},
+            extra={"id": req_id, "len": len(candidate_text or ""), "reason": gating_reason, "history_len": len(recent_history)},
         )
         await ctx.publish(EVENT_TYPE_LLM_REQUEST, llm_req, correlate=ctx.id_from(event), qos=1)
         if self.metrics:
@@ -283,6 +309,8 @@ class RouterPolicy:
         if not text:
             return
         ctx.logger.info("router.llm.response", extra={"len": len(text)})
+        # Add assistant response to conversation history
+        self._add_assistant_message(text)
         await self._speak(
             ctx,
             text=text,
@@ -358,6 +386,15 @@ class RouterPolicy:
     def _close_wake_window(self) -> None:
         self.wake_session_active = False
         self.wake_active_until = 0.0
+
+    def _open_response_window(self) -> None:
+        # Use the same duration as the STT worker's response window
+        self.response_window_active = True
+        self.response_window_until = time.monotonic() + 10.0  # 10 seconds
+
+    def _close_response_window(self) -> None:
+        self.response_window_active = False
+        self.response_window_until = 0.0
 
     def _next_wake_ack_text(self) -> Optional[str]:
         if not self.settings.wake_ack_enabled:
@@ -473,3 +510,23 @@ class RouterPolicy:
         if not self.metrics:
             return
         ctx.logger.debug("router.metrics", extra=self.metrics.snapshot())
+
+    def _add_user_message(self, text: str, timestamp: Optional[float] = None) -> None:
+        """Add a user message to conversation history."""
+        self.conversation_history.append(
+            ConversationMessage(role="user", content=text, timestamp=timestamp)
+        )
+
+    def _add_assistant_message(self, text: str, timestamp: Optional[float] = None) -> None:
+        """Add an assistant message to conversation history."""
+        self.conversation_history.append(
+            ConversationMessage(role="assistant", content=text, timestamp=timestamp or time.time())
+        )
+
+    def _get_recent_history(self, max_messages: int = 10) -> List[ConversationMessage]:
+        """Get recent conversation history, limited to max_messages."""
+        return self.conversation_history[-max_messages:] if self.conversation_history else []
+
+    def _clear_conversation_history(self) -> None:
+        """Clear conversation history (useful for new sessions)."""
+        self.conversation_history.clear()

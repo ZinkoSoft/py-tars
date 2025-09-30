@@ -292,6 +292,20 @@ class LLMService:
                         if context:
                             prompt = RAG_PROMPT_TEMPLATE.format(context=context, user=text)
 
+                        # Format conversation history for chat completion
+                        messages = []
+                        if request.conversation_history:
+                            for msg in request.conversation_history:
+                                messages.append({
+                                    "role": msg.role,
+                                    "content": msg.content
+                                })
+                        # Add current user message
+                        messages.append({
+                            "role": "user", 
+                            "content": prompt
+                        })
+
                         # Fast-fail when required creds are missing (avoid long HTTP timeouts)
                         if isinstance(self.provider, OpenAIProvider) and not OPENAI_API_KEY:
                             logger.warning("OPENAI_API_KEY not set; responding with error for id=%s", req_id)
@@ -314,10 +328,11 @@ class LLMService:
                             if want_stream and getattr(self.provider, "name", "") == "openai":
                                 seq = 0
                                 full_chunks: list[str] = []
-                                logger.info("Starting streaming for id=%s via provider=%s (system_len=%s)", req_id, self.provider.name, len(system or ""))
+                                logger.info("Starting streaming for id=%s via provider=%s (system_len=%s, history_len=%d)", 
+                                           req_id, self.provider.name, len(system or ""), len(messages) - 1)
                                 tts_buf = ""
-                                async for ch in self.provider.stream(
-                                    prompt,
+                                async for ch in self.provider.stream_chat(
+                                    messages=messages,
                                     model=model,
                                     max_tokens=max_tokens,
                                     temperature=temperature,
@@ -404,8 +419,8 @@ class LLMService:
                                     correlate=correlation_id,
                                 )
                             else:
-                                result = await self.provider.generate(
-                                    prompt,
+                                result = await self.provider.generate_chat(
+                                    messages=messages,
                                     model=model,
                                     max_tokens=max_tokens,
                                     temperature=temperature,

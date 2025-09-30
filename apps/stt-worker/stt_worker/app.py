@@ -117,6 +117,7 @@ class STTWorker:
         self._fft_ws: FFTWebSocketServer | None = None
         self._tts_response_window_task: asyncio.Task | None = None
         self._stay_muted_until_wake = False
+        self._in_response_window = False
 
     async def initialize(self) -> None:
         if os.path.exists("/host-models"):
@@ -285,6 +286,7 @@ class STTWorker:
                     self.audio_capture.unmute("tts response window")
                     self._stay_muted_until_wake = False  # Clear stay-muted flag for response window
                     self.recent_unmute_time = time.time()
+                    self._in_response_window = True  # Mark that we're in response window
                     logger.info("Microphone unmuted for %.1f-second response window after TTS", TTS_RESPONSE_WINDOW_SEC)
 
                     # Keep unmuted for 10 seconds
@@ -295,7 +297,9 @@ class STTWorker:
                         self.audio_capture.mute("tts response window timeout")
                         self._stay_muted_until_wake = True  # Stay muted until next wake event
                         logger.info("Response window timeout (%.1fs); microphone muted", TTS_RESPONSE_WINDOW_SEC)
+                    self._in_response_window = False  # Clear response window flag
                 except asyncio.CancelledError:
+                    self._in_response_window = False  # Clear flag on cancellation
                     pass
 
             if self.fallback_unmute_task and not self.fallback_unmute_task.done():
@@ -481,7 +485,7 @@ class STTWorker:
                     if rms < 180:  # Match NOISE_MIN_RMS threshold
                         continue
 
-            result = await service.process_chunk(chunk, now=now)
+            result = await service.process_chunk(chunk, now=now, in_response_window=self._in_response_window)
             if result.error:
                 logger.error(result.error)
                 await self.publish_health(False, result.error)
@@ -491,9 +495,10 @@ class STTWorker:
             if not result.final:
                 if result.candidate_text and result.rejection_reasons:
                     logger.info(
-                        "Discarded '%s' reasons=%s",
+                        "Discarded '%s' reasons=%s (response_window=%s)",
                         result.candidate_text,
                         result.rejection_reasons,
+                        self._in_response_window,
                     )
                 continue
 
@@ -628,6 +633,7 @@ class STTWorker:
             buf = self.vad_processor.get_active_buffer() if self.vad_processor else None
             if not buf:
                 continue
+            logger.debug(f"FFT: processing buffer of {len(buf)} bytes")
             x = np.frombuffer(buf, dtype=np.int16).astype(np.float32)
             if x.size < 256:
                 continue
@@ -647,6 +653,7 @@ class STTWorker:
             idx = np.linspace(0, len(pos) - 1, bins)
             down = np.interp(idx, np.arange(len(pos)), pos)
             payload = {"fft": down.tolist(), "ts": now}
+            logger.debug(f"FFT: broadcasting {len(down)} bins")
             if FFT_PUBLISH:
                 try:
                     await self.mqtt.safe_publish(FFT_TOPIC, payload)

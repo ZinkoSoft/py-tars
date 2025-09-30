@@ -6,6 +6,9 @@ models/whisper
 .env.local
 .env.production
 .env.staging
+.env.deprecated
+.env.old
+.env.backup
 
 # Docker and Containers
 .dockerignore

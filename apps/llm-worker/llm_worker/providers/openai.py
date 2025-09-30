@@ -149,9 +149,140 @@ class OpenAIProvider(LLMProvider):
                         chunks += 1
                         logger.debug("openai.stream chunk #%d len=%d", chunks, len(text))
                         yield {"delta": text}
+    async def generate_chat(self, messages: list[dict], **kwargs) -> LLMResult:
+        model = kwargs.get("model")
+        max_tokens = kwargs.get("max_tokens")
+        temperature = kwargs.get("temperature")
+        top_p = kwargs.get("top_p")
+        system = kwargs.get("system")
+
+        # If system is provided, prepend it to messages
+        chat_messages = []
+        if system:
+            chat_messages.append({"role": "system", "content": system})
+        chat_messages.extend(messages)
+
+        payload = ChatCompletionRequest(
+            model=model,
+            messages=chat_messages,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            stream=False,
+        )
+
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        t0 = time.time()
+        logger.info(
+            "openai.generate_chat start model=%s max_tokens=%s temp=%s top_p=%s messages=%d",
+            model,
+            max_tokens,
+            temperature,
+            top_p,
+            len(chat_messages),
+        )
+        async with httpx.AsyncClient(timeout=self.timeout, base_url=self.base_url) as client:
+            resp = await client.post("/chat/completions", json=payload.model_dump(exclude_none=True), headers=headers)
+            logger.debug("openai.generate_chat HTTP status=%s", resp.status_code)
+            resp.raise_for_status()
+            data = resp.json()
+            try:
+                parsed = ChatCompletionResponse.model_validate(data)
+            except ValidationError as exc:
+                logger.error("openai.generate_chat validation error: %s", exc)
+                raise
+            text = parsed.choices[0].message.content
+            usage = parsed.usage.dict(exclude_none=True) if parsed.usage else None
+            dt = time.time() - t0
+            logger.info("openai.generate_chat done model=%s reply_len=%d elapsed=%.3fs", model, len(text or ""), dt)
+            logger.debug("usage=%s", usage)
+            return LLMResult(text=text, usage=usage, model=model, provider=self.name)
+
+    async def stream_chat(self, messages: list[dict], **kwargs) -> AsyncIterator[dict[str, str | None]]:
+        model = kwargs.get("model")
+        temperature = kwargs.get("temperature")
+        top_p = kwargs.get("top_p")
+        system = kwargs.get("system")
+
+        # If system is provided, prepend it to messages
+        chat_messages = []
+        if system:
+            chat_messages.append({"role": "system", "content": system})
+        chat_messages.extend(messages)
+
+        logger.debug("openai.stream_chat messages=%d", len(chat_messages))
+
+        payload = ChatCompletionRequest(
+            model=model,
+            messages=chat_messages,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=kwargs.get("max_tokens"),
+            stream=True,
+        )
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+        }
+        t0 = time.time()
+        first_dt: float | None = None
+        total_len = 0
+        chunks = 0
+        logger.info(
+            "openai.stream_chat start model=%s temp=%s top_p=%s messages=%d",
+            model,
+            temperature,
+            top_p,
+            len(chat_messages),
+        )
+        async with httpx.AsyncClient(timeout=None, base_url=self.base_url) as client:
+            async with client.stream(
+                "POST",
+                "/chat/completions",
+                json=payload.model_dump(exclude_none=True),
+                headers=headers,
+            ) as resp:
+                logger.debug("openai.stream_chat HTTP status=%s", resp.status_code)
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    if line.startswith(":"):
+                        # SSE comment/heartbeat
+                        continue
+                    if line.startswith("data: "):
+                        data_str = line[6:].strip()
+                    elif line.startswith("data:"):
+                        data_str = line[5:].strip()
+                    else:
+                        continue
+                    if not data_str:
+                        continue
+                    if data_str == "[DONE]":
+                        logger.debug("openai.stream_chat received [DONE]")
+                        break
+                    try:
+                        chunk = StreamChunk.model_validate_json(data_str)
+                    except ValidationError as e:
+                        logger.debug("openai.stream_chat JSON parse error: %s", e)
+                        continue
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
+                    text = delta.content if delta else None
+                    if text:
+                        if first_dt is None:
+                            first_dt = time.time() - t0
+                            logger.info("openai.stream_chat first_token_latency=%.3fs", first_dt)
+                        total_len += len(text)
+                        chunks += 1
+                        logger.debug("openai.stream_chat chunk #%d len=%d", chunks, len(text))
+                        yield {"delta": text}
         dt = time.time() - t0
         logger.info(
-            "openai.stream done chunks=%d total_len=%d elapsed=%.3fs first_token_latency=%.3fs",
+            "openai.stream_chat done chunks=%d total_len=%d elapsed=%.3fs first_token_latency=%.3fs",
             chunks,
             total_len,
             dt,
