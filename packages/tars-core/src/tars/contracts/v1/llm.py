@@ -8,6 +8,9 @@ EVENT_TYPE_LLM_REQUEST = "llm.request"
 EVENT_TYPE_LLM_RESPONSE = "llm.response"
 EVENT_TYPE_LLM_STREAM = "llm.stream"
 EVENT_TYPE_LLM_CANCEL = "llm.cancel"
+EVENT_TYPE_TOOLS_REGISTRY = "llm.tools.registry"
+EVENT_TYPE_TOOL_CALL_REQUEST = "llm.tool.call.request"
+EVENT_TYPE_TOOL_CALL_RESULT = "llm.tool.call.result"
 
 
 class ConversationMessage(BaseModel):
@@ -56,3 +59,30 @@ class LLMStreamDelta(BaseLLMMessage):
 
 class LLMCancel(BaseLLMMessage):
     id: str
+
+
+class ToolSpec(BaseModel):
+    """Specification for a tool that can be called by the LLM."""
+    type: str = "function"
+    function: dict  # OpenAI function spec
+
+    model_config = {"extra": "forbid"}
+
+
+class ToolsRegistry(BaseLLMMessage):
+    """Registry of available tools published by MCP bridge."""
+    tools: List[ToolSpec]
+
+
+class ToolCallRequest(BaseLLMMessage):
+    """Request to call a tool."""
+    call_id: str
+    name: str  # "mcp:server:tool_name"
+    arguments: dict
+
+
+class ToolCallResult(BaseLLMMessage):
+    """Result of a tool call."""
+    call_id: str
+    result: dict | None = None
+    error: str | None = None

@@ -13,6 +13,15 @@ from .llm import (
 	LLMResponse,
 	LLMStreamDelta,
 )
+from .mcp import (
+	EVENT_TYPE_TOOLS_REGISTRY,
+	EVENT_TYPE_TOOL_CALL_REQUEST,
+	EVENT_TYPE_TOOL_CALL_RESULT,
+	ToolCallRequest,
+	ToolCallResult,
+	ToolSpec,
+	ToolsRegistry,
+)
 from .memory import (
 	EVENT_TYPE_CHARACTER_CURRENT,
 	EVENT_TYPE_CHARACTER_GET,
@@ -45,6 +54,13 @@ __all__ = [
 	"LLMRequest",
 	"LLMResponse",
 	"LLMStreamDelta",
+	"EVENT_TYPE_TOOLS_REGISTRY",
+	"EVENT_TYPE_TOOL_CALL_REQUEST",
+	"EVENT_TYPE_TOOL_CALL_RESULT",
+	"ToolCallRequest",
+	"ToolCallResult",
+	"ToolSpec",
+	"ToolsRegistry",
 	"EVENT_TYPE_MEMORY_QUERY",
 	"EVENT_TYPE_MEMORY_RESULTS",
 	"EVENT_TYPE_MEMORY_HEALTH",

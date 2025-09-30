@@ -1,0 +1,9 @@
+servers:
+  - name: filesystem
+    transport: stdio
+    command: "mcp-filesystem"
+    args: ["--root","/home/james/work"]
+    tools_allowlist: ["read_file","write_file","list_dir"]
+timeouts:
+  connect_ms: 5000
+  tool_call_ms: 30000

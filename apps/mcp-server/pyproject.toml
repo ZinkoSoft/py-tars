@@ -1,0 +1,42 @@
+[project]
+name = "tars-mcp-server"
+version = "0.1.0"
+description = "TARS MCP server exposing TARS tools/resources over MCP (FastMCP)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "ZinkoSoft" }]
+
+# MCP SDK provides FastMCP (server), stdio + Streamable HTTP transports, and a CLI.
+dependencies = [
+  "mcp[cli]>=1.2.0",        # official MCP Python SDK + CLI
+  "pydantic>=2.7",
+  "orjson>=3.9",
+  "python-dotenv>=1.0",     # convenient env loading for secrets/keys
+  "asyncio-mqtt>=0.16.2",   # if any tools need to publish/subscribe to MQTT
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.5",
+  "mypy>=1.10",
+  "types-orjson>=3.9",
+]
+
+[project.scripts]
+# Your server’s direct entry point (e.g., `tars-mcp-server stdio` or `tars-mcp-server http`)
+tars-mcp-server = "tars_mcp_server.__main__:main"
+
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_configs = true

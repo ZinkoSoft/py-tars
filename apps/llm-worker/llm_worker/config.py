@@ -73,6 +73,12 @@ TOPIC_CHARACTER_CURRENT = env_str("TOPIC_CHARACTER_CURRENT", "system/character/c
 TOPIC_CHARACTER_GET = env_str("TOPIC_CHARACTER_GET", "character/get")
 TOPIC_CHARACTER_RESULT = env_str("TOPIC_CHARACTER_RESULT", "character/result")
 
+# Tool calling
+TOOL_CALLING_ENABLED = env_bool("TOOL_CALLING_ENABLED", False)
+TOPIC_TOOLS_REGISTRY = env_str("TOPIC_TOOLS_REGISTRY", "llm/tools/registry")
+TOPIC_TOOL_CALL_REQUEST = env_str("TOPIC_TOOL_CALL_REQUEST", "llm/tool.call.request")
+TOPIC_TOOL_CALL_RESULT = env_str("TOPIC_TOOL_CALL_RESULT", "llm/tool.call.result")
+
 # Optional: forward streaming chunks to TTS as sentences (now disabled; router bridges LLM->TTS)
 LLM_TTS_STREAM = env_bool("LLM_TTS_STREAM", False)
 TOPIC_TTS_SAY = env_str("TOPIC_TTS_SAY", "tts/say")

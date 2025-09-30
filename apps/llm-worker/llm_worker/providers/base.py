@@ -10,6 +10,7 @@ class LLMResult:
     usage: Dict[str, Any] | None = None
     model: str | None = None
     provider: str | None = None
+    tool_calls: list | None = None
 
 
 class LLMProvider:

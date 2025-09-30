@@ -19,6 +19,7 @@ class ChatCompletionRequest(BaseModel):
     top_p: Optional[float] = None
     max_tokens: Optional[int] = None
     stream: bool = False
+    tools: Optional[list[dict]] = None  # OpenAI tool specs
 
     model_config = {"extra": "forbid"}
 

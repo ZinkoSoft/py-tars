@@ -269,6 +269,26 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  mcp-bridge:
+    build:
+      context: ..
+      dockerfile: docker/specialized/mcp-bridge.Dockerfile
+    image: tars/mcp-bridge:dev
+    container_name: tars-mcp-bridge
+    env_file: .env
+    environment:
+      MQTT_URL: mqtt://mqtt:1883
+      MQTT_HOST: mqtt
+      MQTT_PORT: "1883"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      MCP_SERVERS_YAML: /config/mcp.server.yml
+    volumes:
+      - ../ops/mcp/mcp.server.yml:/config/mcp.server.yml:ro
+    depends_on:
+      mqtt:
+        condition: service_started
+    restart: unless-stopped
+
 # Optional: define multiple network(s)
 networks:
   default:

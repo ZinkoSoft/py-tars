@@ -155,6 +155,7 @@ class OpenAIProvider(LLMProvider):
         temperature = kwargs.get("temperature")
         top_p = kwargs.get("top_p")
         system = kwargs.get("system")
+        tools = kwargs.get("tools")  # List of tool specs
 
         # If system is provided, prepend it to messages
         chat_messages = []
@@ -169,17 +170,19 @@ class OpenAIProvider(LLMProvider):
             top_p=top_p,
             max_tokens=max_tokens,
             stream=False,
+            tools=tools,
         )
 
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         t0 = time.time()
         logger.info(
-            "openai.generate_chat start model=%s max_tokens=%s temp=%s top_p=%s messages=%d",
+            "openai.generate_chat start model=%s max_tokens=%s temp=%s top_p=%s messages=%d tools=%d",
             model,
             max_tokens,
             temperature,
             top_p,
             len(chat_messages),
+            len(tools or []),
         )
         async with httpx.AsyncClient(timeout=self.timeout, base_url=self.base_url) as client:
             resp = await client.post("/chat/completions", json=payload.model_dump(exclude_none=True), headers=headers)
@@ -192,17 +195,20 @@ class OpenAIProvider(LLMProvider):
                 logger.error("openai.generate_chat validation error: %s", exc)
                 raise
             text = parsed.choices[0].message.content
+            tool_calls = getattr(parsed.choices[0].message, 'tool_calls', None)
             usage = parsed.usage.dict(exclude_none=True) if parsed.usage else None
             dt = time.time() - t0
-            logger.info("openai.generate_chat done model=%s reply_len=%d elapsed=%.3fs", model, len(text or ""), dt)
+            logger.info("openai.generate_chat done model=%s reply_len=%d tool_calls=%d elapsed=%.3fs", 
+                       model, len(text or ""), len(tool_calls or []), dt)
             logger.debug("usage=%s", usage)
-            return LLMResult(text=text, usage=usage, model=model, provider=self.name)
+            return LLMResult(text=text, usage=usage, model=model, provider=self.name, tool_calls=tool_calls)
 
     async def stream_chat(self, messages: list[dict], **kwargs) -> AsyncIterator[dict[str, str | None]]:
         model = kwargs.get("model")
         temperature = kwargs.get("temperature")
         top_p = kwargs.get("top_p")
         system = kwargs.get("system")
+        tools = kwargs.get("tools")  # List of tool specs
 
         # If system is provided, prepend it to messages
         chat_messages = []
@@ -219,6 +225,7 @@ class OpenAIProvider(LLMProvider):
             top_p=top_p,
             max_tokens=kwargs.get("max_tokens"),
             stream=True,
+            tools=tools,
         )
 
         headers = {
@@ -231,11 +238,12 @@ class OpenAIProvider(LLMProvider):
         total_len = 0
         chunks = 0
         logger.info(
-            "openai.stream_chat start model=%s temp=%s top_p=%s messages=%d",
+            "openai.stream_chat start model=%s temp=%s top_p=%s messages=%d tools=%d",
             model,
             temperature,
             top_p,
             len(chat_messages),
+            len(tools or []),
         )
         async with httpx.AsyncClient(timeout=None, base_url=self.base_url) as client:
             async with client.stream(

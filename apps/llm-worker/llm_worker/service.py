@@ -38,6 +38,11 @@ from .config import (
     STREAM_MIN_CHARS,
     STREAM_MAX_CHARS,
     STREAM_BOUNDARY_CHARS,
+    # Tool calling config
+    TOOL_CALLING_ENABLED,
+    TOPIC_TOOLS_REGISTRY,
+    TOPIC_TOOL_CALL_REQUEST,
+    TOPIC_TOOL_CALL_RESULT,
 )
 from .providers.openai import OpenAIProvider
 
@@ -49,6 +54,9 @@ from tars.contracts.v1 import (  # type: ignore[import]
     EVENT_TYPE_LLM_RESPONSE,
     EVENT_TYPE_LLM_STREAM,
     EVENT_TYPE_SAY,
+    EVENT_TYPE_TOOLS_REGISTRY,
+    EVENT_TYPE_TOOL_CALL_REQUEST,
+    EVENT_TYPE_TOOL_CALL_RESULT,
     LLMRequest,
     LLMResponse,
     LLMStreamDelta,
@@ -84,6 +92,9 @@ class LLMService:
             self.provider = OpenAIProvider(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL or None)
         # Character/persona state (loaded via MQTT retained message)
         self.character: Dict[str, Any] = {}
+        # Tool registry and pending results
+        self.tools: list[dict] = []
+        self.pending_tool_results: Dict[str, dict] = {}
 
     def _register_topics(self) -> None:
         register(EVENT_TYPE_LLM_CANCEL, TOPIC_LLM_CANCEL)
@@ -91,6 +102,9 @@ class LLMService:
         register(EVENT_TYPE_LLM_RESPONSE, TOPIC_LLM_RESPONSE)
         register(EVENT_TYPE_LLM_STREAM, TOPIC_LLM_STREAM)
         register(EVENT_TYPE_SAY, TOPIC_TTS_SAY)
+        register(EVENT_TYPE_TOOLS_REGISTRY, TOPIC_TOOLS_REGISTRY)
+        register(EVENT_TYPE_TOOL_CALL_REQUEST, TOPIC_TOOL_CALL_REQUEST)
+        register(EVENT_TYPE_TOOL_CALL_RESULT, TOPIC_TOOL_CALL_RESULT)
 
     def _decode_llm_request(self, payload: bytes) -> Tuple[Optional[LLMRequest], Optional[str]]:
         envelope: Optional[Envelope] = None
@@ -177,6 +191,129 @@ class LLMService:
             return text[: idx + 1].strip(), text[idx + 1 :].lstrip()
         return "", text
 
+    async def _load_tools(self, payload: bytes) -> None:
+        """Load tools from MCP bridge registry."""
+        try:
+            data = json.loads(payload)
+            self.tools = data.get("tools", [])
+            logger.info("Loaded %d tools from registry", len(self.tools))
+        except Exception as e:
+            logger.error("Failed to load tools: %s", e)
+
+    async def _handle_tool_result(self, payload: bytes) -> None:
+        """Handle tool call result and store for processing."""
+        try:
+            data = json.loads(payload)
+            call_id = data.get("call_id")
+            if call_id:
+                self.pending_tool_results[call_id] = data
+                logger.debug("Received tool result for call_id=%s", call_id)
+        except Exception as e:
+            logger.error("Failed to handle tool result: %s", e)
+
+    async def _execute_tool_calls(self, client, tool_calls: list[dict], req_id: str, correlation_id: str) -> list[dict]:
+        """Execute tool calls and return results."""
+        results = []
+        for call in tool_calls:
+            call_id = call.get("id")
+            if not call_id:
+                continue
+            
+            call_payload = {
+                "call_id": call_id,
+                "name": call.get("function", {}).get("name"),
+                "arguments": json.loads(call.get("function", {}).get("arguments", "{}")),
+            }
+            
+            try:
+                topic = f"{TOPIC_TOOL_CALL_REQUEST}/{call_id}"
+                await self._publish_event(
+                    client,
+                    event_type=EVENT_TYPE_TOOL_CALL_REQUEST,
+                    topic=topic,
+                    payload=call_payload,
+                    correlate=correlation_id,
+                )
+                logger.info("Published tool call request for %s", call_id)
+                
+                # Wait for result (simple polling for now)
+                timeout = 30.0  # seconds
+                start_time = asyncio.get_event_loop().time()
+                while asyncio.get_event_loop().time() - start_time < timeout:
+                    if call_id in self.pending_tool_results:
+                        result = self.pending_tool_results.pop(call_id)
+                        results.append(result)
+                        break
+                    await asyncio.sleep(0.1)
+                else:
+                    logger.warning("Timeout waiting for tool result for call_id=%s", call_id)
+                    results.append({"call_id": call_id, "error": "timeout"})
+                    
+            except Exception as e:
+                logger.error("Failed to execute tool call %s: %s", call_id, e)
+                results.append({"call_id": call_id, "error": str(e)})
+        
+        return results
+
+    def _extract_tool_calls(self, result: LLMResult) -> list[dict]:
+        """Extract tool calls from LLM result."""
+        if hasattr(result, 'tool_calls') and result.tool_calls:
+            return result.tool_calls
+        return []
+
+    async def _handle_tool_calls_and_respond(self, client, tool_calls: list[dict], messages: list[dict], 
+                                            req_id: str, correlation_id: str, model: str, 
+                                            max_tokens: int, temperature: float, top_p: float, system: str,
+                                            tools: list[dict] | None) -> None:
+        """Execute tool calls and send follow-up response."""
+        if not tool_calls:
+            return
+        
+        # Execute tool calls
+        tool_results = await self._execute_tool_calls(client, tool_calls, req_id, correlation_id)
+        
+        # Add tool results to conversation
+        for call in tool_calls:
+            messages.append({
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [call]
+            })
+        
+        for result in tool_results:
+            messages.append({
+                "role": "tool",
+                "content": json.dumps(result.get("result", result.get("error", "unknown error"))),
+                "tool_call_id": result["call_id"]
+            })
+        
+        # Generate follow-up response
+        followup_result = await self.provider.generate_chat(
+            messages=messages,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            system=system,
+            tools=tools,
+        )
+        
+        # Send follow-up response
+        resp = LLMResponse(
+            id=req_id,
+            reply=followup_result.text,
+            provider=self.provider.name,
+            model=model,
+            tokens=followup_result.usage or {},
+        )
+        await self._publish_event(
+            client,
+            event_type=EVENT_TYPE_LLM_RESPONSE,
+            topic=TOPIC_LLM_RESPONSE,
+            payload=resp,
+            correlate=correlation_id,
+        )
+
     async def _do_rag(self, client, prompt: str, top_k: int) -> str:
         try:
             payload = {"text": prompt, "top_k": top_k}
@@ -214,6 +351,13 @@ class LLMService:
                     await client.subscribe(TOPIC_CHARACTER_CURRENT)
                     await client.subscribe(TOPIC_CHARACTER_RESULT)
                     logger.info("Subscribed to %s, %s and %s", TOPIC_LLM_REQUEST, TOPIC_CHARACTER_CURRENT, TOPIC_CHARACTER_RESULT)
+                    
+                    # Subscribe to tool topics if tool calling is enabled
+                    if TOOL_CALLING_ENABLED:
+                        await client.subscribe(TOPIC_TOOLS_REGISTRY)
+                        await client.subscribe(TOPIC_TOOL_CALL_RESULT)
+                        logger.info("Subscribed to tool topics: %s, %s", TOPIC_TOOLS_REGISTRY, TOPIC_TOOL_CALL_RESULT)
+                    
                     # Request the current character snapshot once (memory-worker should respond or retained current will arrive)
                     try:
                         await client.publish(TOPIC_CHARACTER_GET, json.dumps({"section": None}))
@@ -254,6 +398,17 @@ class LLMService:
                                     self.character.update(payload_data)
                                 logger.info("character/result received: name=%s", self.character.get("name"))
                             continue
+                        
+                        # Handle tool registry
+                        if topic == TOPIC_TOOLS_REGISTRY:
+                            await self._load_tools(m.payload)
+                            continue
+                        
+                        # Handle tool results
+                        if topic == TOPIC_TOOL_CALL_RESULT:
+                            await self._handle_tool_result(m.payload)
+                            continue
+                        
                         if topic != TOPIC_LLM_REQUEST:
                             continue
                         request, envelope_id = self._decode_llm_request(m.payload)
@@ -306,6 +461,9 @@ class LLMService:
                             "content": prompt
                         })
 
+                        # Include tools if available and enabled
+                        tools = self.tools if TOOL_CALLING_ENABLED and self.tools else None
+
                         # Fast-fail when required creds are missing (avoid long HTTP timeouts)
                         if isinstance(self.provider, OpenAIProvider) and not OPENAI_API_KEY:
                             logger.warning("OPENAI_API_KEY not set; responding with error for id=%s", req_id)
@@ -338,6 +496,7 @@ class LLMService:
                                     temperature=temperature,
                                     top_p=top_p,
                                     system=system,
+                                    tools=tools,
                                 ):
                                     seq += 1
                                     delta_text = ch.get("delta")
@@ -426,22 +585,34 @@ class LLMService:
                                     temperature=temperature,
                                     top_p=top_p,
                                     system=system,
+                                    tools=tools,
                                 )
-                                resp = LLMResponse(
-                                    id=req_id,
-                                    reply=result.text,
-                                    provider=self.provider.name,
-                                    model=model,
-                                    tokens=result.usage or {},
-                                )
-                                logger.info("Publishing llm/response for id=%s (len=%d)", req_id, len(result.text or ""))
-                                await self._publish_event(
-                                    client,
-                                    event_type=EVENT_TYPE_LLM_RESPONSE,
-                                    topic=TOPIC_LLM_RESPONSE,
-                                    payload=resp,
-                                    correlate=correlation_id,
-                                )
+                                
+                                # Check for tool calls
+                                tool_calls = self._extract_tool_calls(result)
+                                if tool_calls and TOOL_CALLING_ENABLED:
+                                    # Handle tool calls and send follow-up response
+                                    await self._handle_tool_calls_and_respond(
+                                        client, tool_calls, messages, req_id, correlation_id,
+                                        model, max_tokens, temperature, top_p, system, tools
+                                    )
+                                else:
+                                    # Send direct response
+                                    resp = LLMResponse(
+                                        id=req_id,
+                                        reply=result.text,
+                                        provider=self.provider.name,
+                                        model=model,
+                                        tokens=result.usage or {},
+                                    )
+                                    logger.info("Publishing llm/response for id=%s (len=%d)", req_id, len(result.text or ""))
+                                    await self._publish_event(
+                                        client,
+                                        event_type=EVENT_TYPE_LLM_RESPONSE,
+                                        topic=TOPIC_LLM_RESPONSE,
+                                        payload=resp,
+                                        correlate=correlation_id,
+                                    )
                         except Exception as e:
                             logger.exception("generation failed")
                             error_resp = LLMResponse(
