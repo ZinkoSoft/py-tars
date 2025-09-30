@@ -61,7 +61,7 @@
     .mqtt-toolbar .spacer { flex:1; }
     .mqtt-toolbar button { background:transparent; border:1px solid var(--border); color:var(--muted); padding:6px 10px; border-radius:8px; cursor:pointer; font-weight:600; }
     .mqtt-toolbar button:hover { color:#fff; border-color:#2a3469; background:#0b132e; }
-  #mqtt-log { border:1px solid var(--border); border-radius:10px; background:#0b1020; max-height:70vh; min-height:200px; overflow:auto; padding:0; flex:1; }
+    #mqtt-log { border:1px solid var(--border); border-radius:10px; background:#0b1020; max-height:70vh; min-height:200px; overflow:auto; padding:0; flex:1; }
     .mqtt-item { border-bottom:1px solid var(--border); padding:10px 12px; }
     .mqtt-item:last-child { border-bottom:none; }
     .mqtt-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:6px; font-size:12px; color:var(--muted); }
@@ -75,21 +75,44 @@
     let spectrum = new Array(64).fill(0);
     const logEl = () => document.getElementById('log');
     const states = { listening:false, processing:false, llmWriting:false };
-    const streamBuffers = new Map(); // id -> { node, text }
-    const ttsBuffers = new Map();    // id -> { node, text }
+    const assistantMessages = new Map(); // id -> { node, text, lastSeq, ttsChunks }
     let lastMemory = { query: '*', k: 25, results: [] };
     const memoryListEl = () => document.getElementById('memory-list');
-  const mqttLog = [];
-  const MAX_MQTT_LOG_ENTRIES = 200;
-  const mqttLogEl = () => document.getElementById('mqtt-log');
+    const mqttLog = [];
+    const MAX_MQTT_LOG_ENTRIES = 200;
+    const mqttLogEl = () => document.getElementById('mqtt-log');
 
     function joinParts(prev, next) {
       const a = (prev || '').trimEnd();
       const b = (next || '').trimStart();
       if (!a) return b;
       if (!b) return a;
-      const needSpace = !/[\s]$/.test(a) && !/^[\s.,!?;:]/.test(b);
+      const needSpace = !(/[\s]$/.test(a) || /^[\s.,!?;:]/.test(b));
       return a + (needSpace ? ' ' : '') + b;
+    }
+
+    function ensureAssistantEntry(id, { meta = 'TARS', reset = false } = {}) {
+      const key = id || 'default';
+      let entry = assistantMessages.get(key);
+      if (!entry) {
+        const node = addBubble('tars', '', meta);
+        entry = { node, text: '', lastSeq: 0, ttsChunks: 0 };
+        assistantMessages.set(key, entry);
+      }
+      if (reset) {
+        entry.text = '';
+        entry.node.textContent = '';
+        entry.lastSeq = 0;
+        entry.ttsChunks = 0;
+      }
+      return entry;
+    }
+
+    function setAssistantText(id, text, opts = {}) {
+      const entry = ensureAssistantEntry(id, opts);
+      entry.text = text || '';
+      entry.node.textContent = entry.text;
+      entry.ttsChunks = 0;
     }
 
     function cloneForLog(value) {
@@ -281,52 +304,51 @@
             return;
           }
           if (topic.endsWith('llm/stream')) {
-            const id = p.id || 'default';
-            const cur = streamBuffers.get(id) || { node: addBubble('tars', '', 'TARS'), text:'' };
-            if (p.delta) {
-              cur.text += p.delta;
-              cur.node.textContent = cur.text;
-              streamBuffers.set(id, cur);
+            const data = p.data || p;
+            const id = data.id || 'default';
+            const seq = typeof data.seq === 'number' ? data.seq : (data.seq != null ? Number(data.seq) : null);
+            const entry = ensureAssistantEntry(id, { meta: 'TARS', reset: seq !== null && seq <= 1 });
+            if (data.delta) {
+              entry.text = entry.text ? entry.text + data.delta : data.delta;
+              entry.node.textContent = entry.text;
             }
-            states.llmWriting = !p.done;
-            // Once LLM is writing, we are past audio processing step
-            states.processing = states.llmWriting ? false : states.processing;
+            if (seq !== null) {
+              entry.lastSeq = seq;
+            }
+            entry.ttsChunks = 0;
+            states.llmWriting = !data.done;
+            states.processing = false;
             setStatus();
             return;
           }
           if (topic.endsWith('llm/response')) {
-            // Update the existing stream bubble text if present, but don't create new bubbles.
-            const id = p.id || 'default';
-            const cur = streamBuffers.get(id);
-            if (cur && (p.reply || '').trim()) {
-              cur.text = (p.reply || '').trim();
-              cur.node.textContent = cur.text;
+            const data = p.data || p;
+            const id = data.id || 'default';
+            const finalText = (data.reply || '').trim();
+            if (finalText) {
+              setAssistantText(id, finalText, { meta: 'TARS' });
             }
-            states.llmWriting = false; setStatus();
+            states.llmWriting = false;
+            states.processing = false;
+            setStatus();
             return;
           }
           if (topic.endsWith('tts/say')) {
+            // Audio playback notifications duplicate the spoken text; avoid rewriting the chat bubble
+            // unless this utterance has no associated LLM stream (wake acknowledgements, system prompts, etc.).
             const id = p.utt_id || 'default';
             const chunk = (p.text || '').trim();
-            if (!chunk) { return; }
-            // Ensure we have a target bubble: prefer existing stream bubble node
-            let entry = ttsBuffers.get(id);
-            if (!entry) {
-              let node;
-              const stream = streamBuffers.get(id);
-              if (stream) {
-                node = stream.node;
-                stream.text = ''; // reset stream text so TTS controls content
-                node.textContent = '';
-              } else {
-                node = addBubble('tars', '', 'TARS');
+            if (chunk) {
+              const entry = ensureAssistantEntry(id, { meta: p.wake_ack ? 'TARS' : 'TARS' });
+              if (!entry.lastSeq) {
+                entry.ttsChunks = (entry.ttsChunks || 0) + 1;
+                entry.text = entry.ttsChunks === 1 ? chunk : joinParts(entry.text, chunk);
+                entry.node.textContent = entry.text;
               }
-              entry = { node, text: '' };
-              ttsBuffers.set(id, entry);
             }
-            entry.text = joinParts(entry.text, chunk);
-            entry.node.textContent = entry.text;
-            states.llmWriting = false; setStatus();
+            states.llmWriting = false;
+            states.processing = false;
+            setStatus();
             return;
           }
           if (topic.endsWith('tts/status')) {
