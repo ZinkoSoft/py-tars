@@ -42,6 +42,10 @@ try:  # pragma: no cover - CPython shim
     import machine  # type: ignore
 except ImportError:  # pragma: no cover
     machine = None  # type: ignore
+try:
+    import math
+except Exception:  # pragma: no cover
+    math = None
 
 
 def sleep_ms(duration):
@@ -140,6 +144,7 @@ class SetupHTTPServer:
                 body,
                 include_controls=True,
                 trigger_reset=True,
+                scanned_ssids=None,
             )
             self._controller._send_http_response(client, status, response)
         finally:
@@ -277,11 +282,203 @@ class MovementController:
         self._last_frame_at = ticks_ms()
         self._led_toggle_at = ticks_ms()
         self._positions = {}
-        led_pin = config.get("status_led")
-        if Pin is not None and led_pin is not None:
-            self._led = Pin(led_pin, Pin.OUT)
-        else:
-            self._led = None
+        # LED / PWM setup. Support either a single pin or an RGB mapping.
+        led_cfg = config.get("status_led")
+        # single-pin fallback
+        self._led = None
+        self._led_pwm = None
+        # neopixel support (single RGB LED on one pin)
+        self._np = None
+        # rgb maps
+        self._led_rgb_pwms = {}
+        self._led_rgb_pins = {}
+        if led_cfg is not None and Pin is not None and machine is not None:
+            # try to import the neopixel class if available
+            try:
+                from neopixel import NeoPixel  # type: ignore
+            except Exception:
+                NeoPixel = None  # type: ignore
+            PWM = getattr(machine, "PWM", None)
+            # If the config gives a mapping, try RGB setup
+            if isinstance(led_cfg, dict):
+                # allow keys: r,g,b or red,green,blue
+                key_map = {"r": None, "g": None, "b": None}
+                for k in ("r", "g", "b", "red", "green", "blue"):
+                    if k in led_cfg:
+                        short = k[0]
+                        key_map[short] = led_cfg[k]
+                for col, pin_num in key_map.items():
+                    if pin_num is None:
+                        continue
+                    try:
+                        if PWM is not None:
+                            p = PWM(Pin(pin_num))
+                            try:
+                                p.freq(1000)
+                            except Exception:
+                                pass
+                            try:
+                                p.duty_u16(0)
+                            except Exception:
+                                try:
+                                    p.duty(0)
+                                except Exception:
+                                    pass
+                            self._led_rgb_pwms[col] = p
+                        else:
+                            self._led_rgb_pins[col] = Pin(pin_num, Pin.OUT)
+                    except Exception:
+                        try:
+                            self._led_rgb_pins[col] = Pin(pin_num, Pin.OUT)
+                        except Exception:
+                            pass
+            else:
+                # single-pin behavior (legacy) or a single-pin NeoPixel
+                try:
+                    # Prefer NeoPixel if the module is present and a single-pin LED is configured
+                    if NeoPixel is not None:
+                        try:
+                            npobj = NeoPixel(Pin(led_cfg), 1)
+                            self._np = npobj
+                        except Exception:
+                            # fall back to PWM/digital if neopixel init fails
+                            pass
+
+                    if self._np is None and PWM is not None:
+                        p = PWM(Pin(led_cfg))
+                        try:
+                            p.freq(1000)
+                        except Exception:
+                            pass
+                        try:
+                            p.duty_u16(0)
+                        except Exception:
+                            try:
+                                p.duty(0)
+                            except Exception:
+                                pass
+                        self._led_pwm = p
+                    elif self._np is None and PWM is None:
+                        self._led = Pin(led_cfg, Pin.OUT)
+                except Exception:
+                    try:
+                        self._led = Pin(led_cfg, Pin.OUT)
+                    except Exception:
+                        self._led = None
+
+        # small helper state for PWM updates and mqtt blink
+        self._last_led_update = ticks_ms()
+        self._mqtt_blink_until = 0
+        self._mqtt_publish_blink_until = 0
+        # logging state to avoid spamming prints
+        self._last_led_print = 0
+        self._last_mode = None
+        # breathing LED state
+        self._breathe_level = 0.0
+        self._breathe_last_update = ticks_ms()
+
+    def _set_led_power(self, level: float):
+        """Set single-pin LED brightness (0.0..1.0) for legacy single-pin devices."""
+        try:
+            if self._led_pwm is not None:
+                # clamp
+                level = max(0.0, min(1.0, level))
+                try:
+                    self._led_pwm.duty_u16(int(level * 65535))
+                    now = ticks_ms()
+                    if self._last_mode != ("power", level) and ticks_diff(now, self._last_led_print) > 2000:
+                        try:
+                            print('LED power set to', level)
+                        except Exception:
+                            pass
+                        self._last_led_print = now
+                        self._last_mode = ("power", level)
+                    return
+                except Exception:
+                    pass
+                try:
+                    self._led_pwm.duty(int(level * 1023))
+                    now = ticks_ms()
+                    if self._last_mode != ("power", level) and ticks_diff(now, self._last_led_print) > 2000:
+                        try:
+                            print('LED power set to', level)
+                        except Exception:
+                            pass
+                        self._last_led_print = now
+                        self._last_mode = ("power", level)
+                    return
+                except Exception:
+                    pass
+            if self._led is not None:
+                try:
+                    self._led.value(1 if level > 0.5 else 0)
+                    now = ticks_ms()
+                    if self._last_mode != ("power", level) and ticks_diff(now, self._last_led_print) > 2000:
+                        try:
+                            print('LED digital set to', 1 if level > 0.5 else 0)
+                        except Exception:
+                            pass
+                        self._last_led_print = now
+                        self._last_mode = ("power", level)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _set_led_color(self, r: float, g: float, b: float):
+        """Set LED color. If RGB pwms exist, set each channel. Else fallback to single-pin behavior."""
+        try:
+            # normalize
+            r = max(0.0, min(1.0, r))
+            g = max(0.0, min(1.0, g))
+            b = max(0.0, min(1.0, b))
+            # RGB PWMs
+            # If we have explicit RGB PWMs configured
+            if any(self._led_rgb_pwms.values()):
+                for col, val in (("r", r), ("g", g), ("b", b)):
+                    p = self._led_rgb_pwms.get(col)
+                    if p is not None:
+                        try:
+                            p.duty_u16(int(val * 65535))
+                            continue
+                        except Exception:
+                            pass
+                        try:
+                            p.duty(int(val * 1023))
+                            continue
+                        except Exception:
+                            pass
+                    # try pin-level on/off fallback
+                    pin = self._led_rgb_pins.get(col)
+                    if pin is not None:
+                        try:
+                            pin.value(1 if val > 0.5 else 0)
+                        except Exception:
+                            pass
+                return
+
+            # If a NeoPixel object is available, write to it directly
+            if getattr(self, "_np", None) is not None:
+                try:
+                    # Neopixel expects 0-255 RGB tuple
+                    rgb_tuple = (int(r * 255), int(g * 255), int(b * 255))
+                    self._np[0] = rgb_tuple
+                    self._np.write()
+                    now = ticks_ms()
+                    if self._last_mode != ("rgb", rgb_tuple) and ticks_diff(now, self._last_led_print) > 2000:
+                        self._last_led_print = now
+                        self._last_mode = ("rgb", rgb_tuple)
+                    return
+                except Exception:
+                    pass
+
+            # no RGB: fallback to single-pin semantics
+            # map color to a brightness for single-channel LEDs:
+            # green steady -> use g; yellow ~ average of r+g
+            brightness = max(g, (r + g) / 2.0)
+            self._set_led_power(brightness)
+        except Exception:
+            pass
 
     def _ensure_http_server(self):
         if network is None:
@@ -293,6 +490,54 @@ class MovementController:
             self._http_server = None
         if self._http_server is None:
             self._http_server = SetupHTTPServer(self, port)
+
+    def _update_breathe_led(self, now=None):
+        """Set the LED to a red breathing level based on the current time."""
+        try:
+            if now is None:
+                now = ticks_ms()
+            period = 3000
+            t = (now % period) / float(period)
+            if math is not None:
+                target = 0.5 * (1 - math.cos(2 * math.pi * t))
+            else:
+                target = 1 - abs(2 * t - 1)
+            target = max(0.0, min(1.0, target))
+
+            dt_ms = ticks_diff(now, self._breathe_last_update)
+            if dt_ms <= 0 or dt_ms > 5000:
+                self._breathe_level = target
+            else:
+                smoothing = min(1.0, dt_ms / 400.0)
+                self._breathe_level += (target - self._breathe_level) * smoothing
+            self._breathe_last_update = now
+
+            level = max(0.0, min(1.0, self._breathe_level))
+            try:
+                gamma = 2.2
+                if math is not None and hasattr(math, "pow"):
+                    level_gamma = math.pow(level, gamma)
+                else:
+                    level_gamma = level ** gamma
+            except Exception:
+                level_gamma = level
+
+            # prefer RGB/NeoPixel if available
+            if getattr(self, "_np", None) is not None or self._led_rgb_pwms or self._led_rgb_pins:
+                self._set_led_color(level_gamma, 0.0, 0.0)
+            elif self._led_pwm is not None or self._led is not None:
+                self._set_led_power(level_gamma)
+            else:
+                # no PWM/NeoPixel available; attempt a slow digital toggle as fallback
+                try:
+                    if ticks_diff(now, self._led_toggle_at) >= 250:
+                        if self._led is not None:
+                            self._led.value(1 if level > 0.5 else 0)
+                        self._led_toggle_at = now
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _teardown_http_server(self):
         if self._http_server is None:
@@ -330,6 +575,11 @@ class MovementController:
             retries = 0
             while not station.isconnected() and retries < 100:
                 sleep_ms(200)
+                # update breathing LED while waiting to connect
+                try:
+                    self._update_breathe_led()
+                except Exception:
+                    pass
                 retries += 1
 
             if station.isconnected():
@@ -350,12 +600,51 @@ class MovementController:
     def setup_pwm(self):
         bus_cfg = self.config["pca9685"]
         if I2C is None or Pin is None:
-            raise RuntimeError("PCA9685 requires machine.I2C")
-        i2c = I2C(0, scl=Pin(bus_cfg["scl"]), sda=Pin(bus_cfg["sda"]))  # type: ignore
-        pwm = PCA9685(i2c, address=bus_cfg.get("address", 0x40))
-        pwm.set_pwm_freq(bus_cfg.get("frequency", 50))
-        pwm.all_off()
-        self._pwm = pwm
+            print("PCA9685 setup skipped: machine.I2C not available")
+            self._pwm = None
+            return
+        scl_pin = bus_cfg.get("scl")
+        sda_pin = bus_cfg.get("sda")
+        bus_id = bus_cfg.get("bus", 0)
+        if scl_pin is None or sda_pin is None:
+            print("PCA9685 setup skipped: 'scl' and 'sda' pins not configured")
+            self._pwm = None
+            return
+        try:
+            i2c = I2C(bus_id, scl=Pin(scl_pin), sda=Pin(sda_pin))  # type: ignore
+        except ValueError as exc:
+            # Try SoftI2C fallback, then skip if failed
+            SoftI2C = getattr(machine, "SoftI2C", None)
+            if SoftI2C is not None:
+                try:
+                    print(
+                        "Hardware I2C init failed (bus=%s scl=%s sda=%s): %s -- attempting SoftI2C"
+                        % (bus_id, scl_pin, sda_pin, exc)
+                    )
+                    i2c = SoftI2C(scl=Pin(scl_pin), sda=Pin(sda_pin))  # type: ignore
+                except Exception as soft_exc:
+                    print(
+                        "PCA9685 setup failed: Invalid I2C pin configuration (scl=%s sda=%s). Update 'pca9685' pins in movement_config.json for your board."
+                        % (scl_pin, sda_pin)
+                    )
+                    self._pwm = None
+                    return
+            else:
+                print(
+                    "PCA9685 setup failed: Invalid I2C pin configuration (scl=%s sda=%s). Update 'pca9685' pins in movement_config.json for your board."
+                    % (scl_pin, sda_pin)
+                )
+                self._pwm = None
+                return
+        try:
+            pwm = PCA9685(i2c, address=bus_cfg.get("address", 0x40))
+            pwm.set_pwm_freq(bus_cfg.get("frequency", 50))
+            pwm.all_off()
+            self._pwm = pwm
+        except Exception as e:
+            print("PCA9685 device not found at address 0x%02X: %s" % (bus_cfg.get("address", 0x40), str(e)))
+            print("Continuing without PCA9685 - servo control will be disabled")
+            self._pwm = None
 
     def connect_mqtt(self):
         if MQTTClient is None:
@@ -373,8 +662,22 @@ class MovementController:
         client.connect()
         client.subscribe(self.config["topics"]["frame"], qos=1)
         self._client = client
-        self._publish_state("ready", {"event": "firmware_online"})
-        self._publish_health(True, "ready")
+        try:
+            print('MQTT connected to', mqtt_cfg.get('host'))
+        except Exception:
+            pass
+        try:
+            print('Subscribed to', self.config['topics']['frame'])
+        except Exception:
+            pass
+        try:
+            self._publish_state("ready", {"event": "firmware_online"})
+        except Exception:
+            pass
+        try:
+            self._publish_health(True, "ready")
+        except Exception:
+            pass
 
     def loop(self):
         if self._client is None:
@@ -382,11 +685,83 @@ class MovementController:
         timeout_ms = self.config.get("frame_timeout_ms", 2500)
         while True:
             self._service_http()
-            if self._led is not None:
+            # LED handling: update when any LED backend is present (PWM, digital, RGB pwms, or NeoPixel).
+            if (
+                self._led_pwm is not None
+                or self._led is not None
+                or getattr(self, "_np", None) is not None
+                or self._led_rgb_pwms
+                or self._led_rgb_pins
+            ):
                 now = ticks_ms()
-                if ticks_diff(now, self._led_toggle_at) >= 500:
-                    self._led.value(0 if self._led.value() else 1)
-                    self._led_toggle_at = now
+                # update at ~50ms intervals for smooth PWM fading
+                if ticks_diff(now, self._last_led_update) >= 50:
+                    self._last_led_update = now
+                    connected = False
+                    try:
+                        connected = self._station is not None and getattr(self._station, "isconnected", lambda: False)()
+                    except Exception:
+                        connected = False
+
+                    # priority: publish blink -> mqtt receive blink -> connected -> disconnected
+                    publish_active = ticks_diff(self._mqtt_publish_blink_until, now) > 0
+                    mqtt_active = ticks_diff(self._mqtt_blink_until, now) > 0
+                    # Treat NeoPixel the same as RGB-capable hardware
+                    if self._led_rgb_pwms or self._led_rgb_pins or getattr(self, "_np", None) is not None:
+                        # RGB-capable: show yellow on MQTT activity, green when connected, red breathe when disconnected
+                        if publish_active:
+                            # quick blue for outgoing publish
+                            self._set_led_color(0.0, 0.0, 1.0)
+                        elif mqtt_active:
+                            # quick yellow (r+g)
+                            self._set_led_color(1.0, 1.0, 0.0)
+                        elif connected:
+                            # steady green
+                            self._set_led_color(0.0, 1.0, 0.0)
+                        else:
+                            # red breathe
+                            period = 2000
+                            t = (now % period) / float(period)
+                            if math is not None:
+                                level = 0.5 * (1 - math.cos(2 * math.pi * t))
+                            else:
+                                level = 1 - abs(2 * t - 1)
+                            self._set_led_color(level, 0.0, 0.0)
+                    elif self._led_pwm is not None or self._led is not None:
+                        # single-channel LED: represent status via brightness/color mapping
+                        if publish_active:
+                            # blue flash
+                            self._set_led_power(1.0)
+                        elif mqtt_active:
+                            # yellow-ish as a bright blink (map to high brightness)
+                            self._set_led_power(1.0)
+                        elif connected:
+                            # green steady -> lower brightness
+                            self._set_led_power(0.4)
+                        else:
+                            # breathe red via brightness
+                            period = 2000
+                            t = (now % period) / float(period)
+                            if math is not None:
+                                level = 0.5 * (1 - math.cos(2 * math.pi * t))
+                            else:
+                                level = 1 - abs(2 * t - 1)
+                            self._set_led_power(level)
+                    else:
+                        # digital pin fallback: slow toggle when disconnected, off when connected
+                        if not connected:
+                            # toggle slowly (1s interval)
+                            if ticks_diff(now, self._led_toggle_at) >= 1000:
+                                try:
+                                    self._led.value(0 if self._led.value() else 1)
+                                except Exception:
+                                    pass
+                                self._led_toggle_at = now
+                        else:
+                            try:
+                                self._led.value(0)
+                            except Exception:
+                                pass
             try:
                 self._client.wait_msg()
             except Exception as exc:  # pragma: no cover
@@ -420,6 +795,12 @@ class MovementController:
         try:
             frame = json.loads(payload.decode("utf-8"))
             self._apply_frame(frame)
+            print('Received frame:', frame.get('id'), 'seq:', frame.get('seq'))
+            # indicate MQTT activity with a short yellow blink (200ms)
+            try:
+                self._mqtt_blink_until = ticks_ms() + 200
+            except Exception:
+                pass
         except Exception as exc:  # pragma: no cover
             self._publish_state("error", {"error": "frame_parse_failed", "detail": str(exc)})
             self._publish_health(False, "frame_parse_failed")
@@ -448,6 +829,7 @@ class MovementController:
                 "total": frame.get("total"),
             },
         )
+        print('Applied frame', frame.get('id'), 'channels:', len(channels))
         if frame.get("done"):
             self._publish_state("completed", {"id": frame.get("id")})
             self._publish_health(True, "completed")
@@ -485,23 +867,58 @@ class MovementController:
         sock.bind(addr)
         sock.listen(1)
         try:
-            sock.settimeout(1)
+            sock.settimeout(0)
         except AttributeError:  # pragma: no cover
-            pass
+            try:
+                sock.setblocking(False)  # type: ignore[attr-defined]
+            except Exception:
+                pass
 
         deadline = None
         if timeout_s > 0:
             deadline = ticks_ms() + timeout_s * 1000
 
-        updated = False
+        print('Starting setup portal; scanning nearby Wi-Fi networks...')
+        # prepare scanned SSIDs list (use the station interface to scan)
+        scanned_ssids = []
+        try:
+            try:
+                station.active(True)
+                scanned = station.scan() if hasattr(station, "scan") else []
+            except Exception:
+                scanned = []
+            seen = set()
+            for item in scanned:
+                try:
+                    ssid = item[0].decode("utf-8") if isinstance(item[0], (bytes, bytearray)) else str(item[0])
+                except Exception:
+                    ssid = str(item[0])
+                ssid = ssid.strip()
+                if ssid and ssid not in seen:
+                    seen.add(ssid)
+                    scanned_ssids.append(ssid)
+            print('Scanned SSIDs:', scanned_ssids)
+        finally:
+            # leave station inactive while portal is active; we'll reactivate on exit
+            try:
+                station.active(False)
+            except Exception:
+                pass
 
+        updated = False
         try:
             while True:
                 if deadline is not None and ticks_diff(ticks_ms(), deadline) >= 0:
                     break
                 try:
+                    # update breathing LED while waiting for portal connections
+                    try:
+                        self._update_breathe_led()
+                    except Exception:
+                        pass
                     client, _ = sock.accept()
                 except OSError:
+                    sleep_ms(50)
                     continue
 
                 status, response, result = ("200 OK", "", None)
@@ -515,6 +932,7 @@ class MovementController:
                             body,
                             include_controls=False,
                             trigger_reset=False,
+                            scanned_ssids=scanned_ssids,
                         )
                 finally:
                     try:
@@ -541,7 +959,7 @@ class MovementController:
             sleep_ms(500)
         return updated
 
-    def _render_form_page(self, error=None, message=None, include_controls=False):
+    def _render_form_page(self, error=None, message=None, include_controls=False, scanned_ssids=None):
         wifi_cfg = self.config.get("wifi", {})
         ssid_value = self._escape_html(wifi_cfg.get("ssid", ""))
         parts = [
@@ -570,15 +988,38 @@ class MovementController:
         if message:
             parts.append("<p style='color:#4caf50;'>%s</p>" % self._escape_html(message))
 
-        parts.extend(
-            [
-                "<form method='POST'>",
-                f"<label>Wi-Fi SSID<input name='ssid' value='{ssid_value}' maxlength='64' required></label>",
-                "<label>Password<input name='password' type='password' maxlength='64'></label>",
-                "<button type='submit'>Save &amp; Connect</button>",
-                "</form>",
-            ]
-        )
+        # Render SSID selection: a dropdown of scanned SSIDs (if provided) with an 'Other' option.
+        ssid_input_html = []
+        ssid_input_html.append("<form method='POST'>")
+        if scanned_ssids:
+            ssid_input_html.append("<label>Wi-Fi Network<select name='selected_ssid' id='selected_ssid' required>")
+            ssid_input_html.append("<option value=''>-- Select a network --</option>")
+            for s in scanned_ssids:
+                s_esc = self._escape_html(s)
+                selected_attr = " selected" if s == wifi_cfg.get("ssid", "") else ""
+                ssid_input_html.append(f"<option value='{s_esc}'{selected_attr}>{s_esc}</option>")
+            ssid_input_html.append("<option value='__other__'>Other...</option>")
+            ssid_input_html.append("</select></label>")
+            # manual entry field, hidden by default unless current SSID isn't in scanned list
+            is_other = ssid_value and ssid_value not in scanned_ssids
+            style = "display:block;" if is_other else "display:none;"
+            ssid_input_html.append(
+                f"<label id='ssid_other_label' style='{style}'>Manual SSID<input name='ssid_other' id='ssid_other' value='{ssid_value}' maxlength='64'></label>"
+            )
+        else:
+            ssid_input_html.append(f"<label>Wi-Fi SSID<input name='ssid' value='{ssid_value}' maxlength='64' required></label>")
+
+        ssid_input_html.append("<label>Password<input name='password' type='password' maxlength='64'></label>")
+        ssid_input_html.append("<button type='submit'>Save &amp; Connect</button>")
+        ssid_input_html.append("</form>")
+        parts.extend(ssid_input_html)
+        # Add a small script to toggle manual SSID field when user selects Other
+        if scanned_ssids:
+            parts.append(
+                "<script>\n"
+                "(function(){var sel=document.getElementById('selected_ssid');var other=document.getElementById('ssid_other_label');var otherInput=document.getElementById('ssid_other');if(!sel) return;sel.addEventListener('change',function(){if(sel.value=='__other__'){other.style.display='block';otherInput.required=true;}else{other.style.display='none';otherInput.required=false;}});})();\n"
+                "</script>"
+            )
 
         if include_controls:
             portal_cfg = self.config.get("setup_portal", {})
@@ -702,25 +1143,40 @@ class MovementController:
         body,
         include_controls,
         trigger_reset,
+        scanned_ssids=None,
     ):
         if path not in ("/", ""):
             return "404 Not Found", "<h1>Not Found</h1>", None
 
         if method == "POST":
             form = self._parse_form(body or "")
-            if "ssid" in form:
+            # Support a dropdown select 'selected_ssid' or manual 'ssid_other'
+            ssid_val = None
+            if "selected_ssid" in form:
+                sel = form.get("selected_ssid", "").strip()
+                if sel and sel != "__other__":
+                    ssid_val = sel
+                else:
+                    # user chose Other; fall back to manual field
+                    ssid_val = form.get("ssid_other", "").strip()
+            elif "ssid" in form:
+                # backward compatibility with older clients
                 ssid_val = form.get("ssid", "").strip()
+
+            if ssid_val is not None:
                 password_val = form.get("password", "")
                 if not ssid_val:
                     html = self._render_form_page(
                         error="SSID is required",
                         include_controls=include_controls,
+                        scanned_ssids=scanned_ssids,
                     )
                     return "200 OK", html, None
                 self.config.setdefault("wifi", {})
                 self.config["wifi"]["ssid"] = ssid_val
                 self.config["wifi"]["password"] = password_val
                 save_config(self._config_path, self.config)
+                print('Saved Wi-Fi credentials for SSID:', ssid_val)
                 if trigger_reset:
                     self._pending_reset_at = ticks_ms() + 1500
                 return "200 OK", self._render_success_page(ssid_val), "wifi_updated"
@@ -732,11 +1188,13 @@ class MovementController:
                         html = self._render_form_page(
                             message=f"Centered {count} channels.",
                             include_controls=True,
+                            scanned_ssids=scanned_ssids,
                         )
                     else:
                         html = self._render_form_page(
                             error="Unable to center servos — hardware not ready.",
                             include_controls=True,
+                            scanned_ssids=scanned_ssids,
                         )
                     return "200 OK", html, None
                 if "center" in form:
@@ -750,15 +1208,17 @@ class MovementController:
                         html = self._render_form_page(
                             message=f"Centered channel {channel}.",
                             include_controls=True,
+                            scanned_ssids=scanned_ssids,
                         )
                     else:
                         html = self._render_form_page(
                             error="Invalid channel or hardware not ready.",
                             include_controls=True,
+                            scanned_ssids=scanned_ssids,
                         )
                     return "200 OK", html, None
 
-        html = self._render_form_page(include_controls=include_controls)
+        html = self._render_form_page(include_controls=include_controls, scanned_ssids=scanned_ssids)
         return "200 OK", html, None
 
     def _center_servo(self, channel):
@@ -801,8 +1261,8 @@ class MovementController:
             "<!DOCTYPE html><html><head><meta charset='utf-8'>"
             "<meta name='viewport' content='width=device-width,initial-scale=1'>"
             "<title>Credentials Saved</title>"
-            "<style>body{font-family:Arial,Helvetica,sans-serif;padding:24px;"
-            "background:#101820;color:#f2f2f2;}a{color:#ff6f3c;}</style></head><body>"
+            "<style>body{{font-family:Arial,Helvetica,sans-serif;padding:24px;"
+            "background:#101820;color:#f2f2f2;}}a{{color:#ff6f3c;}}</style></head><body>"
             "<h1>Credentials saved</h1>"
             f"<p>The ESP32 will now reboot and try to join <strong>{ssid_html}</strong>.</p>"
             "<p>You can disconnect from the setup Wi-Fi network.</p>"
@@ -863,7 +1323,16 @@ class MovementController:
             body.update(payload)
         state_topic = self.config["topics"]["state"]
         retain = event == "ready"
-        self._client.publish(state_topic, json.dumps(body), qos=1, retain=retain)
+        try:
+            self._client.publish(state_topic, json.dumps(body), qos=1, retain=retain)
+            print('Published state ->', state_topic, 'event=', event)
+            # flash blue briefly to indicate an outgoing publish (300ms)
+            try:
+                self._mqtt_publish_blink_until = ticks_ms() + 300
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     def _publish_health(self, ok, event):
         if self._client is None:
@@ -876,15 +1345,32 @@ class MovementController:
             "event": event,
             "timestamp": time.time(),
         }
-        self._client.publish(topic, json.dumps(body), qos=1, retain=True)
+        try:
+            self._client.publish(topic, json.dumps(body), qos=1, retain=True)
+            print('Published health ->', topic, 'ok=', ok, 'event=', event)
+            try:
+                self._mqtt_publish_blink_until = ticks_ms() + 300
+            except Exception:
+                pass
+        except Exception:
+            pass
 
 
-def main():  # pragma: no cover
+def main():
     config = load_config(DEFAULT_CONFIG["config_path"])
+    print("Config loaded:", config)
     controller = MovementController(config)
+    print("Connecting WiFi...")
     controller.connect_wifi()
+    print("WiFi connected!")
     controller.setup_pwm()
+    if controller._pwm is not None:
+        print("PWM setup complete")
+    else:
+        print("PWM setup skipped - PCA9685 not available")
     controller.connect_mqtt()
+    print("MQTT connected!")
+    print("Starting loop...")
     controller.loop()
 
 
