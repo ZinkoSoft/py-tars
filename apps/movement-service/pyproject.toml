@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tars-movement-service"
+version = "0.1.0"
+description = "MQTT movement controller that bridges high-level directives to the ESP32 servo firmware."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "asyncio-mqtt>=0.16.2",
+  "orjson>=3.11.0",
+  "paho-mqtt<2.0",
+  "pydantic>=2.7",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2",
+  "pytest-asyncio>=0.23",
+  "pytest-mock>=3.12",
+]
+
+[project.scripts]
+tars-movement-service = "movement_service.__main__:main"
+
+[tool.setuptools]
+package-dir = {"" = "."}
+packages = ["movement_service"]
+include-package-data = false
