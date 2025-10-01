@@ -10,3 +10,6 @@ dependencies = [
   "tenacity>=8.4",
   "PyYAML>=6.0"
 ]
+
+[project.scripts]
+mcp-filesystem = "mcp_bridge.servers.filesystem:main"

@@ -28,16 +28,26 @@ Configure MCP servers in `ops/mcp/mcp.server.yml`:
 servers:
   - name: filesystem
     transport: stdio
-    command: "mcp-filesystem"
-    args: ["--root", "/home/user/work"]
+    command: "npx"
+    args: ["--yes", "@modelcontextprotocol/server-filesystem", "/workspace"]
     tools_allowlist: ["read_file", "write_file", "list_dir"]
+```
 
+> The bridge will automatically download the official filesystem MCP server from npm via `npx` the first time it runs. No manual install steps are required as long as Node.js is available in the container or host.
+
+> The reference Docker Compose config mounts the repository root at `/workspace`, which is why the examples point the filesystem server at that path. Adapt the mount and argument to match your deployment.
+
+Add additional servers by declaring them in the same YAML file. For example:
+
+```yaml
   - name: weather
     transport: stdio
-    command: "mcp-weather-api"
+    command: "npx"
+    args: ["--yes", "@example/mcp-weather-api"]
     env:
       API_KEY: "your-weather-api-key"
     tools_allowlist: ["get_weather", "get_forecast"]
+```
 
 timeouts:
   connect_ms: 5000
@@ -72,16 +82,11 @@ LOG_LEVEL=INFO
 
 ## 🛠️ Adding MCP Servers
 
-### 1. Install MCP Server
+### 1. Ensure Runtime Support
 
-```bash
-# Example: Install filesystem MCP server
-npm install -g @modelcontextprotocol/server-filesystem
+Make sure the environment can run the server command you declare. The bundled examples use `npx`, so having Node.js 18+ available is sufficient—`npx --yes` will download the server on demand. The provided Docker image already includes Node.js and npm so the default configuration works out of the box. Pass filesystem roots as positional arguments (e.g. `npx ... /workspace`) since the official server expects directories, not a `--root` flag.
 
-# Or build from source
-git clone https://github.com/modelcontextprotocol/server-filesystem
-cd server-filesystem && npm install && npm run build
-```
+If you prefer to pre-install a server globally (npm, pipx, uv, etc.), that also works; just point the `command` field at the executable.
 
 ### 2. Configure Server
 
@@ -234,8 +239,8 @@ docker compose restart mcp-bridge
 servers:
   - name: filesystem
     transport: stdio
-    command: "mcp-filesystem"
-    args: ["--root", "/workspace"]
+    command: "npx"
+    args: ["--yes", "@modelcontextprotocol/server-filesystem", "--root", "/workspace"]
     tools_allowlist: ["read_file", "write_file", "list_dir"]
 ```
 

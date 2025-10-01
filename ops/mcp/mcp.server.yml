@@ -1,8 +1,8 @@
 servers:
   - name: filesystem
     transport: stdio
-    command: "mcp-filesystem"
-    args: ["--root","/home/james/work"]
+    command: "npx"
+    args: ["--yes", "@modelcontextprotocol/server-filesystem", "/workspace"]
     tools_allowlist: ["read_file","write_file","list_dir"]
 timeouts:
   connect_ms: 5000

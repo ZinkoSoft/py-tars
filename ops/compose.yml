@@ -284,6 +284,7 @@ services:
       MCP_SERVERS_YAML: /config/mcp.server.yml
     volumes:
       - ../ops/mcp/mcp.server.yml:/config/mcp.server.yml:ro
+      - ..:/workspace
     depends_on:
       mqtt:
         condition: service_started
