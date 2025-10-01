@@ -16,6 +16,16 @@
     .toolbar { display:flex; gap:8px; }
     .btn { background:transparent; color:var(--muted); border:1px solid var(--border); padding:6px 10px; border-radius:8px; cursor:pointer; font-weight:600; }
     .btn:hover { color:#fff; border-color:#2a3469; background:#0b132e; }
+    .btn.health { position:relative; }
+    .health-indicator { 
+      display: inline-block;
+      width: 8px; 
+      height: 8px; 
+      border-radius: 50%; 
+      background: #f44336; 
+      margin-left: 6px;
+      vertical-align: middle;
+    }
     #container { display:flex; gap:16px; padding:16px; height:100%; }
     #left { flex:1; display:flex; flex-direction:column; gap:12px; }
     .panel { background:var(--panel); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
@@ -81,6 +91,17 @@
     const mqttLog = [];
     const MAX_MQTT_LOG_ENTRIES = 200;
     const mqttLogEl = () => document.getElementById('mqtt-log');
+    let esp32Health = { ok: false, event: 'unknown', timestamp: null };
+    const healthComponents = {
+      'esp32': { name: 'ESP32 Movement', ok: false, lastPing: null, error: null },
+      'stt': { name: 'Speech-to-Text', ok: false, lastPing: null, error: null },
+      'llm': { name: 'Language Model', ok: false, lastPing: null, error: null },
+      'tts': { name: 'Text-to-Speech', ok: false, lastPing: null, error: null },
+      'memory': { name: 'Memory Service', ok: false, lastPing: null, error: null },
+      'camera': { name: 'Camera Service', ok: false, lastPing: null, error: null },
+      'router': { name: 'Message Router', ok: false, lastPing: null, error: null }
+    };
+    const HEALTH_TIMEOUT_MS = 30000; // 30 seconds
 
     function joinParts(prev, next) {
       const a = (prev || '').trimEnd();
@@ -263,7 +284,84 @@
       if (states.listening) s.push('Listening…');
       if (states.processing) s.push('Processing audio…');
       if (states.llmWriting) s.push('TARS is writing…');
-      document.getElementById('status-line').innerHTML = s.length ? `<span class="dot"></span> ${s.join(' • ')}` : 'Idle';
+      // Add ESP32 status
+      const esp32Status = esp32Health.ok ? 'ESP32 OK' : 'ESP32 Offline';
+      if (esp32Health.event && esp32Health.event !== 'ready') {
+        s.push(`${esp32Status} (${esp32Health.event})`);
+      } else {
+        s.push(esp32Status);
+      }
+      const statusText = s.length ? `${s.join(' • ')}` : 'Idle';
+      const statusEl = document.getElementById('status-line');
+      statusEl.innerHTML = `<span class="dot"></span> ${statusText}`;
+      // Color the dot based on ESP32 health
+      const dot = statusEl.querySelector('.dot');
+      if (dot) {
+        dot.style.background = esp32Health.ok ? '#4caf50' : '#f44336'; // green or red
+      }
+    }
+
+    function updateEsp32Status() {
+      setStatus(); // Refresh the status line
+      updateHealthStatus('esp32', esp32Health.ok, esp32Health.event);
+      updateHealthButton();
+    }
+
+    function updateHealthStatus(component, ok, event = null, error = null) {
+      const comp = healthComponents[component];
+      if (!comp) return;
+      
+      comp.ok = ok;
+      comp.lastPing = Date.now();
+      comp.error = error || (ok ? null : event);
+      
+      updateHealthButton();
+      
+      // Update the health panel if it's currently open
+      if (currentDrawer === 'health') {
+        renderHealthPanel();
+      }
+    }
+
+    function checkHealthTimeouts() {
+      const now = Date.now();
+      let hasOffline = false;
+      
+      Object.keys(healthComponents).forEach(key => {
+        const comp = healthComponents[key];
+        if (comp.lastPing && (now - comp.lastPing) > HEALTH_TIMEOUT_MS) {
+          if (comp.ok) {
+            comp.ok = false;
+            comp.error = 'timeout';
+            hasOffline = true;
+          }
+        }
+        if (!comp.ok) hasOffline = true;
+      });
+      
+      if (hasOffline) {
+        updateHealthButton();
+        // Update the health panel if it's currently open
+        if (currentDrawer === 'health') {
+          renderHealthPanel();
+        }
+      }
+    }
+
+    function updateHealthButton() {
+      const indicator = document.querySelector('.health-indicator');
+      if (!indicator) return;
+      
+      const allOk = Object.values(healthComponents).every(comp => comp.ok);
+      indicator.style.background = allOk ? '#4caf50' : '#f44336';
+      
+      // Update title with summary
+      const okCount = Object.values(healthComponents).filter(comp => comp.ok).length;
+      const totalCount = Object.keys(healthComponents).length;
+      const btn = document.querySelector('.btn.health');
+      if (btn) {
+        btn.title = `System Health: ${okCount}/${totalCount} components online`;
+      }
     }
 
     function connect() {
@@ -293,6 +391,7 @@
           if (topic.endsWith('stt/partial')) {
             states.listening = true; setStatus();
             updateMicText(p.text || '');
+            updateHealthStatus('stt', true, 'active');
             return;
           }
           if (topic.endsWith('stt/final')) {
@@ -301,6 +400,7 @@
             setStatus();
             updateMicText('');
             if (p.text) addBubble('user', p.text, 'You');
+            updateHealthStatus('stt', true, 'processed');
             return;
           }
           if (topic.endsWith('llm/stream')) {
@@ -319,6 +419,7 @@
             states.llmWriting = !data.done;
             states.processing = false;
             setStatus();
+            updateHealthStatus('llm', true, 'streaming');
             return;
           }
           if (topic.endsWith('llm/response')) {
@@ -331,6 +432,7 @@
             states.llmWriting = false;
             states.processing = false;
             setStatus();
+            updateHealthStatus('llm', true, 'completed');
             return;
           }
           if (topic.endsWith('tts/say')) {
@@ -349,12 +451,14 @@
             states.llmWriting = false;
             states.processing = false;
             setStatus();
+            updateHealthStatus('tts', true, 'speaking');
             return;
           }
           if (topic.endsWith('tts/status')) {
             // Only update statuses; avoid adding duplicate bubbles here since we render from tts/say
             if ((p.event||'') === 'speaking_start') {
               states.processing = false; states.llmWriting = false; setStatus();
+              updateHealthStatus('tts', true, 'speaking');
             }
             return;
           }
@@ -367,6 +471,37 @@
                 results: Array.isArray(p.results) ? p.results : []
               };
               renderMemory(lastMemory);
+              updateHealthStatus('memory', true, 'query_completed');
+            } catch (e) { /* ignore */ }
+            return;
+          }
+          if (topic.startsWith('system/health/')) {
+            // Health status: { ok, event, timestamp }
+            try {
+              // Extract data from envelope
+              const healthData = p.data || p;
+              const component = topic.split('/').pop(); // Extract component name from topic
+              const ok = typeof healthData.ok === 'boolean' ? healthData.ok : false;
+              const event = healthData.event || 'unknown';
+              
+              if (component === 'movement-esp32') {
+                esp32Health = { ok, event, timestamp: healthData.timestamp || null };
+                updateEsp32Status();
+              } else {
+                // Map topic component to our health components
+                const componentMap = {
+                  'stt': 'stt',
+                  'llm': 'llm', 
+                  'tts': 'tts',
+                  'memory': 'memory',
+                  'camera': 'camera',
+                  'router': 'router'
+                };
+                const healthKey = componentMap[component];
+                if (healthKey) {
+                  updateHealthStatus(healthKey, ok, event);
+                }
+              }
             } catch (e) { /* ignore */ }
             return;
           }
@@ -495,8 +630,75 @@
       }
     }
 
-    // Drawer controls
-    let currentDrawer = null; // 'mic' | 'memory' | 'stream' | 'camera' | null
+    function renderHealthPanel() {
+      const container = document.getElementById('health-components');
+      if (!container) return;
+      
+      const overallEl = document.getElementById('overall-health');
+      const okCount = Object.values(healthComponents).filter(comp => comp.ok).length;
+      const totalCount = Object.keys(healthComponents).length;
+      
+      if (overallEl) {
+        overallEl.textContent = `${okCount}/${totalCount} components online`;
+        overallEl.style.color = okCount === totalCount ? '#4caf50' : okCount === 0 ? '#f44336' : '#ff9800';
+      }
+      
+      container.innerHTML = '';
+      
+      Object.entries(healthComponents).forEach(([key, comp]) => {
+        const item = document.createElement('div');
+        item.className = 'health-item';
+        item.style.cssText = `
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 8px 12px;
+          margin: 4px 0;
+          border-radius: 6px;
+          background: ${comp.ok ? 'rgba(76, 175, 80, 0.1)' : 'rgba(244, 67, 54, 0.1)'};
+          border: 1px solid ${comp.ok ? '#4caf50' : '#f44336'};
+        `;
+        
+        const left = document.createElement('div');
+        left.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+        
+        const indicator = document.createElement('div');
+        indicator.style.cssText = `
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+          background: ${comp.ok ? '#4caf50' : '#f44336'};
+          flex-shrink: 0;
+        `;
+        
+        const name = document.createElement('div');
+        name.style.cssText = 'font-weight: 600; color: var(--text);';
+        name.textContent = comp.name;
+        
+        left.appendChild(indicator);
+        left.appendChild(name);
+        
+        const right = document.createElement('div');
+        right.style.cssText = 'font-size: 12px; color: var(--muted); text-align: right;';
+        
+        if (comp.lastPing) {
+          const timeAgo = Math.floor((Date.now() - comp.lastPing) / 1000);
+          const timeStr = timeAgo < 60 ? `${timeAgo}s ago` : `${Math.floor(timeAgo/60)}m ago`;
+          right.textContent = timeStr;
+          
+          // Add hover tooltip with more details
+          item.title = `Last ping: ${formatTime(comp.lastPing)}\nStatus: ${comp.ok ? 'Online' : 'Offline'}${comp.error ? `\nError: ${comp.error}` : ''}`;
+        } else {
+          right.textContent = 'Never';
+          item.title = 'No ping received yet';
+        }
+        
+        item.appendChild(left);
+        item.appendChild(right);
+        container.appendChild(item);
+      });
+    }
+    let currentDrawer = null; // 'mic' | 'memory' | 'stream' | 'camera' | 'health' | null
     function openDrawer(which) {
       if (currentDrawer === which) { return closeDrawer(); }
       closeDrawer(false);
@@ -510,6 +712,8 @@
         renderMqttLog();
       } else if (which === 'camera') {
         startCameraStream();
+      } else if (which === 'health') {
+        renderHealthPanel();
       }
     }
     function closeDrawer(toggleBackdrop=true) {
@@ -572,13 +776,23 @@
 
     // Remove camera frame handling from WebSocket since we use MJPEG now
 
-  window.addEventListener('load', ()=>{ connect(); drawSpectrum(); setStatus(); refreshMemory(); updateMqttSummary(); });
+  window.addEventListener('load', ()=>{ 
+    connect(); 
+    drawSpectrum(); 
+    setStatus(); 
+    refreshMemory(); 
+    updateMqttSummary();
+    updateHealthButton();
+    // Check for health timeouts every 5 seconds
+    setInterval(checkHealthTimeouts, 5000);
+  });
   </script>
   </head>
 <body>
   <header>
     <h1>TARS Chat</h1>
     <div class="toolbar">
+      <button class="btn health" onclick="openDrawer('health')" title="System Health">Health <span class="health-indicator"></span></button>
       <button class="btn" onclick="openDrawer('mic')">Microphone</button>
       <button class="btn" onclick="openDrawer('memory')">Memory</button>
       <button class="btn" onclick="openDrawer('stream')">MQTT Stream</button>
@@ -659,6 +873,22 @@
     <div class="content">
       <div id="camera-status" style="color:var(--muted); margin-bottom:8px;">Connecting...</div>
       <img id="camera-stream" style="width:100%; max-width:640px; border:1px solid var(--border); border-radius:6px;" alt="Camera feed" />
+    </div>
+  </aside>
+
+  <!-- Health Drawer -->
+  <aside id="drawer-health" class="drawer" aria-hidden="true">
+    <header>
+      <h2>System Health</h2>
+      <button class="close" onclick="closeDrawer()">Close</button>
+    </header>
+    <div class="content">
+      <div id="health-status" style="margin-bottom:16px;">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+          <span id="overall-health" style="font-weight:600;">Checking...</span>
+        </div>
+        <div id="health-components"></div>
+      </div>
     </div>
   </aside>
 </body>

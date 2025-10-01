@@ -121,7 +121,7 @@ async def run_router() -> None:
                     handler_timeout=settings.stream_settings.handler_timeout_sec,
                 )
                 ctx = Ctx(pub=publisher, policy=policy, logger=logger, metrics=metrics)
-                await ctx.publish("system.health.router", HealthPing(ok=True, event="ready"), qos=1)
+                await ctx.publish("system/health/router", HealthPing(ok=True, event="ready"), qos=1)
                 backoff = 1.0
                 try:
                     await dispatcher.run()

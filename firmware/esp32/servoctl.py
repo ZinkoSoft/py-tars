@@ -765,12 +765,23 @@ class MovementController:
             try:
                 self._client.wait_msg()
             except Exception as exc:  # pragma: no cover
+                print('MQTT connection lost:', str(exc))
                 self._publish_state("error", {"error": "mqtt_wait_failed", "detail": str(exc)})
                 self._publish_health(False, "mqtt_wait_failed")
-                sleep_ms(500)
-                self._client.reconnect()
-                self._client.subscribe(self.config["topics"]["frame"], qos=1)
-                self._publish_health(True, "reconnected")
+                
+                # Robust reconnection with 10-second retry interval
+                while True:
+                    try:
+                        print('Attempting MQTT reconnection...')
+                        self._client.reconnect()
+                        self._client.subscribe(self.config["topics"]["frame"], qos=1)
+                        print('MQTT reconnected successfully')
+                        self._publish_health(True, "reconnected")
+                        break  # Exit retry loop on successful reconnection
+                    except Exception as reconn_exc:
+                        print('MQTT reconnection failed:', str(reconn_exc))
+                        print('Retrying in 10 seconds...')
+                        sleep_ms(10000)  # Wait 10 seconds before retrying
             now_ms = ticks_ms()
             if ticks_diff(now_ms, self._last_frame_at) > timeout_ms:
                 self._publish_state("error", {"error": "frame_timeout"})
@@ -1368,8 +1379,19 @@ def main():
         print("PWM setup complete")
     else:
         print("PWM setup skipped - PCA9685 not available")
-    controller.connect_mqtt()
-    print("MQTT connected!")
+    
+    # Robust MQTT connection with retries
+    while True:
+        try:
+            print("Connecting to MQTT...")
+            controller.connect_mqtt()
+            print("MQTT connected!")
+            break  # Exit retry loop on successful connection
+        except Exception as e:
+            print('MQTT connection failed:', str(e))
+            print('Retrying MQTT connection in 10 seconds...')
+            sleep_ms(10000)  # Wait 10 seconds before retrying
+    
     print("Starting loop...")
     controller.loop()
 

@@ -14,7 +14,7 @@
   "pca9685": {
     "address": 64,
     "frequency": 50,
-    "scl": 22,
+    "scl": 20,
     "sda": 21
   },
   "topics": {
