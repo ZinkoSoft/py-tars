@@ -99,7 +99,8 @@
       'tts': { name: 'Text-to-Speech', ok: false, lastPing: null, error: null },
       'memory': { name: 'Memory Service', ok: false, lastPing: null, error: null },
       'camera': { name: 'Camera Service', ok: false, lastPing: null, error: null },
-      'router': { name: 'Message Router', ok: false, lastPing: null, error: null }
+      'router': { name: 'Message Router', ok: false, lastPing: null, error: null },
+      'mcp-bridge': { name: 'MCP Bridge', ok: false, lastPing: null, error: null }
     };
     const HEALTH_TIMEOUT_MS = 30000; // 30 seconds
 
@@ -478,11 +479,14 @@
           if (topic.startsWith('system/health/')) {
             // Health status: { ok, event, timestamp }
             try {
-              // Extract data from envelope
+              // Extract data from envelope (handles both wrapped and unwrapped formats)
               const healthData = p.data || p;
               const component = topic.split('/').pop(); // Extract component name from topic
               const ok = typeof healthData.ok === 'boolean' ? healthData.ok : false;
-              const event = healthData.event || 'unknown';
+              const event = healthData.event || healthData.err || 'unknown';
+              const error = healthData.err || null;
+              
+              console.log(`[Health] ${component}: ok=${ok}, event=${event}`, healthData);
               
               if (component === 'movement-esp32') {
                 esp32Health = { ok, event, timestamp: healthData.timestamp || null };
@@ -495,14 +499,20 @@
                   'tts': 'tts',
                   'memory': 'memory',
                   'camera': 'camera',
-                  'router': 'router'
+                  'router': 'router',
+                  'mcp-bridge': 'mcp-bridge',
+                  'movement-service': 'esp32'  // movement-service also maps to esp32
                 };
                 const healthKey = componentMap[component];
                 if (healthKey) {
-                  updateHealthStatus(healthKey, ok, event);
+                  updateHealthStatus(healthKey, ok, event, error);
+                } else {
+                  console.warn(`[Health] Unknown component: ${component}`);
                 }
               }
-            } catch (e) { /* ignore */ }
+            } catch (e) { 
+              console.error('[Health] Error processing health message:', e, 'payload:', p);
+            }
             return;
           }
           // Camera frames now handled via MJPEG over HTTP, not MQTT

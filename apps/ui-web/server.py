@@ -112,6 +112,9 @@ async def mqtt_bridge_task():
                                 globals()['_last_memory_results'] = payload
                             except Exception:
                                 pass
+                        # Log health messages for debugging
+                        if topic_str.startswith("system/health/"):
+                            logger.info(f"Health message: {topic_str} -> {payload}")
                         logger.debug(f"Forwarding {topic_str}")
                         await manager.broadcast({"topic": topic_str, "payload": payload})
         except Exception as e:
