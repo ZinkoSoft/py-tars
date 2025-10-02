@@ -107,6 +107,11 @@ class TARSController:
         self._positions = {}  # Current servo positions
         self._last_frame_at = ticks_ms()
         
+        # Health monitoring
+        self._last_health_publish_at = ticks_ms()
+        self._health_publish_interval_ms = 300000  # 5 minutes
+        self._last_frame_timeout_logged = False
+        
         # Flags
         self._pending_reset_at = None
         self._running = True
@@ -192,16 +197,25 @@ class TARSController:
             self.sequences = MovementSequences(self.servo_controller, self.servo_config)
             print("✓ Movement sequences loaded (15 sequences)")
             
-            # Create command handler
+            # Create command handler (without mqtt_client initially - will be set after MQTT connects)
             self.movement_handler = MovementCommandHandler(
                 self.sequences,
                 self.servo_controller,
-                self.servo_config
+                self.servo_config,
+                mqtt_client=None,  # Will be set in _update_movement_handler_mqtt()
+                status_topic="movement/status"
             )
             print("✓ Movement command handler initialized")
             
         except Exception as e:
             print(f"✗ Movement setup failed: {e}")
+    
+    def _update_movement_handler_mqtt(self):
+        """Update movement handler with MQTT client after connection."""
+        if self.movement_handler and self._mqtt_wrapper:
+            # Pass the wrapper, not the underlying client
+            self.movement_handler.mqtt_client = self._mqtt_wrapper
+            print("✓ Movement handler connected to MQTT for status publishing")
     
     def _connect_wifi(self):
         """
@@ -281,7 +295,15 @@ class TARSController:
         # Connect to broker
         try:
             self._mqtt_wrapper.connect()
-            print("✓ MQTT connected and subscribed")
+            print("✓ MQTT connected and subscribed to movement/frame")
+            
+            # Subscribe to additional movement topics
+            self._mqtt_wrapper.subscribe("movement/test", qos=1)
+            self._mqtt_wrapper.subscribe("movement/stop", qos=1)
+            print("✓ Subscribed to movement/test and movement/stop")
+            
+            # Update movement handler with MQTT client for status publishing
+            self._update_movement_handler_mqtt()
         except Exception as e:
             print(f"✗ MQTT connection failed: {e}")
     
@@ -383,23 +405,13 @@ class TARSController:
             return
         
         try:
-            # Parse command
-            cmd = self.movement_handler.parse_command(payload)
+            # Parse and validate command (uses lib/validation.py for strong typing)
+            cmd = self.movement_handler.parse_and_validate_command(payload)
             if cmd is None:
-                print("Invalid command format")
+                print("Invalid command format or validation failed")
                 if self._mqtt_wrapper:
                     self._mqtt_wrapper.publish_state("command_error", {
-                        "error": "invalid_format"
-                    })
-                return
-            
-            # Validate command
-            if not self.movement_handler.validate_command(cmd["command"]):
-                print(f"Unknown command: {cmd['command']}")
-                if self._mqtt_wrapper:
-                    self._mqtt_wrapper.publish_state("command_error", {
-                        "command": cmd["command"],
-                        "error": "unknown_command"
+                        "error": "invalid_format_or_validation_failed"
                     })
                 return
             
@@ -474,20 +486,45 @@ class TARSController:
         """
         Check if frame timeout has occurred.
         
-        If no frames received within timeout period, publish health warning
-        and optionally disable servos.
+        If no frames received within timeout period, log warning once
+        and optionally disable servos. Only publishes health every 5 minutes.
         """
         frame_timeout_ms = self.config.get("frame_timeout_ms", 5000)
         elapsed = ticks_diff(ticks_ms(), self._last_frame_at)
         
         if elapsed > frame_timeout_ms:
-            print(f"⚠ Frame timeout ({elapsed}ms)")
-            
-            if self._mqtt_wrapper:
-                self._mqtt_wrapper.publish_health(False, "frame_timeout")
+            # Only log once when timeout first occurs
+            if not self._last_frame_timeout_logged:
+                print(f"⚠ Frame timeout ({elapsed}ms) - will not log again until frames resume")
+                self._last_frame_timeout_logged = True
             
             # Optional: disable servos on timeout
             # self._disable_all_servos()
+        else:
+            # Reset logging flag when frames resume
+            if self._last_frame_timeout_logged:
+                print("✓ Frame reception resumed")
+                self._last_frame_timeout_logged = False
+    
+    def _publish_periodic_health(self):
+        """
+        Publish health status periodically (every 5 minutes).
+        """
+        now = ticks_ms()
+        elapsed = ticks_diff(now, self._last_health_publish_at)
+        
+        if elapsed >= self._health_publish_interval_ms:
+            if self._mqtt_wrapper:
+                # Check if frames are timing out
+                frame_timeout_ms = self.config.get("frame_timeout_ms", 5000)
+                frames_ok = ticks_diff(now, self._last_frame_at) <= frame_timeout_ms
+                
+                if frames_ok:
+                    self._mqtt_wrapper.publish_health(True, "periodic_health_check")
+                else:
+                    self._mqtt_wrapper.publish_health(False, "frame_timeout")
+            
+            self._last_health_publish_at = now
     
     async def loop(self):
         """
@@ -509,14 +546,19 @@ class TARSController:
         
         while self._running:
             try:
-                # Wait for MQTT messages (blocking with timeout)
+                # Check for MQTT messages (non-blocking)
+                # Call check_msg() multiple times to process all pending messages
                 if self._mqtt_wrapper:
                     try:
-                        self._mqtt_wrapper.wait_msg()
+                        for _ in range(10):  # Process up to 10 messages per loop iteration
+                            self._mqtt_wrapper.check_msg()
                     except Exception as mqtt_exc:
                         print(f"MQTT error: {mqtt_exc}")
                         # Reconnect handled by wrapper
-                        self._mqtt_wrapper.reconnect()
+                        try:
+                            self._mqtt_wrapper.reconnect()
+                        except Exception as reconnect_exc:
+                            print(f"Reconnect failed: {reconnect_exc}")
                 
                 # Poll HTTP server (non-blocking)
                 if self._http_server:
@@ -525,11 +567,14 @@ class TARSController:
                     except Exception as http_exc:
                         print(f"HTTP error: {http_exc}")
                 
-                # Check frame timeout
+                # Check frame timeout (logs once, no health spam)
                 self._check_frame_timeout()
                 
-                # Small delay to prevent tight loop
-                sleep_ms(10)
+                # Publish periodic health (every 5 minutes)
+                self._publish_periodic_health()
+                
+                # Small async delay to prevent tight loop and allow other tasks to run
+                await asyncio.sleep_ms(50)  # 50ms delay for better responsiveness
                 
             except KeyboardInterrupt:
                 print("\nKeyboard interrupt - shutting down")
@@ -683,6 +728,7 @@ async def main():
 if __name__ == "__main__":
     # Run async main function
     try:
+        print("[Tars Controller] Starting async run")
         asyncio.run(main())
     except AttributeError:
         # MicroPython doesn't have asyncio.run(), use get_event_loop()

@@ -101,10 +101,46 @@ class ServoConfig:
         
         Args:
             legs_config: Dict with 'height', 'left', 'right' servo definitions
-            arms_config: Dict with 'right_*' and 'left_*' servo definitions
+            arms_config: Dict with 'right_*' and 'left_*' servo definitions (flat)
+                        OR nested structure with 'right': {'main': ..., 'forearm': ..., 'hand': ...}
         """
         self.legs = legs_config or self.DEFAULT_LEGS.copy()
-        self.arms = arms_config or self.DEFAULT_ARMS.copy()
+        
+        # Support both flat and nested arm configurations
+        if arms_config:
+            self.arms_flat = arms_config if any(k.startswith(('right_', 'left_')) for k in arms_config.keys()) else None
+            if not self.arms_flat:
+                # Config is nested, keep it as-is
+                self.arms = arms_config
+                # Also create flattened version for backward compat
+                self.arms_flat = {}
+                for side in ('right', 'left'):
+                    if side in arms_config:
+                        for part in ('main', 'forearm', 'hand'):
+                            if part in arms_config[side]:
+                                self.arms_flat[f"{side}_{part}"] = arms_config[side][part]
+            else:
+                # Config is flat, reconstruct nested version
+                self.arms_flat = arms_config
+                self.arms = {'right': {}, 'left': {}}
+                for key, val in arms_config.items():
+                    if key.startswith('right_'):
+                        part = key.replace('right_', '')
+                        self.arms['right'][part] = val
+                    elif key.startswith('left_'):
+                        part = key.replace('left_', '')
+                        self.arms['left'][part] = val
+        else:
+            # Use defaults - convert from flat to nested
+            self.arms_flat = self.DEFAULT_ARMS.copy()
+            self.arms = {'right': {}, 'left': {}}
+            for key, val in self.DEFAULT_ARMS.items():
+                if key.startswith('right_'):
+                    part = key.replace('right_', '')
+                    self.arms['right'][part] = val
+                elif key.startswith('left_'):
+                    part = key.replace('left_', '')
+                    self.arms['left'][part] = val
     
     @classmethod
     def from_dict(cls, config_dict):
@@ -165,7 +201,7 @@ class ServoConfig:
         if group == "legs":
             servo_cfg = self.legs.get(servo_name)
         elif group == "arms":
-            servo_cfg = self.arms.get(servo_name)
+            servo_cfg = self.arms_flat.get(servo_name)
         else:
             raise ValueError(f"Unknown servo group: {group}")
         
@@ -211,7 +247,7 @@ class ServoConfig:
         if group == "legs":
             servo_cfg = self.legs.get(servo_name)
         elif group == "arms":
-            servo_cfg = self.arms.get(servo_name)
+            servo_cfg = self.arms_flat.get(servo_name)
         else:
             raise ValueError(f"Unknown servo group: {group}")
         
@@ -234,7 +270,7 @@ class ServoConfig:
         if group == "legs":
             servo_cfg = self.legs.get(servo_name)
         elif group == "arms":
-            servo_cfg = self.arms.get(servo_name)
+            servo_cfg = self.arms_flat.get(servo_name)
         else:
             raise ValueError(f"Unknown servo group: {group}")
         
@@ -257,7 +293,7 @@ class ServoConfig:
             channels.append(("legs", name, cfg.get("channel", 0)))
         
         # Arms channels
-        for name, cfg in self.arms.items():
+        for name, cfg in self.arms_flat.items():
             channels.append(("arms", name, cfg.get("channel", 0)))
         
         return channels

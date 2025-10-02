@@ -402,7 +402,10 @@ if [[ -z "$WIFI_SSID" ]]; then
   "topics": {
     "frame": "movement/frame",
     "state": "movement/state",
-    "health": "system/health/movement-esp32"
+    "health": "system/health/movement-esp32",
+    "test": "movement/test",
+    "stop": "movement/stop",
+    "status": "movement/status"
   },
   "frame_timeout_ms": 2500,
   "status_led": 48,
@@ -417,6 +420,78 @@ if [[ -z "$WIFI_SSID" ]]; then
   "servo_centers": {
     "0": 302,
     "1": 310
+  },
+  "servos": {
+    "legs": {
+      "height": {
+        "channel": 0,
+        "up": 220,
+        "neutral": 300,
+        "down": 350,
+        "min": 200,
+        "max": 400
+      },
+      "left": {
+        "channel": 1,
+        "forward": 220,
+        "neutral": 300,
+        "back": 380,
+        "offset": 0,
+        "min": 200,
+        "max": 400
+      },
+      "right": {
+        "channel": 2,
+        "forward": 380,
+        "neutral": 300,
+        "back": 220,
+        "offset": 0,
+        "min": 200,
+        "max": 400
+      }
+    },
+    "arms": {
+      "right": {
+        "main": {
+          "channel": 3,
+          "min": 135,
+          "max": 440,
+          "neutral": 287
+        },
+        "forearm": {
+          "channel": 4,
+          "min": 200,
+          "max": 380,
+          "neutral": 290
+        },
+        "hand": {
+          "channel": 5,
+          "min": 200,
+          "max": 280,
+          "neutral": 240
+        }
+      },
+      "left": {
+        "main": {
+          "channel": 6,
+          "min": 135,
+          "max": 440,
+          "neutral": 287
+        },
+        "forearm": {
+          "channel": 7,
+          "min": 200,
+          "max": 380,
+          "neutral": 290
+        },
+        "hand": {
+          "channel": 8,
+          "min": 280,
+          "max": 380,
+          "neutral": 330
+        }
+      }
+    }
   }
 }
 EOF
@@ -445,7 +520,10 @@ else
   "topics": {
     "frame": "movement/frame",
     "state": "movement/state",
-    "health": "system/health/movement-esp32"
+    "health": "system/health/movement-esp32",
+    "test": "movement/test",
+    "stop": "movement/stop",
+    "status": "movement/status"
   },
   "frame_timeout_ms": 2500,
   "status_led": 48,
@@ -460,6 +538,78 @@ else
   "servo_centers": {
     "0": 302,
     "1": 310
+  },
+  "servos": {
+    "legs": {
+      "height": {
+        "channel": 0,
+        "up": 220,
+        "neutral": 300,
+        "down": 350,
+        "min": 200,
+        "max": 400
+      },
+      "left": {
+        "channel": 1,
+        "forward": 220,
+        "neutral": 300,
+        "back": 380,
+        "offset": 0,
+        "min": 200,
+        "max": 400
+      },
+      "right": {
+        "channel": 2,
+        "forward": 380,
+        "neutral": 300,
+        "back": 220,
+        "offset": 0,
+        "min": 200,
+        "max": 400
+      }
+    },
+    "arms": {
+      "right": {
+        "main": {
+          "channel": 3,
+          "min": 135,
+          "max": 440,
+          "neutral": 287
+        },
+        "forearm": {
+          "channel": 4,
+          "min": 200,
+          "max": 380,
+          "neutral": 290
+        },
+        "hand": {
+          "channel": 5,
+          "min": 200,
+          "max": 280,
+          "neutral": 240
+        }
+      },
+      "left": {
+        "main": {
+          "channel": 6,
+          "min": 135,
+          "max": 440,
+          "neutral": 287
+        },
+        "forearm": {
+          "channel": 7,
+          "min": 200,
+          "max": 380,
+          "neutral": 290
+        },
+        "hand": {
+          "channel": 8,
+          "min": 280,
+          "max": 380,
+          "neutral": 330
+        }
+      }
+    }
   }
 }
 EOF
@@ -472,7 +622,6 @@ cat > "$MAIN_FILE" << 'EOF'
 # main.py - ESP32 Auto-start for TARS Movement Controller
 # This file is automatically executed on boot by MicroPython
 
-import time
 import sys
 
 print("=" * 50)
@@ -480,6 +629,14 @@ print("TARS Movement Controller - Boot Sequence")
 print("=" * 50)
 
 try:
+    # Import async support
+    try:
+        import uasyncio as asyncio
+        import utime as time
+    except ImportError:
+        import asyncio
+        import time
+    
     # Small delay to let system stabilize
     time.sleep(1)
     
@@ -490,14 +647,16 @@ try:
     
     print("[BOOT] tars_controller.py loaded successfully")
     
-    # The tars_controller module should handle its own main loop
-    # If it has a main() or run() function, call it here
+    # Run the async main function with event loop
     if hasattr(tars_controller, 'main'):
-        tars_controller.main()
-    elif hasattr(tars_controller, 'run'):
-        tars_controller.run()
+        print("[BOOT] Starting async main loop...")
+        
+        # MicroPython doesn't have asyncio.run(), use get_event_loop()
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(tars_controller.main())
+        
     else:
-        print("[BOOT] tars_controller.py has no main() or run() function")
+        print("[BOOT] ERROR: tars_controller.py has no main() function")
         print("[BOOT] Module loaded but not started")
         
 except KeyboardInterrupt:
@@ -507,7 +666,6 @@ except KeyboardInterrupt:
 except Exception as e:
     print(f"[BOOT] ERROR: Failed to start tars_controller.py")
     print(f"[BOOT] Exception: {e}")
-    import sys
     sys.print_exception(e)
     
     # Don't crash completely - allow REPL access for debugging

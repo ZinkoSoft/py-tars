@@ -10,7 +10,7 @@ from asyncio_mqtt import MqttError
 from movement_service.calibration import MovementCalibration
 from movement_service.config import MovementSettings
 from movement_service.json import dumps, loads
-from movement_service.models import MovementCommand, MovementFrame, MovementState
+from movement_service.models import MovementCommand, MovementFrame, MovementState, MovementStateEvent
 from movement_service.sequences import build_frames
 
 _LOGGER = logging.getLogger("movement-service")
@@ -90,12 +90,12 @@ class MovementService:
                 qos=self.settings.publish_qos,
                 retain=False,
             )
-            await self._publish_state(client, MovementState(id=frame.id, event="frame", seq=frame.seq))
+            await self._publish_state(client, MovementState(id=frame.id, event=MovementStateEvent.FRAME_SENT, seq=frame.seq))
             await asyncio.sleep(self.settings.frame_backoff_ms / 1000)
         if last_frame is not None:
             await self._publish_state(
                 client,
-                MovementState(id=last_frame.id, event="completed", seq=last_frame.seq),
+                MovementState(id=last_frame.id, event=MovementStateEvent.COMPLETED, seq=last_frame.seq),
             )
 
     async def _publish_state(self, client: mqtt.Client, state: MovementState) -> None:

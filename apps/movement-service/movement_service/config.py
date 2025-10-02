@@ -4,16 +4,22 @@ import os
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
+from tars.contracts.v1.movement import (
+    TOPIC_HEALTH_MOVEMENT_SERVICE,
+    TOPIC_MOVEMENT_COMMAND,
+    TOPIC_MOVEMENT_FRAME,
+    TOPIC_MOVEMENT_STATE,
+)
 
 
 class MovementSettings(BaseModel):
     """Environment-driven configuration for the movement service."""
 
     mqtt_url: str = Field(default="mqtt://localhost:1883")
-    command_topic: str = Field(default="movement/command")
-    frame_topic: str = Field(default="movement/frame")
-    state_topic: str = Field(default="movement/state")
-    health_topic: str = Field(default="system/health/movement-service")
+    command_topic: str = Field(default=TOPIC_MOVEMENT_COMMAND)
+    frame_topic: str = Field(default=TOPIC_MOVEMENT_FRAME)
+    state_topic: str = Field(default=TOPIC_MOVEMENT_STATE)
+    health_topic: str = Field(default=TOPIC_HEALTH_MOVEMENT_SERVICE)
     calibration_path: str | None = Field(default=None)
     publish_qos: int = Field(default=1, ge=0, le=2)
     frame_backoff_ms: int = Field(default=40, ge=0, le=500)

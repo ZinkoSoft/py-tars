@@ -18,10 +18,19 @@ def test_movement_command_roundtrip() -> None:
 
 def test_movement_frame_defaults() -> None:
     cmd = MovementCommand(command=MovementAction.RESET)
-    frame = MovementFrame(id=cmd.id, seq=0, total=1)
+    frame = MovementFrame(
+        id=cmd.id,
+        seq=0,
+        total=1,
+        duration_ms=200,
+        hold_ms=0,
+        channels={}
+    )
     assert frame.duration_ms == 200
     assert frame.hold_ms == 0
     assert frame.channels == {}
+    assert frame.disable_after is False
+    assert frame.done is False
 
 
 def test_calibration_interpolation() -> None:

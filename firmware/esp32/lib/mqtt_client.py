@@ -154,6 +154,42 @@ class MQTTClientWrapper:
             # Reconnect will be handled by caller
             raise
     
+    def check_msg(self):
+        """
+        Check for a message (non-blocking call with short wait).
+        
+        Actually uses wait_msg() internally but doesn't block forever.
+        The umqtt library's check_msg() is unreliable on MicroPython.
+        
+        Raises:
+            RuntimeError: If client not connected
+        """
+        if self._client is None:
+            raise RuntimeError("MQTT client not connected")
+        
+        try:
+            # Set a very short socket timeout for non-blocking behavior
+            # This allows wait_msg() to return quickly if no data
+            sock = self._client.sock
+            if sock:
+                sock.settimeout(0.001)  # 1ms timeout for near-instant return
+            
+            # Now wait_msg() will return quickly if no messages
+            self._client.wait_msg()
+            
+        except OSError as e:
+            # Timeout or no data is expected - not an error
+            if e.args[0] not in (110, 11):  # ETIMEDOUT, EAGAIN
+                print(f'MQTT error: {e}')
+                self.publish_state("error", {"error": "mqtt_check_failed", "detail": str(e)})
+                self.publish_health(False, "mqtt_check_failed")
+                raise
+        except Exception as exc:
+            print(f'MQTT connection lost: {exc}')
+            self.publish_state("error", {"error": "mqtt_check_failed", "detail": str(exc)})
+            self.publish_health(False, "mqtt_check_failed")
+            raise
+    
     def publish_state(self, event, payload=None):
         """
         Publish state message to state topic.

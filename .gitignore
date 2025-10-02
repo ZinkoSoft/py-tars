@@ -125,3 +125,6 @@ data/*
 .github
 
 server/models-cache
+
+firmware/esp32/.claude
+firmware/esp32/movement_config*
