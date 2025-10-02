@@ -1,9 +1,24 @@
 # ESP32 Servo Firmware
 
 This directory contains the MicroPython firmware that drives the TARS servo rig via
-a PCA9685 controller. The firmware subscribes to MQTT `movement/frame` payloads
-published by the host-side movement service, applies the PWM values, and reports
-status back on `movement/state` and `system/health/movement-esp32`.
+a PCA9685 controller.
+
+## 🎉 Phase 4-5 Complete!
+
+**Status**: ✅ All movement modules implemented and integrated  
+**Total Code**: 3,733 lines (Phase 3 + Phase 4-5)  
+**Tests**: 38/38 passing (100%)  
+**Documentation**: See [PHASE_4_5_COMPLETE.md](./PHASE_4_5_COMPLETE.md) for full details
+
+**What's New:**
+- ✅ WiFi/MQTT infrastructure (Phase 3)
+- ✅ Percentage-based servo API (1-100 scale)
+- ✅ 15 TARS-AI movement sequences (basic + expressive)
+- ✅ Asyncio parallel servo control
+- ✅ Command queue with emergency stop
+- ✅ Full integration into `tars_controller.py`
+
+**Next Step**: Hardware deployment and servo calibration (see below)
 
 ## Prerequisites
 
@@ -30,45 +45,107 @@ Adjust the port and image name for your setup.
 
 ## Deploy the servo firmware
 
+### Quick Setup (Recommended) 🚀
+
+Use the **automated setup script** to flash your ESP32 in one command:
+
+```bash
+cd firmware/esp32
+./setup.sh
+```
+
+The script will automatically:
+- ✅ Check for required tools (`esptool`, `mpremote`)
+- ✅ Detect connected ESP32 devices
+- ✅ Read MQTT credentials from `../../.env` (MQTT_USER, MQTT_PASS, MQTT_PORT)
+- ✅ Auto-detect your host IP address
+- ✅ **Scan for available WiFi networks** (or manual entry, or skip for portal setup)
+- ✅ Generate complete `movement_config.json` with all required fields
+- ✅ Auto-download MicroPython firmware if needed
+- ✅ Guide through manual bootloader mode if needed (hold BOOT, press RESET)
+- ✅ Upload `lib/`, `movements/`, `tars_controller.py`, `main.py`, and `movement_config.json` to ESP32
+- ✅ Verify application is running with LED status check
+
+### LED Status Indicators 🚦
+
+The ESP32 uses an onboard RGB LED (GPIO 48) to indicate system status:
+
+- 🔵 **Cyan (Solid)** - System booting
+- 🔴 **Red (Breathing)** - No WiFi / Setup portal active (connect to `TARS-Setup`)
+- 🟡 **Yellow (Blinking)** - MQTT connection error (check broker/credentials)
+- 🟢 **Green (Solid)** - Fully connected and running ✓
+
+See [LED_STATUS.md](./LED_STATUS.md) for detailed troubleshooting.
+
+### WiFi Configuration Options
+
+The script offers three ways to configure WiFi:
+
+1. **Scan for networks** - Automatically detects available WiFi networks and lets you select from a list
+2. **Manual entry** - Type in the SSID manually
+3. **Skip setup** - Leave WiFi blank and configure later via the ESP32's web portal
+   - ESP32 will create a `TARS-Setup` WiFi network
+   - Connect and visit `http://192.168.4.1/` to configure
+
+**Prerequisites:**
+```bash
+pip install esptool mpremote
+```
+
+**MicroPython Firmware:**
+The script will automatically download the latest ESP32-S3 MicroPython firmware if not found locally. The firmware is cached in `/tmp/` for reuse. You can also manually download it from:
+- https://micropython.org/download/ESP32_GENERIC_S3/
+- Place the `.bin` file in this directory to use your own version
+
+### Manual Setup
+
 1. Clone this repository (or copy the `firmware/esp32` folder) and `cd` into it.
-2. Copy `servoctl.py` to the board's filesystem:
+2. Copy the modular structure to the board's filesystem:
    ```bash
-   ampy --port /dev/ttyUSB0 put servoctl.py
+   # Using mpremote (recommended)
+   mpremote fs cp -r lib/ :lib/
+   mpremote fs cp -r movements/ :movements/
+   mpremote fs cp tars_controller.py :tars_controller.py
+   mpremote fs cp main.py :main.py
    ```
-   With `mpremote` the equivalent is:
+3. Create a `movement_config.json` file with your Wi-Fi and MQTT details (see below) and upload it to the board:
    ```bash
-   mpremote cp servoctl.py :servoctl.py
-   ```
-3. Create a `movement_config.json` file next to `servoctl.py` with your Wi-Fi and MQTT details (see below) and upload it to the board:
-   ```bash
-   ampy --port /dev/ttyUSB0 put movement_config.json
+   mpremote fs cp movement_config.json :movement_config.json
    ```
 4. Reset the board. On boot, the firmware will:
   - Attempt to join the configured Wi-Fi network
-  - Fall back to hosting a `TARS-Setup` access point with a web portal if Wi-Fi credentials are missing or invalid
-  - Subscribe to `movement/frame`
-  - Send a retained health payload on `system/health/movement-esp32`
-  - Blink the optional status LED (if configured)
+  - Connect to MQTT broker and subscribe to `movement/test` and `movement/stop`
+  - Execute movement sequences autonomously
+  - Send a retained health payload on `system/health/movement`
+  - Show connection status via LED indicators
 
-## Web-based Wi-Fi setup
+## WiFi Configuration
 
-If the firmware cannot connect to Wi-Fi it automatically enables an access point named
-`TARS-Setup` (password optional, see `setup_portal` config). Connect to that network and
-open `http://192.168.4.1/` to access the captive portal:
+**Note**: The new `tars_controller.py` architecture focuses on autonomous movement sequences.
+WiFi setup is handled via `setup.sh` (recommended) or manual `movement_config.json` editing.
 
-1. Enter your Wi-Fi SSID and password.
-2. Submit the form to save the credentials to `movement_config.json`.
-3. The board reboots and attempts to join the newly provided network.
-4. Once the ESP32 is on your LAN, browse to `http://<esp32-ip>/` to reach the same portal
-  where you can center individual servos or all channels before running live motions.
+If you need WiFi credentials, use the `setup.sh` script which has built-in WiFi scanning:
+```bash
+./setup.sh
+```
 
-You can also trigger the portal by clearing the Wi-Fi credentials from
-`movement_config.json` and resetting the board.
+Alternatively, manually edit `movement_config.json`:
+```json
+{
+  "wifi": {
+    "ssid": "YourNetwork",
+    "password": "YourPassword"
+  },
+  ...
+}
+```
+
+For the old web-based setup portal, see `servoctl.py` (legacy architecture).
 
 ## Configuration file
 
 The firmware reads `movement_config.json` at startup. All fields are optional—the
-file overrides the defaults baked into `servoctl.py`. Example:
+file provides configuration for WiFi, MQTT, and hardware settings. Example:
 
 ```json
 {
@@ -127,6 +204,49 @@ Key fields:
 - `servo_channel_count`: Number of active PCA9685 channels (used by the centering UI).
 - `default_center_pulse`: PWM count applied when a channel lacks a specific calibration.
 - `servo_centers`: Optional per-channel PWM overrides used by the centering controls.
+
+## Troubleshooting
+
+### No serial devices found (Ubuntu/Linux)
+
+**1. Add user to dialout group** (required for serial port access):
+```bash
+sudo usermod -a -G dialout $USER
+# Log out and back in for changes to take effect
+```
+
+**2. Check if device is detected**:
+```bash
+ls /dev/ttyUSB* /dev/ttyACM*
+# Expected output: /dev/ttyUSB0 or /dev/ttyACM0
+```
+
+**3. Verify USB connection**:
+```bash
+lsusb
+# Look for: "CP210x", "CH340", "FTDI", or "Silicon Labs"
+```
+
+**4. Check dmesg for device detection**:
+```bash
+sudo dmesg | tail -20
+# Should show: "USB Serial device" or "cp210x" when you plug in the ESP32
+```
+
+**Expected device paths:**
+- **Linux (Ubuntu)**: `/dev/ttyUSB0` or `/dev/ttyACM0`
+- **macOS**: `/dev/cu.usbmodem*` or `/dev/tty.usbserial-*`
+
+### Common ESP32 USB chips
+- **CP210x** (Silicon Labs) - Most common, usually works out-of-box on Linux
+- **CH340** - Common on clone boards, usually works on Ubuntu 18.04+
+- **FTDI** - Less common, usually works out-of-box
+
+### Still not working?
+- Try a different USB cable (must support data, not just power)
+- Try a different USB port
+- Reboot after adding user to dialout group
+- Check if ESP32 LED is on (indicates power)
 
 ## Health and troubleshooting
 
