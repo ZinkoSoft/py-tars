@@ -36,14 +36,19 @@ TTS_AGGREGATE_DEBOUNCE_MS = int(getenv("TTS_AGGREGATE_DEBOUNCE_MS", "150"))
 # When aggregating, synthesize as a single WAV (pipeline disabled) to avoid playback gaps
 TTS_AGGREGATE_SINGLE_WAV = int(getenv("TTS_AGGREGATE_SINGLE_WAV", "1"))
 
-# Cache wake acknowledgements as WAVs for fast replay
+# Cache wake acknowledgements and common phrases as WAVs for fast replay
 TTS_WAKE_CACHE_ENABLE = int(getenv("TTS_WAKE_CACHE_ENABLE", "1"))
-TTS_WAKE_CACHE_DIR = getenv("TTS_WAKE_CACHE_DIR", "/tmp/tars/wake-ack")
+TTS_WAKE_CACHE_DIR = getenv("TTS_WAKE_CACHE_DIR", "data/tts-cache")
 TTS_WAKE_CACHE_MAX = int(getenv("TTS_WAKE_CACHE_MAX", "16"))
-TTS_WAKE_ACK_TEXTS = getenv_list(
+
+# Collect all texts to preload into cache
+_wake_ack_texts = getenv_list(
     "TTS_WAKE_ACK_TEXTS",
     getenv("ROUTER_WAKE_ACK_CHOICES", ""),
 )
+_online_text = getenv("ONLINE_ANNOUNCE_TEXT", "System online.")
+# Combine wake acks and online text for preloading
+TTS_WAKE_ACK_TEXTS = _wake_ack_texts + (_online_text,) if _online_text else _wake_ack_texts
 
 # External TTS provider selection and settings
 # Options: "piper" (default), "elevenlabs"

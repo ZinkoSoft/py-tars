@@ -81,7 +81,7 @@ services:
       TTS_STREAMING: ${TTS_STREAMING:-0}
       TTS_PIPELINE: ${TTS_PIPELINE:-1}
       TTS_WAKE_CACHE_ENABLE: ${TTS_WAKE_CACHE_ENABLE:-1}
-      TTS_WAKE_CACHE_DIR: ${TTS_WAKE_CACHE_DIR:-/tmp/tars/wake-ack}
+      TTS_WAKE_CACHE_DIR: ${TTS_WAKE_CACHE_DIR:-/data/tts-cache}
       TTS_WAKE_CACHE_MAX: ${TTS_WAKE_CACHE_MAX:-16}
 
     depends_on:
@@ -93,6 +93,7 @@ services:
     volumes:
       - ../apps/tts-worker/voices:/voice-models:ro
       - /run/user/1000/pulse:/run/user/1000/pulse:ro
+      - ../data/tts-cache:/data/tts-cache
 
   stt:
     build:

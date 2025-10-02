@@ -56,11 +56,17 @@ class TTSConfig:
     aggregate_single_wav: bool
     wake_cache_dir: str | None = None
     wake_cache_max_entries: int = 8
-    wake_ack_preload_texts: tuple[str, ...] = ()
+    wake_ack_preload_texts: tuple[str, ...] = ()  # All phrases to preload (wake acks + system messages)
 
 
 @dataclass(slots=True)
 class WakeAckCache:
+    """Phrase cache for commonly used TTS text (wake acks, system messages, etc.).
+    
+    Caches synthesized WAV files to avoid redundant API calls to TTS providers.
+    Particularly useful for frequently repeated phrases like wake acknowledgements
+    and system status messages (e.g., "System online").
+    """
     base_dir: Path
     max_entries: int = 16
     _lock: threading.Lock = field(init=False, repr=False)
@@ -520,6 +526,23 @@ class TTSDomainService:
         trimmed = value.strip()
         return trimmed or None
 
+    def _is_cacheable(self, text: str, wake_ack: bool) -> bool:
+        """Check if this text should use the phrase cache.
+        
+        Returns True if:
+        1. It's explicitly marked as wake_ack, OR
+        2. It matches one of the preloaded texts (case-insensitive)
+        """
+        if wake_ack:
+            return True
+        if not self._config.wake_ack_preload_texts:
+            return False
+        text_normalized = text.strip().lower()
+        for preload_text in self._config.wake_ack_preload_texts:
+            if preload_text.strip().lower() == text_normalized:
+                return True
+        return False
+
     def _has_async_synth(self, synth: Synthesizer) -> bool:
         """Check if synthesizer supports async methods."""
         return hasattr(synth, "synth_and_play_async") and callable(getattr(synth, "synth_and_play_async"))
@@ -535,12 +558,13 @@ class TTSDomainService:
         """Async synthesis using native async synthesizer methods (no double-threading)."""
         session = self._current_session
         try:
-            if wake_ack and self._wake_cache is not None and hasattr(synth, "synth_to_wav_async"):
+            if self._is_cacheable(text, wake_ack) and self._wake_cache is not None and hasattr(synth, "synth_to_wav_async"):
                 try:
                     # Wake cache ensure is still sync (lightweight I/O check)
                     cache_path = await asyncio.to_thread(self._wake_cache.ensure, text, synth)
+                    logger.debug("Using cached phrase for '%s'", text[:48])
                 except Exception as exc:
-                    logger.debug("Wake cache unavailable for '%s': %s", text, exc)
+                    logger.debug("Phrase cache unavailable for '%s': %s", text[:48], exc)
                 else:
                     return await asyncio.to_thread(self._play_wav_path, cache_path, session)
             if not streaming and hasattr(synth, "synth_to_wav_async"):
@@ -565,11 +589,12 @@ class TTSDomainService:
     ) -> float:
         session = self._current_session
         try:
-            if wake_ack and self._wake_cache is not None and hasattr(synth, "synth_to_wav"):
+            if self._is_cacheable(text, wake_ack) and self._wake_cache is not None and hasattr(synth, "synth_to_wav"):
                 try:
                     cache_path = self._wake_cache.ensure(text, synth)
+                    logger.debug("Using cached phrase for '%s'", text[:48])
                 except Exception as exc:
-                    logger.debug("Wake cache unavailable for '%s': %s", text, exc)
+                    logger.debug("Phrase cache unavailable for '%s': %s", text[:48], exc)
                 else:
                     return self._play_wav_path(cache_path, session)
             if not streaming and hasattr(synth, "synth_to_wav"):
@@ -612,15 +637,15 @@ class TTSDomainService:
                 return
             synth = self._wake_synth if self._wake_synth is not None else self._primary_synth
             if not hasattr(synth, "synth_to_wav"):
-                logger.debug("Wake ack synth lacks synth_to_wav; skipping preload")
+                logger.debug("Synth lacks synth_to_wav; skipping phrase cache preload")
                 self._wake_preloaded = True
                 return
             for text in texts:
                 try:
                     await asyncio.to_thread(cache.ensure, text, synth)
-                    logger.info("Wake ack cache preloaded", extra={"text": text[:48]})
+                    logger.info("Phrase cache preloaded", extra={"text": text[:48]})
                 except Exception as exc:
-                    logger.warning("Wake ack preload failed", extra={"text": text[:48], "error": str(exc)})
+                    logger.warning("Phrase cache preload failed", extra={"text": text[:48], "error": str(exc)})
             self._wake_preloaded = True
 
     @staticmethod

@@ -197,7 +197,7 @@ class TTSService:
                 await client.subscribe([(SAY_TOPIC, 0), (CONTROL_TOPIC, 0)])
                 logger.info("Subscribed to %s and %s, ready to process messages", SAY_TOPIC, CONTROL_TOPIC)
                 callbacks = self._build_callbacks(client)
-                logger.debug("Starting wake acknowledgement cache preload task")
+                logger.debug("Starting phrase cache preload task")
                 preload_task: asyncio.Task[None] | None = None
                 try:
                     preload_task = asyncio.create_task(self._domain.preload_wake_cache())
@@ -206,11 +206,11 @@ class TTSService:
                         try:
                             task.result()
                         except asyncio.CancelledError:
-                            logger.debug("Wake acknowledgement cache preload cancelled")
+                            logger.debug("Phrase cache preload cancelled")
                         except Exception as exc:  # pragma: no cover - defensive logging
-                            logger.warning("Wake acknowledgement cache preload failed", extra={"error": str(exc)})
+                            logger.warning("Phrase cache preload failed", extra={"error": str(exc)})
                         else:
-                            logger.info("Wake acknowledgement cache preload complete")
+                            logger.info("Phrase cache preload complete")
 
                     preload_task.add_done_callback(_handle_preload_result)
 
