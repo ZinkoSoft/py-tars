@@ -94,7 +94,11 @@ class LLMService:
         self.character: Dict[str, Any] = {}
         # Tool registry and pending results
         self.tools: list[dict] = []
-        self.pending_tool_results: Dict[str, dict] = {}
+        self.pending_tool_results: Dict[str, dict] = {}  # Legacy - kept for compatibility
+        # Pending RAG queries (keyed by correlation ID)
+        self._pending_rag: Dict[str, asyncio.Future[str]] = {}
+        # Pending tool calls (keyed by call_id) - uses futures for non-blocking wait
+        self._tool_futures: Dict[str, asyncio.Future[dict]] = {}
 
     def _register_topics(self) -> None:
         register(EVENT_TYPE_LLM_CANCEL, TOPIC_LLM_CANCEL)
@@ -200,19 +204,68 @@ class LLMService:
         except Exception as e:
             logger.error("Failed to load tools: %s", e)
 
+    async def _handle_memory_results(self, payload: bytes) -> None:
+        """Handle memory/results messages using correlation ID."""
+        try:
+            envelope: Optional[Envelope] = None
+            try:
+                envelope = Envelope.model_validate_json(payload)
+                data = envelope.data if isinstance(envelope.data, dict) else {}
+            except ValidationError:
+                data = json.loads(payload)
+            
+            # Extract correlation ID to match with pending RAG query
+            corr_id = envelope.correlate if envelope else data.get("correlate") or data.get("id")
+            if corr_id and corr_id in self._pending_rag:
+                future = self._pending_rag.pop(corr_id)
+                results = data.get("results") or []
+                snippets = []
+                for r in results:
+                    doc = r.get("document") or {}
+                    t = doc.get("text") or json.dumps(doc)
+                    snippets.append(t)
+                context = "\n".join(snippets)
+                if not future.done():
+                    future.set_result(context)
+                logger.debug("Resolved RAG query %s with %d results", corr_id, len(results))
+        except Exception as e:
+            logger.warning("Failed to handle memory/results: %s", e)
+
     async def _handle_tool_result(self, payload: bytes) -> None:
-        """Handle tool call result and store for processing."""
+        """Handle tool call result and resolve pending futures."""
         try:
             data = json.loads(payload)
             call_id = data.get("call_id")
             if call_id:
+                # Legacy dict storage for compatibility
                 self.pending_tool_results[call_id] = data
-                logger.debug("Received tool result for call_id=%s", call_id)
+                # Resolve future if present (non-blocking pattern)
+                if call_id in self._tool_futures:
+                    future = self._tool_futures.pop(call_id)
+                    if not future.done():
+                        future.set_result(data)
+                    logger.debug("Resolved tool call future for call_id=%s", call_id)
+                else:
+                    logger.debug("Received tool result for call_id=%s (no pending future)", call_id)
         except Exception as e:
             logger.error("Failed to handle tool result: %s", e)
 
     async def _execute_tool_calls(self, client, tool_calls: list[dict], req_id: str, correlation_id: str) -> list[dict]:
-        """Execute tool calls and return results."""
+        """Execute tool calls and return results using asyncio.Future pattern.
+        
+        Creates a future for each tool call, publishes the request, and waits
+        for _handle_tool_result to resolve the future when the result arrives.
+        No polling - immediate response when result is published.
+        
+        Args:
+            client: MQTT client
+            tool_calls: List of tool call objects from LLM
+            req_id: Request ID
+            correlation_id: Correlation ID for tracing
+            
+        Returns:
+            List of tool results
+        """
         results = []
         for call in tool_calls:
             call_id = call.get("id")
@@ -226,6 +279,11 @@ class LLMService:
             }
             
             try:
+                # Create future for this tool call
+                future: asyncio.Future[dict] = asyncio.Future()
+                self._tool_futures[call_id] = future
+                
+                # Publish tool call request
                 topic = f"{TOPIC_TOOL_CALL_REQUEST}/{call_id}"
                 await self._publish_event(
                     client,
@@ -236,20 +294,18 @@ class LLMService:
                 )
                 logger.info("Published tool call request for %s", call_id)
                 
-                # Wait for result (simple polling for now)
-                timeout = 30.0  # seconds
-                start_time = asyncio.get_event_loop().time()
-                while asyncio.get_event_loop().time() - start_time < timeout:
-                    if call_id in self.pending_tool_results:
-                        result = self.pending_tool_results.pop(call_id)
-                        results.append(result)
-                        break
-                    await asyncio.sleep(0.1)
-                else:
+                # Wait for result with timeout (no polling - immediate response)
+                try:
+                    result = await asyncio.wait_for(future, timeout=30.0)
+                    results.append(result)
+                    logger.debug("Received tool result for %s", call_id)
+                except asyncio.TimeoutError:
+                    self._tool_futures.pop(call_id, None)
                     logger.warning("Timeout waiting for tool result for call_id=%s", call_id)
                     results.append({"call_id": call_id, "error": "timeout"})
                     
             except Exception as e:
+                self._tool_futures.pop(call_id, None)
                 logger.error("Failed to execute tool call %s: %s", call_id, e)
                 results.append({"call_id": call_id, "error": str(e)})
         
@@ -314,30 +370,40 @@ class LLMService:
             correlate=correlation_id,
         )
 
-    async def _do_rag(self, client, prompt: str, top_k: int) -> str:
+    async def _do_rag(self, client, prompt: str, top_k: int, correlation_id: str) -> str:
+        """Non-blocking RAG query using correlation ID and asyncio.Future.
+        
+        Creates a future keyed by correlation ID, publishes the query, and waits
+        for memory-worker to respond. Uses timeout to prevent indefinite blocking.
+        
+        Args:
+            client: MQTT client
+            prompt: Query text
+            top_k: Number of results to retrieve
+            correlation_id: Unique ID to correlate request and response
+            
+        Returns:
+            RAG context string (empty on timeout/error)
+        """
+        future: asyncio.Future[str] = asyncio.Future()
+        self._pending_rag[correlation_id] = future
+        
         try:
-            payload = {"text": prompt, "top_k": top_k}
+            payload = {"text": prompt, "top_k": top_k, "id": correlation_id}
             await client.publish(TOPIC_MEMORY_QUERY, json.dumps(payload))
-            # Wait for a single memory/results message; simple heuristic for MVP
-            async with client.messages() as mstream:
-                await client.subscribe(TOPIC_MEMORY_RESULTS)
-                async for m in mstream:
-                    try:
-                        data = json.loads(m.payload)
-                    except Exception:
-                        continue
-                    results = data.get("results") or []
-                    if not results:
-                        return ""
-                    snippets = []
-                    for r in results[:top_k]:
-                        doc = r.get("document") or {}
-                        t = doc.get("text") or json.dumps(doc)
-                        snippets.append(t)
-                    return "\n".join(snippets)
+            logger.debug("Published RAG query with correlation_id=%s", correlation_id)
+            
+            # Wait for memory/results with timeout
+            context = await asyncio.wait_for(future, timeout=5.0)
+            return context
+        except asyncio.TimeoutError:
+            self._pending_rag.pop(correlation_id, None)
+            logger.warning("RAG query timeout for correlation_id=%s", correlation_id)
+            return ""
         except Exception as e:
+            self._pending_rag.pop(correlation_id, None)
             logger.warning("RAG failed: %s", e)
-        return ""
+            return ""
 
     async def run(self):
         host, port, user, pwd = parse_mqtt(MQTT_URL)
@@ -350,6 +416,10 @@ class LLMService:
                     await client.subscribe(TOPIC_LLM_REQUEST)
                     await client.subscribe(TOPIC_CHARACTER_CURRENT)
                     await client.subscribe(TOPIC_CHARACTER_RESULT)
+                    # Subscribe to memory/results for RAG queries (persistent subscription)
+                    if RAG_ENABLED:
+                        await client.subscribe(TOPIC_MEMORY_RESULTS)
+                        logger.info("Subscribed to %s for RAG queries", TOPIC_MEMORY_RESULTS)
                     logger.info("Subscribed to %s, %s and %s", TOPIC_LLM_REQUEST, TOPIC_CHARACTER_CURRENT, TOPIC_CHARACTER_RESULT)
                     
                     # Subscribe to tool topics if tool calling is enabled
@@ -404,6 +474,11 @@ class LLMService:
                             await self._load_tools(m.payload)
                             continue
                         
+                        # Handle memory/results for RAG
+                        if topic == TOPIC_MEMORY_RESULTS:
+                            await self._handle_memory_results(m.payload)
+                            continue
+                        
                         # Handle tool results
                         if topic == TOPIC_TOOL_CALL_RESULT:
                             await self._handle_tool_result(m.payload)
@@ -442,7 +517,7 @@ class LLMService:
 
                         context = ""
                         if use_rag:
-                            context = await self._do_rag(client, text, rag_k)
+                            context = await self._do_rag(client, text, rag_k, correlation_id)
                         prompt = text
                         if context:
                             prompt = RAG_PROMPT_TEMPLATE.format(context=context, user=text)

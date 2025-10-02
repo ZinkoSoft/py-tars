@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Tuple
 from urllib.parse import urlparse
@@ -79,12 +81,25 @@ def parse_mqtt(url: str) -> Tuple[str, int, str | None, str | None]:
 
 
 class STEmbedder:
-    """SentenceTransformer embedding wrapper."""
+    """SentenceTransformer embedding wrapper with async support.
+    
+    Uses asyncio.to_thread() to offload CPU-bound embedding computation,
+    keeping the event loop responsive during memory operations.
+    """
 
     def __init__(self, model_name: str):
         self.model = SentenceTransformer(model_name, device="cpu")
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed")
 
     def __call__(self, texts: list[str]) -> np.ndarray:
+        """Synchronous embedding (blocks for CPU-bound computation).
+        
+        For async contexts, prefer embed_async() to avoid blocking the event loop.
+        """
+        return self._encode_sync(texts)
+    
+    def _encode_sync(self, texts: list[str]) -> np.ndarray:
+        """Internal sync implementation of encoding."""
         embeddings = self.model.encode(
             texts,
             show_progress_bar=False,
@@ -92,6 +107,21 @@ class STEmbedder:
             normalize_embeddings=True,
         )
         return embeddings.astype(np.float32)
+    
+    async def embed_async(self, texts: list[str]) -> np.ndarray:
+        """Async wrapper for embedding using thread pool.
+        
+        Offloads CPU-bound SentenceTransformer encoding to avoid blocking
+        the event loop during MQTT message processing.
+        
+        Args:
+            texts: List of text strings to embed
+            
+        Returns:
+            numpy array of embeddings (normalized float32)
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self._executor, self._encode_sync, texts)
 
 
 class MemoryService:
@@ -191,7 +221,7 @@ class MemoryService:
                                 request, correlate = self._decode_character_get(payload)
                                 await self._handle_char_get(client, request, correlate)
                             elif topic in (TOPIC_STT_FINAL, TOPIC_TTS_SAY):
-                                self._ingest_document(topic, payload)
+                                await self._ingest_document(topic, payload)
                             else:
                                 logger.debug("Unhandled topic: %s", topic)
                         except Exception as exc:  # pragma: no cover - defensive
@@ -238,7 +268,8 @@ class MemoryService:
         correlate: str | None,
     ) -> None:
         top_k = query.top_k or TOP_K
-        results = self.db.query(query.text, top_k=top_k)
+        # Use async query to avoid blocking event loop during embedding
+        results = await self.db.query_async(query.text, top_k=top_k)
         hits = [
             MemoryResult(
                 document=doc if isinstance(doc, dict) else {"text": str(doc)},
@@ -291,7 +322,8 @@ class MemoryService:
             retain=False,
         )
 
-    def _ingest_document(self, topic: str, payload: bytes) -> None:
+    async def _ingest_document(self, topic: str, payload: bytes) -> None:
+        """Ingest document asynchronously to avoid blocking event loop during embedding."""
         data, _ = self._decode_payload(payload)
         if not data:
             return
@@ -301,7 +333,8 @@ class MemoryService:
             doc = self._coerce_tts_payload(data)
         if doc is None:
             return
-        self.db.add([doc])
+        # Use async add to avoid blocking event loop during embedding
+        await self.db.add_async([doc])
         try:
             self.db.save(self.database_path)
         except Exception:

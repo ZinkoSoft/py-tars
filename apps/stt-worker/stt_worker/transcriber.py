@@ -3,8 +3,10 @@ from __future__ import annotations
 """STT transcription backends: local Whisper, WebSocket proxy, or OpenAI API.
 
 Public entry point is SpeechTranscriber; behavior unchanged. Added typing and docs.
+Async wrappers added to prevent blocking event loop during CPU-bound transcription.
 """
 
+import asyncio
 import io
 import logging
 import wave
@@ -188,6 +190,7 @@ class SpeechTranscriber:
     """Facade selecting the configured STT backend.
 
     Use transcribe(audio_data, input_sample_rate) to obtain (text, confidence, metrics).
+    For async contexts, use transcribe_async() to avoid blocking the event loop.
     """
 
     def __init__(self) -> None:
@@ -211,4 +214,23 @@ class SpeechTranscriber:
             self._impl = _LocalWhisperTranscriber()
 
     def transcribe(self, audio_data: bytes, input_sample_rate: int) -> Tuple[str, float, Dict[str, Any]]:
+        """Synchronous transcription (blocks for CPU-bound Whisper inference).
+        
+        For async contexts, prefer transcribe_async() to avoid blocking the event loop.
+        """
         return self._impl.transcribe(audio_data, input_sample_rate)
+
+    async def transcribe_async(self, audio_data: bytes, input_sample_rate: int) -> Tuple[str, float, Dict[str, Any]]:
+        """Async wrapper for transcription using asyncio.to_thread().
+        
+        Offloads CPU-bound work to a thread pool, keeping the event loop responsive.
+        Recommended for all async contexts (e.g., within service event handlers).
+        
+        Args:
+            audio_data: Raw PCM16 audio bytes
+            input_sample_rate: Sample rate of the input audio
+            
+        Returns:
+            Tuple of (text, confidence, metrics)
+        """
+        return await asyncio.to_thread(self._impl.transcribe, audio_data, input_sample_rate)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import os
@@ -124,6 +125,22 @@ class PiperSynth:
     def synth_to_wav(self, text: str, wav_path: str) -> None:
         """Synthesize text to the provided WAV path."""
         self._synth_to_wav(text, wav_path)
+
+    # ----- Async API -----
+    async def synth_and_play_async(self, text: str, streaming: bool = False, pipeline: bool = True) -> float:
+        """Async wrapper for synth_and_play. Offloads CPU-bound synthesis to thread pool.
+        
+        Returns total elapsed seconds until playback finishes.
+        Prevents event loop blocking during Piper synthesis (typically 100-500ms per sentence).
+        """
+        return await asyncio.to_thread(self.synth_and_play, text, streaming, pipeline)
+
+    async def synth_to_wav_async(self, text: str, wav_path: str) -> None:
+        """Async wrapper for synth_to_wav. Offloads CPU-bound synthesis to thread pool.
+        
+        Prevents event loop blocking during Piper synthesis operations.
+        """
+        await asyncio.to_thread(self.synth_to_wav, text, wav_path)
 
     # ----- Internals -----
     def _load_voice(self) -> None:

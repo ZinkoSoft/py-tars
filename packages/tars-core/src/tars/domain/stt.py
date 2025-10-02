@@ -24,6 +24,12 @@ class Transcriber(Protocol):
     def transcribe(self, audio: bytes, sample_rate: int) -> tuple[str, Optional[float], dict[str, Any]]: ...
 
 
+class AsyncTranscriber(Protocol):
+    """Protocol describing an async transcription engine (preferred for event loop contexts)."""
+
+    async def transcribe_async(self, audio: bytes, sample_rate: int) -> tuple[str, Optional[float], dict[str, Any]]: ...
+
+
 class SuppressionState(Protocol):
     cooldown_until: float
 
@@ -82,7 +88,7 @@ class STTService:
         self,
         *,
         vad: VadProcessor,
-        transcriber: Transcriber,
+        transcriber: Transcriber | AsyncTranscriber,
         suppression: SuppressionEngine,
         sample_rate: int,
         frame_size: int,
@@ -98,6 +104,8 @@ class STTService:
         self._preprocess = preprocess
         self._partials = config.partials
         self._last_partial_text: str = ""
+        # Check if transcriber supports async (preferred)
+        self._has_async_transcribe = hasattr(transcriber, "transcribe_async")
 
     def in_cooldown(self, now: Optional[float] = None) -> bool:
         now = now if now is not None else time.time()
@@ -136,11 +144,16 @@ class STTService:
                     processed = utterance
 
         try:
-            text, confidence, metrics = await asyncio.to_thread(
-                self._transcriber.transcribe,
-                processed,
-                self._sample_rate,
-            )
+            if self._has_async_transcribe:
+                # Use async transcriber (preferred - already uses to_thread internally)
+                text, confidence, metrics = await self._transcriber.transcribe_async(processed, self._sample_rate)  # type: ignore[attr-defined]
+            else:
+                # Fallback to sync transcriber wrapped in to_thread
+                text, confidence, metrics = await asyncio.to_thread(
+                    self._transcriber.transcribe,
+                    processed,
+                    self._sample_rate,
+                )
         except Exception as exc:
             result.error = f"Transcription error: {exc}"
             return result
@@ -190,11 +203,16 @@ class STTService:
             return None
 
         try:
-            text, confidence, _ = await asyncio.to_thread(
-                self._transcriber.transcribe,
-                buffer_bytes,
-                self._sample_rate,
-            )
+            if self._has_async_transcribe:
+                # Use async transcriber (preferred - already uses to_thread internally)
+                text, confidence, _ = await self._transcriber.transcribe_async(buffer_bytes, self._sample_rate)  # type: ignore[attr-defined]
+            else:
+                # Fallback to sync transcriber wrapped in to_thread
+                text, confidence, _ = await asyncio.to_thread(
+                    self._transcriber.transcribe,
+                    buffer_bytes,
+                    self._sample_rate,
+                )
         except Exception:  # pragma: no cover - partial failures are non-fatal
             return None
 

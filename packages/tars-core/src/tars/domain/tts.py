@@ -26,7 +26,12 @@ StatusEvent = Literal["speaking_start", "speaking_end", "paused", "resumed", "st
 
 
 class Synthesizer(Protocol):
-    """Protocol describing synthesizer behavior required by the domain."""
+    """Protocol describing synthesizer behavior required by the domain.
+    
+    Supports both sync and async implementations via duck typing.
+    Async methods (synth_and_play_async, synth_to_wav_async) are optional;
+    if present, domain will prefer them to avoid event loop blocking.
+    """
 
     def synth_and_play(self, text: str, streaming: bool = False, pipeline: bool = True) -> float: ...
 
@@ -343,14 +348,26 @@ class TTSDomainService:
                 t0 = time.time()
                 streaming = self._config.streaming_enabled if streaming_override is None else bool(streaming_override)
                 pipeline = self._config.pipeline_enabled if pipeline_override is None else bool(pipeline_override)
-                elapsed = await asyncio.to_thread(
-                    self._do_synth_and_play_blocking,
-                    synth,
-                    text,
-                    streaming,
-                    pipeline,
-                    wake_ack,
-                )
+                
+                # Use async synth if available to avoid double-threading overhead
+                if self._has_async_synth(synth):
+                    elapsed = await self._do_synth_and_play_async(
+                        synth,
+                        text,
+                        streaming,
+                        pipeline,
+                        wake_ack,
+                    )
+                else:
+                    # Offload to thread to avoid blocking event loop during synthesis
+                    elapsed = await asyncio.to_thread(
+                        self._do_synth_and_play_blocking,
+                        synth,
+                        text,
+                        streaming,
+                        pipeline,
+                        wake_ack,
+                    )
                 t1 = time.time()
                 if stt_ts is not None:
                     logger.info(
@@ -502,6 +519,41 @@ class TTSDomainService:
             return None
         trimmed = value.strip()
         return trimmed or None
+
+    def _has_async_synth(self, synth: Synthesizer) -> bool:
+        """Check if synthesizer supports async methods."""
+        return hasattr(synth, "synth_and_play_async") and callable(getattr(synth, "synth_and_play_async"))
+
+    async def _do_synth_and_play_async(
+        self,
+        synth: Synthesizer,
+        text: str,
+        streaming: bool,
+        pipeline: bool,
+        wake_ack: bool,
+    ) -> float:
+        """Async synthesis using native async synthesizer methods (no double-threading)."""
+        session = self._current_session
+        try:
+            if wake_ack and self._wake_cache is not None and hasattr(synth, "synth_to_wav_async"):
+                try:
+                    # Wake cache ensure is still sync (lightweight I/O check)
+                    cache_path = await asyncio.to_thread(self._wake_cache.ensure, text, synth)
+                except Exception as exc:
+                    logger.debug("Wake cache unavailable for '%s': %s", text, exc)
+                else:
+                    return await asyncio.to_thread(self._play_wav_path, cache_path, session)
+            if not streaming and hasattr(synth, "synth_to_wav_async"):
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as f:
+                    await synth.synth_to_wav_async(text, f.name)  # type: ignore[attr-defined]
+                    return await asyncio.to_thread(self._play_wav_path, Path(f.name), session)
+            try:
+                return await synth.synth_and_play_async(text, streaming=streaming, pipeline=pipeline)  # type: ignore[attr-defined]
+            except TypeError:
+                return await synth.synth_and_play_async(text)  # type: ignore[attr-defined]
+        finally:
+            if session is not None:
+                session.player_proc = None
 
     def _do_synth_and_play_blocking(
         self,

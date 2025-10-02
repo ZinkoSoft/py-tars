@@ -7,8 +7,11 @@ stored vectors were created with a different embedding model (hence a
 different dimensionality) than the current embedder, HyperDB will transparently
 re-embed all existing documents on the next add/query to match the current
 dimension. This avoids runtime errors like vstack/MatMul dimension mismatches.
+
+Supports both sync and async embedding functions via duck typing.
 """
 
+import asyncio
 from dataclasses import dataclass
 import logging
 from typing import Any, Callable, Iterable
@@ -40,13 +43,19 @@ class HyperConfig:
 
 
 class HyperDB:
-    """Hybrid doc store supporting vector and BM25 retrieval with optional rerank."""
+    """Hybrid doc store supporting vector and BM25 retrieval with optional rerank.
+    
+    Supports both sync and async embedding functions via duck typing.
+    If embedding_fn has an embed_async method, async operations will use it.
+    """
 
     def __init__(self, embedding_fn: Callable[[list[str]], np.ndarray], cfg: HyperConfig | None = None):
         self.cfg = cfg or HyperConfig()
         self.embed = embedding_fn
         self.documents: list[Any] = []
         self.vectors: np.ndarray | None = None
+        # Check if embedding function supports async (duck typing)
+        self._has_async_embed = hasattr(embedding_fn, "embed_async")
 
         # BM25 components
         self.stemmer = Stemmer.Stemmer("english") if self.cfg.rag_strategy == "hybrid" else None
@@ -83,6 +92,10 @@ class HyperDB:
         self.bm25.index(self.corpus_tokens)
 
     def add(self, docs: Iterable[Any]):
+        """Synchronous document addition (blocks for CPU-bound embedding).
+        
+        For async contexts, prefer add_async() to avoid blocking the event loop.
+        """
         docs = list(docs)
         if not docs:
             return
@@ -104,6 +117,48 @@ class HyperDB:
                 logger.info(f"Embedding dim changed {cur_dim} -> {new_dim}; re-embedding {len(self.documents)} existing docs")
                 existing_texts = [self._doc_to_text(d) for d in self.documents]
                 self.vectors = np.asarray(self.embed(existing_texts), dtype=np.float32)
+            self.vectors = np.vstack([self.vectors, vecs])
+        self.documents.extend(docs)
+        self._ensure_bm25()
+    
+    async def add_async(self, docs: Iterable[Any]):
+        """Async document addition using async embeddings.
+        
+        Offloads CPU-bound embedding computation to avoid blocking the event loop
+        during memory indexing operations (e.g., when ingesting STT/TTS messages).
+        
+        Args:
+            docs: Documents to add to the index
+        """
+        docs = list(docs)
+        if not docs:
+            return
+        # Generate embeddings asynchronously
+        texts = [self._doc_to_text(d) for d in docs]
+        if self._has_async_embed:
+            vecs = np.asarray(await self.embed.embed_async(texts), dtype=np.float32)  # type: ignore[attr-defined]
+        else:
+            # Fallback to sync embed wrapped in to_thread
+            vecs = await asyncio.to_thread(lambda: np.asarray(self.embed(texts), dtype=np.float32))
+        
+        if self.vectors is None:
+            self.vectors = vecs
+        else:
+            # If dimensions differ due to an embedding model change, re-embed existing corpus
+            try:
+                cur_dim = int(self.vectors.shape[1]) if self.vectors.ndim == 2 else int(self.vectors.shape[-1])
+                new_dim = int(vecs.shape[1]) if vecs.ndim == 2 else int(vecs.shape[-1])
+            except Exception:
+                cur_dim = self.vectors.shape[-1]
+                new_dim = vecs.shape[-1]
+
+            if cur_dim != new_dim:
+                logger.info(f"Embedding dim changed {cur_dim} -> {new_dim}; re-embedding {len(self.documents)} existing docs")
+                existing_texts = [self._doc_to_text(d) for d in self.documents]
+                if self._has_async_embed:
+                    self.vectors = np.asarray(await self.embed.embed_async(existing_texts), dtype=np.float32)  # type: ignore[attr-defined]
+                else:
+                    self.vectors = await asyncio.to_thread(lambda: np.asarray(self.embed(existing_texts), dtype=np.float32))
             self.vectors = np.vstack([self.vectors, vecs])
         self.documents.extend(docs)
         self._ensure_bm25()
@@ -134,6 +189,10 @@ class HyperDB:
             return False
 
     def query(self, query_text: str, top_k: int | None = None) -> list[tuple[Any, float]]:
+        """Synchronous query (blocks for CPU-bound embedding).
+        
+        For async contexts, prefer query_async() to avoid blocking the event loop.
+        """
         if not self.documents or self.vectors is None or self.vectors.size == 0:
             return []
         k = top_k or self.cfg.top_k
@@ -149,6 +208,79 @@ class HyperDB:
             logger.info(f"Vector/query dim mismatch {cur_dim} vs {q_dim}; re-embedding {len(self.documents)} docs to reconcile")
             texts = [self._doc_to_text(d) for d in self.documents]
             self.vectors = np.asarray(self.embed(texts), dtype=np.float32)
+
+        sims = cosine_similarity(self.vectors, qv)
+        top_idx = np.argsort(sims)[-max(1, k * 2):][::-1]
+
+        candidates = [(self.documents[i], float(sims[i])) for i in top_idx]
+
+        if self.cfg.rag_strategy == "hybrid" and self.bm25 is not None:
+            # BM25 retrieve
+            qtok = bm25s.tokenize([query_text], stopwords="en", stemmer=self.stemmer)
+            bm_idx, bm_scores = self.bm25.retrieve(qtok, k=min(len(self.documents), max(1, k * 2)))
+            try:
+                bm_idx = bm_idx[0]; bm_scores = bm_scores[0]
+            except Exception:
+                bm_idx, bm_scores = [], []
+
+            # Reciprocal rank fusion
+            v_ranks = {i: r + 1 for r, i in enumerate([i for i in top_idx])}
+            b_ranks = {int(i): r + 1 for r, i in enumerate(list(bm_idx))}
+            all_ids = set(v_ranks) | set(b_ranks)
+            rrf = {i: (1 / (60 + v_ranks.get(i, len(self.documents) + 1))) + (1 / (60 + b_ranks.get(i, len(self.documents) + 1))) for i in all_ids}
+            fused = sorted(rrf.items(), key=lambda x: x[1], reverse=True)[: max(k * 2, k)]
+            candidates = [(self.documents[i], rrf[i]) for i, _ in fused]
+
+        # Optional rerank
+        if self.reranker and candidates:
+            passages = [{"id": idx, "text": self._doc_to_text(doc), "meta": {}} for idx, (doc, _) in enumerate(candidates)]
+            try:
+                results = self.reranker.rerank(RerankRequest(query=query_text, passages=passages))
+                order = sorted(((r["id"], r.get("score", 0.0)) for r in results), key=lambda x: x[1], reverse=True)
+                reranked = [candidates[i] for i, _ in order[:k]]
+                return reranked
+            except Exception:
+                pass
+
+        return candidates[:k]
+    
+    async def query_async(self, query_text: str, top_k: int | None = None) -> list[tuple[Any, float]]:
+        """Async query using async embeddings.
+        
+        Offloads CPU-bound embedding computation to avoid blocking the event loop
+        during memory retrieval operations (e.g., when processing RAG queries).
+        
+        Args:
+            query_text: Query string to search for
+            top_k: Number of results to return (defaults to config.top_k)
+            
+        Returns:
+            List of (document, score) tuples sorted by relevance
+        """
+        if not self.documents or self.vectors is None or self.vectors.size == 0:
+            return []
+        k = top_k or self.cfg.top_k
+        
+        # Vector search with async embedding
+        if self._has_async_embed:
+            qv_list = await self.embed.embed_async([query_text])  # type: ignore[attr-defined]
+            qv = np.asarray(qv_list[0], dtype=np.float32)
+        else:
+            qv = await asyncio.to_thread(lambda: np.asarray(self.embed([query_text])[0], dtype=np.float32))
+        
+        # Ensure dimensions are compatible; if not, re-embed entire corpus to current embedder dimension
+        try:
+            cur_dim = int(self.vectors.shape[1]) if self.vectors.ndim == 2 else int(self.vectors.shape[-1])
+        except Exception:
+            cur_dim = self.vectors.shape[-1]
+        q_dim = int(qv.shape[0]) if qv.ndim == 1 else int(qv.shape[1])
+        if cur_dim != q_dim:
+            logger.info(f"Vector/query dim mismatch {cur_dim} vs {q_dim}; re-embedding {len(self.documents)} docs to reconcile")
+            texts = [self._doc_to_text(d) for d in self.documents]
+            if self._has_async_embed:
+                self.vectors = np.asarray(await self.embed.embed_async(texts), dtype=np.float32)  # type: ignore[attr-defined]
+            else:
+                self.vectors = await asyncio.to_thread(lambda: np.asarray(self.embed(texts), dtype=np.float32))
 
         sims = cosine_similarity(self.vectors, qv)
         top_idx = np.argsort(sims)[-max(1, k * 2):][::-1]
