@@ -327,14 +327,16 @@ if [[ "$WIFI_OPTION" == "1" ]]; then
         
         info "Found ${#WIFI_NETWORKS[@]} network(s):"
         for i in "${!WIFI_NETWORKS[@]}"; do
-            echo "  [$i] ${WIFI_NETWORKS[$i]}"
+            # Display with 1-based numbering for better UX
+            echo "  [$((i+1))] ${WIFI_NETWORKS[$i]}"
         done
         
         echo ""
         read -p "Select network number (or press Enter to enter manually): " WIFI_NUM
         
-        if [[ -n "$WIFI_NUM" ]] && [[ "$WIFI_NUM" =~ ^[0-9]+$ ]] && [[ "$WIFI_NUM" -lt "${#WIFI_NETWORKS[@]}" ]]; then
-            WIFI_SSID="${WIFI_NETWORKS[$WIFI_NUM]}"
+        if [[ -n "$WIFI_NUM" ]] && [[ "$WIFI_NUM" =~ ^[0-9]+$ ]] && [[ "$WIFI_NUM" -ge 1 ]] && [[ "$WIFI_NUM" -le "${#WIFI_NETWORKS[@]}" ]]; then
+            # Convert 1-based user input to 0-based array index
+            WIFI_SSID="${WIFI_NETWORKS[$((WIFI_NUM-1))]}"
             success "Selected: $WIFI_SSID"
         else
             read -p "Enter WiFi SSID manually: " WIFI_SSID
