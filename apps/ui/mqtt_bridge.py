@@ -35,6 +35,7 @@ class MqttBridge:
         self.partial_topic = topics.get("partial")
         self.final_topic = topics.get("final")
         self.tts_topic = topics.get("tts")
+        self.llm_response_topic = topics.get("llm_response")
         self.audio_topic = topics.get("audio")
         self._subscribe_audio = subscribe_audio and bool(self.audio_topic)
         self.client.on_message = self._on_message
@@ -59,8 +60,11 @@ class MqttBridge:
             topics.append((self.final_topic, 0))
         if self.tts_topic:
             topics.append((self.tts_topic, 0))
+        if self.llm_response_topic:
+            topics.append((self.llm_response_topic, 0))
         if self._subscribe_audio and self.audio_topic:
             topics.append((self.audio_topic, 0))
+        logger.info(f"MQTT Bridge subscribing to topics: {topics}")
         if topics:
             self.client.subscribe(topics)
         self._thread = threading.Thread(target=self.client.loop_forever, daemon=True)

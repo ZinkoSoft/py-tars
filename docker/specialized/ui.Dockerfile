@@ -18,10 +18,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# Copy requirements first for layer caching
 COPY apps/ui/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir --upgrade pip && \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
+# Copy source code - Docker automatically detects changes
 COPY apps/ui/ /app/
 
 ENV UI_CONFIG="/config/ui.toml"

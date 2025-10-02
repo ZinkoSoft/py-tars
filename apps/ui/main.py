@@ -29,6 +29,7 @@ AUDIO_EVENT = AUDIO_TOPIC or "__fft__"
 PARTIAL_TOPIC = CFG["topics"]["partial"]
 FINAL_TOPIC = CFG["topics"]["final"]
 TTS_TOPIC = CFG["topics"]["tts"]
+LLM_RESPONSE_TOPIC = CFG["topics"]["llm_response"]
 
 FFT_WS_CFG = CFG.get("fft_ws", {})
 
@@ -51,8 +52,11 @@ try:
 except (TypeError, ValueError):
     FFT_WS_RETRY = 5.0
 
-logging.basicConfig(level=logging.INFO)
+print("========== TARS UI STARTING ==========")
+print(f"MQTT Topics: final={FINAL_TOPIC}, llm={LLM_RESPONSE_TOPIC}, tts={TTS_TOPIC}")
+logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(name)s:%(message)s')
 logger = logging.getLogger("tars.ui")
+print("========== LOGGING CONFIGURED ==========")
 
 u = urlparse(MQTT_URL)
 host = u.hostname or "127.0.0.1"
@@ -72,12 +76,21 @@ class UI:
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont(FONT_NAME, 22)
         self.big_font = pygame.font.SysFont(FONT_NAME, 28)
+        self.small_font = pygame.font.SysFont(FONT_NAME, 18)
         self.last_partial = ""
         self.last_final = ""
+        self.last_final_time = 0.0
+        self.last_llm_response = ""
+        self.last_llm_response_time = 0.0
         self.last_tts = ""
+        self.tts_speaking = False
+        self.tts_ended_time = 0.0
         self.boot_message = "System Online"
         self.boot_message_started = time.monotonic()
         self.boot_message_duration = 3.0
+        # Fade durations
+        self.stt_fade_duration = 3.0  # STT fades after 3 seconds
+        self.llm_fade_duration = 4.0  # LLM fades after TTS ends + 4 seconds
         self.components: dict[str, Any] = {}
         self.spectrum_component: SpectrumBars | None = None
 
@@ -136,25 +149,100 @@ class UI:
         if self.spectrum_component is not None:
             spectrum_top = min(spectrum_top, self.spectrum_component.box.y)
 
-        upper_height = max(120, spectrum_top - 40)
-        transcript_y = max(20, int(upper_height * 0.35))
-        response_y = max(transcript_y + self.big_font.get_linesize() * 2, int(upper_height * 0.6))
-        response_y = min(response_y, spectrum_top - self.font.get_linesize() - 10)
-
-        # Middle transcript
-        txt_surface = self.big_font.render(self.last_partial or self.last_final, True, (240, 240, 240))
-        self.screen.blit(txt_surface, (20, transcript_y))
-        # Bottom AI response
-        active_tts = self.last_tts
+        # Calculate positions
+        margin = 20
+        top_y = 20
+        
+        # STT Final text (top right) - fades out after 3 seconds
+        if self.last_final:
+            stt_elapsed = now - self.last_final_time
+            if stt_elapsed < self.stt_fade_duration:
+                # Calculate fade alpha (255 -> 0 over fade duration)
+                fade_progress = stt_elapsed / self.stt_fade_duration
+                alpha = int(255 * (1.0 - fade_progress))
+                alpha = max(0, min(255, alpha))
+                
+                # Render STT text (right-aligned)
+                stt_text = f"You: {self.last_final}"
+                stt_surface = self.small_font.render(stt_text, True, (200, 200, 255))
+                stt_surface.set_alpha(alpha)
+                stt_x = self.width - stt_surface.get_width() - margin
+                self.screen.blit(stt_surface, (stt_x, top_y))
+            else:
+                # Clear after fade duration
+                self.last_final = ""
+        
+        # LLM Response (below STT, left-aligned) - fades out after TTS ends
+        if self.last_llm_response:
+            # Calculate alpha based on TTS state
+            alpha = 255  # Default: full opacity
+            
+            # If TTS has ended, start fading
+            if not self.tts_speaking and self.tts_ended_time > 0:
+                llm_elapsed = now - self.tts_ended_time
+                if llm_elapsed < self.llm_fade_duration:
+                    # Calculate fade alpha
+                    fade_progress = llm_elapsed / self.llm_fade_duration
+                    alpha = int(255 * (1.0 - fade_progress))
+                    alpha = max(0, min(255, alpha))
+                else:
+                    # Clear after fade duration
+                    self.last_llm_response = ""
+                    alpha = 0
+            
+            # Render LLM response if alpha > 0
+            if alpha > 0:
+                self._render_wrapped_text(
+                    self.last_llm_response,
+                    margin,
+                    top_y + 30,
+                    self.width - margin * 2,
+                    (180, 255, 180),
+                    alpha
+                )
+        
+        # Boot message (backwards compatible)
         if self.boot_message:
             elapsed = time.monotonic() - self.boot_message_started
-            if elapsed <= self.boot_message_duration and not self.last_tts:
-                active_tts = self.boot_message
+            if elapsed <= self.boot_message_duration and not self.last_llm_response:
+                boot_surface = self.font.render(self.boot_message, True, (180, 220, 180))
+                self.screen.blit(boot_surface, (margin, top_y + 30))
             else:
                 self.boot_message = ""
-        tts_surface = self.font.render(active_tts, True, (180, 220, 180))
-        self.screen.blit(tts_surface, (20, response_y))
+        
         pygame.display.flip()
+
+    def _render_wrapped_text(self, text: str, x: int, y: int, max_width: int, color: tuple, alpha: int):
+        """Render text with word wrapping and alpha transparency."""
+        words = text.split()
+        lines = []
+        current_line = []
+        
+        for word in words:
+            current_line.append(word)
+            test_line = " ".join(current_line)
+            test_surface = self.font.render(test_line, True, color)
+            
+            if test_surface.get_width() > max_width:
+                if len(current_line) > 1:
+                    # Line too long, render previous line
+                    current_line.pop()
+                    lines.append(" ".join(current_line))
+                    current_line = [word]
+                else:
+                    # Single word too long, render it anyway
+                    lines.append(test_line)
+                    current_line = []
+        
+        if current_line:
+            lines.append(" ".join(current_line))
+        
+        # Render each line
+        line_height = self.font.get_linesize()
+        for i, line in enumerate(lines):
+            line_surface = self.font.render(line, True, color)
+            line_surface.set_alpha(alpha)
+            self.screen.blit(line_surface, (x, y + i * line_height))
 
 def main():
     event_queue = queue.Queue(maxsize=256)
@@ -163,8 +251,11 @@ def main():
         "partial": PARTIAL_TOPIC,
         "final": FINAL_TOPIC,
         "tts": TTS_TOPIC,
+        "llm_response": LLM_RESPONSE_TOPIC,
         "audio": AUDIO_TOPIC,
     }
+    logger.info(f"UI Topics config: {topics}")
+    logger.info(f"MQTT connection: host={host}, port={port}, user={username}")
     bridge = MqttBridge(
         event_queue,
         host=host,
@@ -174,7 +265,9 @@ def main():
         password=password,
         subscribe_audio=not use_ws,
     )
+    logger.info("Starting MQTT bridge...")
     bridge.start()
+    logger.info("MQTT bridge started")
     fft_client: FFTWebsocketClient | None = None
     if use_ws:
         fft_client = FFTWebsocketClient(FFT_WS_URL, AUDIO_EVENT, event_queue, retry_seconds=FFT_WS_RETRY)
@@ -189,15 +282,42 @@ def main():
                     running = False
             topic, payload = bridge.poll()
             if topic:
+                # Only log non-FFT messages to avoid spam
+                if topic != AUDIO_EVENT:
+                    logger.info(f"RX topic={topic}")
                 if topic == PARTIAL_TOPIC:
-                    ui.last_partial = payload.get("text", "")
+                    # STT messages may have nested data structure
+                    data = payload.get("data", payload)
+                    ui.last_partial = data.get("text", "")
+                    logger.info(f"STT Partial: {ui.last_partial}")
                 elif topic == FINAL_TOPIC:
-                    ui.last_final = payload.get("text", "")
+                    # STT messages may have nested data structure
+                    data = payload.get("data", payload)
+                    ui.last_final = data.get("text", "")
+                    ui.last_final_time = time.monotonic()
                     ui.last_partial = ""
+                    logger.info(f"STT Final: {ui.last_final}")
+                elif topic == LLM_RESPONSE_TOPIC:
+                    # Handle LLM response (may have nested data structure)
+                    data = payload.get("data", payload)
+                    reply = data.get("reply")
+                    logger.info(f"LLM Response: reply={reply}")
+                    if reply:
+                        ui.last_llm_response = reply
+                        ui.last_llm_response_time = time.monotonic()
+                        ui.tts_ended_time = 0.0  # Reset fade timer
+                        logger.info(f"Set LLM response to: {ui.last_llm_response}")
                 elif topic == TTS_TOPIC:
-                    ev = payload.get("event")
+                    # TTS status has nested structure: payload.data.event
+                    data = payload.get("data", {})
+                    ev = data.get("event")
+                    logger.info(f"TTS event: {ev}, speaking={ui.tts_speaking}")
                     if ev == "speaking_start":
-                        ui.last_tts = payload.get("text", "")
+                        ui.last_tts = data.get("text", "")
+                        ui.tts_speaking = True
+                    elif ev == "speaking_end":
+                        ui.tts_speaking = False
+                        ui.tts_ended_time = time.monotonic()
                 elif topic == AUDIO_EVENT:
                     fft_vals = payload.get("fft") or []
                     if ui.spectrum_component is not None:

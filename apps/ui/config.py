@@ -34,6 +34,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "partial": "stt/partial",
         "final": "stt/final",
         "tts": "tts/status",
+        "llm_response": "llm/response",
     },
     "fft_ws": {
         "enabled": True,
@@ -92,6 +93,7 @@ def load_config() -> Dict[str, Any]:
         ("topics", "partial"): os.getenv("UI_PARTIAL_TOPIC"),
         ("topics", "final"): os.getenv("UI_FINAL_TOPIC"),
         ("topics", "tts"): os.getenv("UI_TTS_TOPIC"),
+        ("topics", "llm_response"): os.getenv("UI_LLM_RESPONSE_TOPIC"),
         ("fft_ws", "enabled"): os.getenv("UI_FFT_WS_ENABLE"),
         ("fft_ws", "url"): os.getenv("UI_FFT_WS_URL"),
         ("fft_ws", "retry_seconds"): os.getenv("UI_FFT_WS_RETRY"),
