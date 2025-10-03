@@ -5,8 +5,7 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Tuple
-from urllib.parse import urlparse
+from typing import Any
 
 import asyncio_mqtt as mqtt
 import numpy as np
@@ -34,6 +33,7 @@ from .config import (
     TOP_K,
 )
 from .hyperdb import HyperConfig, HyperDB
+from .mqtt_client import MemoryMQTTClient
 
 from tars.contracts.envelope import Envelope
 from tars.contracts.registry import register
@@ -73,11 +73,6 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("memory-worker")
-
-
-def parse_mqtt(url: str) -> Tuple[str, int, str | None, str | None]:
-    parsed = urlparse(url)
-    return parsed.hostname or "127.0.0.1", parsed.port or 1883, parsed.username, parsed.password
 
 
 class STEmbedder:
@@ -133,6 +128,7 @@ class MemoryService:
         self.db = HyperDB(embedding_fn=self.embedder, cfg=HyperConfig(rag_strategy=RAG_STRATEGY, top_k=TOP_K))
         self._load_or_initialize_db()
         self.character = self._load_character()
+        self.mqtt_client = MemoryMQTTClient(MQTT_URL, source_name=SOURCE_NAME)
 
     def _register_topics(self) -> None:
         register(EVENT_TYPE_MEMORY_QUERY, TOPIC_QUERY)
@@ -190,23 +186,16 @@ class MemoryService:
             logger.warning("Could not reconcile embedding dimensions", exc_info=True)
 
     async def run(self) -> None:
-        host, port, user, password = parse_mqtt(MQTT_URL)
-        logger.info("Connecting to MQTT %s:%s", host, port)
         try:
-            async with mqtt.Client(
-                hostname=host,
-                port=port,
-                username=user,
-                password=password,
-                client_id="tars-memory",
-            ) as client:
-                logger.info("Connected to MQTT %s:%s as tars-memory", host, port)
+            async with await self.mqtt_client.connect() as client:
                 await self._publish_health(client, ok=True, event="ready", retain=True)
                 await self._publish_character_current(client)
+                
+                # Subscribe to all topics
+                topics = [TOPIC_STT_FINAL, TOPIC_TTS_SAY, TOPIC_QUERY, TOPIC_CHAR_GET]
+                await self.mqtt_client.subscribe(client, topics)
+                
                 async with client.messages() as stream:
-                    for topic in (TOPIC_STT_FINAL, TOPIC_TTS_SAY, TOPIC_QUERY, TOPIC_CHAR_GET):
-                        await client.subscribe(topic)
-                        logger.info("Subscribed to %s", topic)
                     async for message in stream:
                         topic = str(getattr(message, "topic", ""))
                         payload = message.payload
@@ -240,7 +229,7 @@ class MemoryService:
         retain: bool = False,
     ) -> None:
         payload = HealthPing(ok=ok, event=event, err=err)
-        await self._publish_event(
+        await self.mqtt_client.publish_event(
             client,
             event_type=EVENT_TYPE_MEMORY_HEALTH,
             topic=TOPIC_HEALTH,
@@ -251,7 +240,7 @@ class MemoryService:
         )
 
     async def _publish_character_current(self, client: mqtt.Client) -> None:
-        await self._publish_event(
+        await self.mqtt_client.publish_event(
             client,
             event_type=EVENT_TYPE_CHARACTER_CURRENT,
             topic=TOPIC_CHAR_CURRENT,
@@ -278,7 +267,7 @@ class MemoryService:
             for doc, score in results
         ]
         payload = MemoryResults(query=query.text, k=top_k, results=hits)
-        await self._publish_event(
+        await self.mqtt_client.publish_event(
             client,
             event_type=EVENT_TYPE_MEMORY_RESULTS,
             topic=TOPIC_RESULTS,
@@ -296,7 +285,7 @@ class MemoryService:
     ) -> None:
         snapshot_dict = self.character.model_dump()
         if not request.section:
-            await self._publish_event(
+            await self.mqtt_client.publish_event(
                 client,
                 event_type=EVENT_TYPE_CHARACTER_RESULT,
                 topic=TOPIC_CHAR_RESULT,
@@ -312,7 +301,7 @@ class MemoryService:
         else:
             value = {"error": f"unknown section '{section}'", "available": list(snapshot_dict.keys())}
         payload = CharacterSection(section=section, value=value)
-        await self._publish_event(
+        await self.mqtt_client.publish_event(
             client,
             event_type=EVENT_TYPE_CHARACTER_RESULT,
             topic=TOPIC_CHAR_RESULT,
@@ -413,20 +402,6 @@ class MemoryService:
             if text:
                 return {"text": text}, None
         return {}, None
-
-    async def _publish_event(
-        self,
-        client: mqtt.Client,
-        *,
-        event_type: str,
-        topic: str,
-        payload: Any,
-        correlate: str | None,
-        qos: int,
-        retain: bool,
-    ) -> None:
-        envelope = Envelope.new(event_type=event_type, data=payload, correlate=correlate, source=SOURCE_NAME)
-        await client.publish(topic, envelope.model_dump_json().encode(), qos=qos, retain=retain)
 
     def _load_character(self) -> CharacterSnapshot:
         try:
