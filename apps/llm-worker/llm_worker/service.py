@@ -32,6 +32,8 @@ from .config import (
     TOPIC_CHARACTER_CURRENT,
     TOPIC_CHARACTER_GET,
     TOPIC_CHARACTER_RESULT,
+    TOOL_CALLING_ENABLED,
+    TOPIC_TOOLS_REGISTRY,
     # TTS streaming config
     LLM_TTS_STREAM,
     TOPIC_TTS_SAY,
@@ -45,6 +47,7 @@ from .config import (
     TOPIC_TOOL_CALL_RESULT,
 )
 from .providers.openai import OpenAIProvider
+from .mcp_client import get_mcp_client
 
 from tars.contracts.envelope import Envelope  # type: ignore[import]
 from tars.contracts.registry import register  # type: ignore[import]
@@ -196,11 +199,21 @@ class LLMService:
         return "", text
 
     async def _load_tools(self, payload: bytes) -> None:
-        """Load tools from MCP bridge registry."""
+        """Load tools from MCP bridge registry and initialize MCP client."""
         try:
             data = json.loads(payload)
             self.tools = data.get("tools", [])
             logger.info("Loaded %d tools from registry", len(self.tools))
+            
+            # Initialize MCP client with registry data
+            if TOOL_CALLING_ENABLED:
+                mcp_client = get_mcp_client()
+                await mcp_client.initialize_from_registry(data)
+                
+                # Connect to known servers (hardcoded for now, could be from config)
+                # TODO: Get server URLs from registry metadata or config
+                await mcp_client.connect_to_server("test-server", "http://mcp-test-server:8080/mcp")
+                logger.info("MCP client initialized and connected")
         except Exception as e:
             logger.error("Failed to load tools: %s", e)
 
@@ -251,62 +264,53 @@ class LLMService:
             logger.error("Failed to handle tool result: %s", e)
 
     async def _execute_tool_calls(self, client, tool_calls: list[dict], req_id: str, correlation_id: str) -> list[dict]:
-        """Execute tool calls and return results using asyncio.Future pattern.
+        """Execute tool calls directly via MCP client.
         
-        Creates a future for each tool call, publishes the request, and waits
-        for _handle_tool_result to resolve the future when the result arrives.
-        No polling - immediate response when result is published.
+        No MQTT round-trip - calls MCP servers directly for lower latency.
         
         Args:
-            client: MQTT client
+            client: MQTT client (unused, kept for signature compatibility)
             tool_calls: List of tool call objects from LLM
             req_id: Request ID
             correlation_id: Correlation ID for tracing
             
         Returns:
-            List of tool results
+            List of tool results with call_id and content/error
         """
         results = []
+        mcp_client = get_mcp_client()
+        
         for call in tool_calls:
             call_id = call.get("id")
             if not call_id:
                 continue
             
-            call_payload = {
-                "call_id": call_id,
-                "name": call.get("function", {}).get("name"),
-                "arguments": json.loads(call.get("function", {}).get("arguments", "{}")),
-            }
+            tool_name = call.get("function", {}).get("name")
+            arguments_str = call.get("function", {}).get("arguments", "{}")
             
             try:
-                # Create future for this tool call
-                future: asyncio.Future[dict] = asyncio.Future()
-                self._tool_futures[call_id] = future
+                arguments = json.loads(arguments_str)
+                logger.info(f"Executing tool: {tool_name} with args: {arguments}")
                 
-                # Publish tool call request
-                topic = f"{TOPIC_TOOL_CALL_REQUEST}/{call_id}"
-                await self._publish_event(
-                    client,
-                    event_type=EVENT_TYPE_TOOL_CALL_REQUEST,
-                    topic=topic,
-                    payload=call_payload,
-                    correlate=correlation_id,
-                )
-                logger.info("Published tool call request for %s", call_id)
+                # Execute directly via MCP client
+                result = await mcp_client.execute_tool(tool_name, arguments)
                 
-                # Wait for result with timeout (no polling - immediate response)
-                try:
-                    result = await asyncio.wait_for(future, timeout=30.0)
-                    results.append(result)
-                    logger.debug("Received tool result for %s", call_id)
-                except asyncio.TimeoutError:
-                    self._tool_futures.pop(call_id, None)
-                    logger.warning("Timeout waiting for tool result for call_id=%s", call_id)
-                    results.append({"call_id": call_id, "error": "timeout"})
+                # Format result for OpenAI
+                if "error" in result and result.get("error"):
+                    results.append({
+                        "call_id": call_id,
+                        "error": result["error"]
+                    })
+                    logger.error(f"Tool {tool_name} failed: {result['error']}")
+                else:
+                    results.append({
+                        "call_id": call_id,
+                        "content": result.get("content", "")
+                    })
+                    logger.info(f"Tool {tool_name} succeeded: {result.get('content', '')[:100]}")
                     
             except Exception as e:
-                self._tool_futures.pop(call_id, None)
-                logger.error("Failed to execute tool call %s: %s", call_id, e)
+                logger.error(f"Failed to execute tool call {call_id}: {e}", exc_info=True)
                 results.append({"call_id": call_id, "error": str(e)})
         
         return results
@@ -328,22 +332,19 @@ class LLMService:
         # Execute tool calls
         tool_results = await self._execute_tool_calls(client, tool_calls, req_id, correlation_id)
         
-        # Add tool results to conversation
-        for call in tool_calls:
-            messages.append({
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [call]
-            })
-        
+        # Add tool result messages to conversation
         for result in tool_results:
-            messages.append({
+            # Use content if successful, otherwise error message
+            error = result.get("error")
+            content = result.get("content") if not error else error
+            tool_msg = {
                 "role": "tool",
-                "content": json.dumps(result.get("result", result.get("error", "unknown error"))),
+                "content": content or "",
                 "tool_call_id": result["call_id"]
-            })
+            }
+            messages.append(tool_msg)
         
-        # Generate follow-up response
+        # Generate follow-up response with tool results
         followup_result = await self.provider.generate_chat(
             messages=messages,
             model=model,
@@ -666,6 +667,12 @@ class LLMService:
                                 # Check for tool calls
                                 tool_calls = self._extract_tool_calls(result)
                                 if tool_calls and TOOL_CALLING_ENABLED:
+                                    # Add assistant message with tool_calls to conversation history
+                                    messages.append({
+                                        "role": "assistant",
+                                        "content": result.text,
+                                        "tool_calls": tool_calls
+                                    })
                                     # Handle tool calls and send follow-up response
                                     await self._handle_tool_calls_and_respond(
                                         client, tool_calls, messages, req_id, correlation_id,

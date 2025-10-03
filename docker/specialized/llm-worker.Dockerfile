@@ -30,8 +30,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir /tmp/llm-worker && \
     rm -rf /tmp/llm-worker
 
-# Copy source code LAST (this layer invalidates most frequently)
-COPY apps/llm-worker/llm_worker /app/llm_worker
+# Source code will be provided via volume mount at /workspace/apps/llm-worker
+# This enables live code updates without container rebuild
+# NOTE: The pip install above creates the package entry but source comes from workspace
 
 ENV LOG_LEVEL=INFO
 

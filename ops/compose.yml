@@ -265,8 +265,18 @@ services:
       LLM_MODEL: gpt-4o-mini
       LLM_MAX_TOKENS: "512"
       LLM_TEMPERATURE: "0.7"
+      TOOL_CALLING_ENABLED: ${TOOL_CALLING_ENABLED:-false}
+      OPENAI_RESPONSES_MODELS: ${OPENAI_RESPONSES_MODELS:-gpt-5*,gpt-5-mini,gpt-5-nano}
+      TOPIC_TOOLS_REGISTRY: ${TOPIC_TOOLS_REGISTRY:-llm/tools/registry}
+      TOPIC_TOOL_CALL_REQUEST: ${TOPIC_TOOL_CALL_REQUEST:-llm/tool.call.request}
+      TOPIC_TOOL_CALL_RESULT: ${TOPIC_TOOL_CALL_RESULT:-llm/tool.call.result}
+      PYTHONPATH: /workspace/apps/llm-worker
+    volumes:
+      - ..:/workspace:ro
     depends_on:
       mqtt:
+        condition: service_started
+      mcp-bridge:
         condition: service_started
     restart: unless-stopped
 
@@ -283,12 +293,25 @@ services:
       MQTT_PORT: "1883"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       MCP_SERVERS_YAML: /config/mcp.server.yml
+      PYTHONPATH: /workspace/apps/mcp-bridge
     volumes:
       - ../ops/mcp/mcp.server.yml:/config/mcp.server.yml:ro
       - ..:/workspace
     depends_on:
       mqtt:
         condition: service_started
+      mcp-test-server:
+        condition: service_started
+    restart: unless-stopped
+
+  mcp-test-server:
+    build:
+      context: ../apps/mcp-tools/test
+      dockerfile: Dockerfile
+    image: tars/mcp-test-server:dev
+    container_name: tars-mcp-test-server
+    ports:
+      - "8080:8080"
     restart: unless-stopped
 
 # Optional: define multiple network(s)

@@ -320,6 +320,8 @@ class OpenAIProvider(LLMProvider):
                 headers=headers,
             )
             logger.debug("openai.generate_chat HTTP status=%s", resp.status_code)
+            if resp.status_code >= 400:
+                logger.error(f"🔴 OpenAI API error response: {resp.text}")
             resp.raise_for_status()
             data = resp.json()
             try:

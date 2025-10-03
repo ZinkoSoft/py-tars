@@ -17,6 +17,7 @@ dependencies = [
   "pydantic==2.9.2",
   "typing_extensions==4.12.2",
   "tars-core>=0.1.0",
+  "mcp>=1.2.0",
 ]
 
 [project.optional-dependencies]

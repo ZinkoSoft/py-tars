@@ -1,9 +1,14 @@
 servers:
-  - name: filesystem
-    transport: stdio
-    command: "npx"
-    args: ["--yes", "@modelcontextprotocol/server-filesystem", "/workspace"]
-    tools_allowlist: ["read_file","write_file","list_dir"]
+  - name: test-server
+    transport: http
+    url: "http://mcp-test-server:8080/mcp"
+    tools_allowlist: ["hello", "add", "get_time"]
+  # Stdio servers (currently having handshake issues):
+  # - name: filesystem
+  #   transport: stdio
+  #   command: "npx"
+  #   args: ["--yes", "@modelcontextprotocol/server-filesystem", "/workspace"]
+  #   tools_allowlist: ["read_file","write_file","list_dir"]
 timeouts:
   connect_ms: 5000
   tool_call_ms: 30000
