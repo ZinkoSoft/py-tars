@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pygame
+from pydantic import ValidationError
 
 from urllib.parse import urlparse
 from config import load_config
@@ -14,6 +15,12 @@ from mqtt_bridge import MqttBridge
 from module.layout import Box, get_layout_dimensions, load_layout_config
 from module.spectrum import SpectrumBars
 from module.tars_idle import TarsIdle
+
+# Import typed contracts
+from tars.contracts.envelope import Envelope
+from tars.contracts.v1.stt import FinalTranscript, PartialTranscript
+from tars.contracts.v1.llm import LLMResponse
+from tars.contracts.v1.tts import TtsStatus
 
 CFG = load_config()
 
@@ -285,43 +292,58 @@ def main():
                 # Only log non-FFT messages to avoid spam
                 if topic != AUDIO_EVENT:
                     logger.info(f"RX topic={topic}")
-                if topic == PARTIAL_TOPIC:
-                    # STT messages may have nested data structure
-                    data = payload.get("data", payload)
-                    ui.last_partial = data.get("text", "")
-                    logger.info(f"STT Partial: {ui.last_partial}")
-                elif topic == FINAL_TOPIC:
-                    # STT messages may have nested data structure
-                    data = payload.get("data", payload)
-                    ui.last_final = data.get("text", "")
-                    ui.last_final_time = time.monotonic()
-                    ui.last_partial = ""
-                    logger.info(f"STT Final: {ui.last_final}")
-                elif topic == LLM_RESPONSE_TOPIC:
-                    # Handle LLM response (may have nested data structure)
-                    data = payload.get("data", payload)
-                    reply = data.get("reply")
-                    logger.info(f"LLM Response: reply={reply}")
-                    if reply:
-                        ui.last_llm_response = reply
-                        ui.last_llm_response_time = time.monotonic()
-                        ui.tts_ended_time = 0.0  # Reset fade timer
-                        logger.info(f"Set LLM response to: {ui.last_llm_response}")
-                elif topic == TTS_TOPIC:
-                    # TTS status has nested structure: payload.data.event
-                    data = payload.get("data", {})
-                    ev = data.get("event")
-                    logger.info(f"TTS event: {ev}, speaking={ui.tts_speaking}")
-                    if ev == "speaking_start":
-                        ui.last_tts = data.get("text", "")
-                        ui.tts_speaking = True
-                    elif ev == "speaking_end":
-                        ui.tts_speaking = False
-                        ui.tts_ended_time = time.monotonic()
-                elif topic == AUDIO_EVENT:
-                    fft_vals = payload.get("fft") or []
-                    if ui.spectrum_component is not None:
-                        ui.spectrum_component.update(fft_vals)
+                
+                try:
+                    if topic == PARTIAL_TOPIC:
+                        # Parse envelope and extract PartialTranscript
+                        envelope = Envelope.model_validate(payload)
+                        partial = PartialTranscript.model_validate(envelope.data)
+                        ui.last_partial = partial.text
+                        logger.info(f"STT Partial: {ui.last_partial}")
+                    
+                    elif topic == FINAL_TOPIC:
+                        # Parse envelope and extract FinalTranscript
+                        envelope = Envelope.model_validate(payload)
+                        final = FinalTranscript.model_validate(envelope.data)
+                        ui.last_final = final.text
+                        ui.last_final_time = time.monotonic()
+                        ui.last_partial = ""
+                        logger.info(f"STT Final: {ui.last_final}")
+                    
+                    elif topic == LLM_RESPONSE_TOPIC:
+                        # Parse envelope and extract LLMResponse
+                        envelope = Envelope.model_validate(payload)
+                        llm_response = LLMResponse.model_validate(envelope.data)
+                        if llm_response.reply:
+                            ui.last_llm_response = llm_response.reply
+                            ui.last_llm_response_time = time.monotonic()
+                            ui.tts_ended_time = 0.0  # Reset fade timer
+                            logger.info(f"Set LLM response to: {ui.last_llm_response}")
+                        elif llm_response.error:
+                            logger.error(f"LLM error: {llm_response.error}")
+                    
+                    elif topic == TTS_TOPIC:
+                        # Parse envelope and extract TtsStatus
+                        envelope = Envelope.model_validate(payload)
+                        tts_status = TtsStatus.model_validate(envelope.data)
+                        logger.info(f"TTS event: {tts_status.event}, speaking={ui.tts_speaking}")
+                        if tts_status.event == "speaking_start":
+                            ui.last_tts = tts_status.text
+                            ui.tts_speaking = True
+                        elif tts_status.event == "speaking_end":
+                            ui.tts_speaking = False
+                            ui.tts_ended_time = time.monotonic()
+                    
+                    elif topic == AUDIO_EVENT:
+                        # FFT data is not wrapped in envelope
+                        fft_vals = payload.get("fft") or []
+                        if ui.spectrum_component is not None:
+                            ui.spectrum_component.update(fft_vals)
+                
+                except ValidationError as e:
+                    logger.error(f"Invalid payload for topic {topic}: {e}")
+                except Exception as e:
+                    logger.error(f"Error processing topic {topic}: {e}")
             ui.render()
             ui.clock.tick(FPS)
     finally:

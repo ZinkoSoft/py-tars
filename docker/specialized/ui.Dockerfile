@@ -19,10 +19,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# Copy tars-core package first (needed for contracts)
+COPY packages/tars-core /tmp/tars-core
+
 # Copy requirements first for layer caching
 COPY apps/ui/requirements.txt ./requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir /tmp/tars-core && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy source code - Docker automatically detects changes
