@@ -9,6 +9,7 @@ import orjson as json
 from pydantic import ValidationError
 
 from .mqtt_client import MQTTClient
+from .handlers import CharacterManager, ToolExecutor, RAGHandler, MessageRouter, RequestHandler
 from .config import (
     MQTT_URL,
     LOG_LEVEL,
@@ -81,6 +82,7 @@ logger = logging.getLogger("llm-worker")
 class LLMService:
     def __init__(self):
         self._register_topics()
+        
         # Provider selection (only OpenAI for now)
         provider = LLM_PROVIDER.lower()
         if provider == "openai":
@@ -88,17 +90,35 @@ class LLMService:
         else:
             logger.warning("Unsupported provider '%s', defaulting to openai", provider)
             self.provider = OpenAIProvider(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL or None)
-        # Character/persona state (loaded via MQTT retained message)
-        self.character: Dict[str, Any] = {}
-        # Tool registry and pending results
-        self.tools: list[dict] = []
-        self.pending_tool_results: Dict[str, dict] = {}  # Legacy - kept for compatibility
-        # Pending RAG queries (keyed by correlation ID)
-        self._pending_rag: Dict[str, asyncio.Future[str]] = {}
-        # Pending tool calls (keyed by call_id) - uses futures for non-blocking wait
-        self._tool_futures: Dict[str, asyncio.Future[dict]] = {}
+        
         # MQTT client wrapper
         self.mqtt_client = MQTTClient(MQTT_URL, client_id="tars-llm", source_name="llm-worker")
+        
+        # Handlers for different responsibilities
+        self.character_mgr = CharacterManager()
+        self.tool_executor = ToolExecutor()
+        self.rag_handler = RAGHandler(TOPIC_MEMORY_QUERY)
+        
+        # Build config dict for request handler
+        self.config = self._build_config()
+        
+        # Request handler for LLM processing
+        self.request_handler = RequestHandler(
+            provider=self.provider,
+            character_mgr=self.character_mgr,
+            tool_executor=self.tool_executor,
+            rag_handler=self.rag_handler,
+            mqtt_client=self.mqtt_client,
+            config=self.config,
+        )
+        
+        # Message router to dispatch MQTT messages
+        self.router = MessageRouter(
+            character_handler=self.character_mgr,
+            tool_handler=self.tool_executor,
+            rag_handler=self.rag_handler,
+            request_handler=self.request_handler,
+        )
 
     def _register_topics(self) -> None:
         register(EVENT_TYPE_LLM_CANCEL, TOPIC_LLM_CANCEL)
@@ -109,6 +129,36 @@ class LLMService:
         register(EVENT_TYPE_TOOLS_REGISTRY, TOPIC_TOOLS_REGISTRY)
         register(EVENT_TYPE_TOOL_CALL_REQUEST, TOPIC_TOOL_CALL_REQUEST)
         register(EVENT_TYPE_TOOL_CALL_RESULT, TOPIC_TOOL_CALL_RESULT)
+    
+    def _build_config(self) -> Dict[str, Any]:
+        """Build configuration dictionary for handlers."""
+        return {
+            # LLM settings
+            "LLM_MODEL": LLM_MODEL,
+            "LLM_MAX_TOKENS": LLM_MAX_TOKENS,
+            "LLM_TEMPERATURE": LLM_TEMPERATURE,
+            "LLM_TOP_P": LLM_TOP_P,
+            "OPENAI_API_KEY": OPENAI_API_KEY,
+            # RAG settings
+            "RAG_ENABLED": RAG_ENABLED,
+            "RAG_TOP_K": RAG_TOP_K,
+            "RAG_PROMPT_TEMPLATE": RAG_PROMPT_TEMPLATE,
+            # Tool settings
+            "TOOL_CALLING_ENABLED": TOOL_CALLING_ENABLED,
+            # TTS streaming settings
+            "LLM_TTS_STREAM": LLM_TTS_STREAM,
+            "STREAM_MIN_CHARS": STREAM_MIN_CHARS,
+            "STREAM_MAX_CHARS": STREAM_MAX_CHARS,
+            "STREAM_BOUNDARY_CHARS": STREAM_BOUNDARY_CHARS,
+            # Topics
+            "TOPIC_LLM_STREAM": TOPIC_LLM_STREAM,
+            "TOPIC_LLM_RESPONSE": TOPIC_LLM_RESPONSE,
+            "TOPIC_TTS_SAY": TOPIC_TTS_SAY,
+            # Event types
+            "EVENT_TYPE_LLM_STREAM": EVENT_TYPE_LLM_STREAM,
+            "EVENT_TYPE_LLM_RESPONSE": EVENT_TYPE_LLM_RESPONSE,
+            "EVENT_TYPE_SAY": EVENT_TYPE_SAY,
+        }
 
     def _decode_llm_request(self, payload: bytes) -> Tuple[Optional[LLMRequest], Optional[str]]:
         envelope: Optional[Envelope] = None
@@ -404,6 +454,7 @@ class LLMService:
             return ""
 
     async def run(self):
+        """Main service loop: connect to MQTT, subscribe, and route messages to handlers."""
         try:
             async with await self.mqtt_client.connect() as client:
                 await self.mqtt_client.publish_health(client, TOPIC_HEALTH)
@@ -421,282 +472,18 @@ class LLMService:
                     tools_registry_topic=TOPIC_TOOLS_REGISTRY,
                 )
                 
-                # Process messages
+                # Process messages via router
                 async for m in self.mqtt_client.message_stream(client):
-                        topic = str(getattr(m, "topic", ""))
-                        if topic == TOPIC_CHARACTER_CURRENT:
-                            # Update persona from retained/current payload
-                            try:
-                                self.character = json.loads(m.payload)
-                                logger.info("character/current updated: name=%s", self.character.get("name"))
-                            except Exception:
-                                logger.warning("Failed to parse character/current")
-                            continue
-                        if topic == TOPIC_CHARACTER_RESULT:
-                            payload_data: Dict[str, Any]
-                            try:
-                                envelope = Envelope.model_validate_json(m.payload)
-                                raw_data = envelope.data
-                                payload_data = raw_data if isinstance(raw_data, dict) else {}
-                            except ValidationError:
-                                try:
-                                    payload_data = json.loads(m.payload)
-                                except Exception:
-                                    payload_data = {}
-
-                            if payload_data:
-                                if "name" in payload_data:
-                                    self.character = payload_data
-                                elif "section" in payload_data and "value" in payload_data:
-                                    section_key = payload_data.get("section")
-                                    if isinstance(section_key, str):
-                                        self.character.setdefault(section_key, payload_data.get("value"))
-                                        self.character[section_key] = payload_data.get("value")
-                                else:
-                                    self.character.update(payload_data)
-                                logger.info("character/result received: name=%s", self.character.get("name"))
-                            continue
-                        
-                        # Handle tool registry
-                        if topic == TOPIC_TOOLS_REGISTRY:
-                            await self._load_tools(m.payload)
-                            continue
-                        
-                        # Handle memory/results for RAG
-                        if topic == TOPIC_MEMORY_RESULTS:
-                            await self._handle_memory_results(m.payload)
-                            continue
-                        
-                        # Handle tool results
-                        if topic == TOPIC_TOOL_CALL_RESULT:
-                            await self._handle_tool_result(m.payload)
-                            continue
-                        
-                        if topic != TOPIC_LLM_REQUEST:
-                            continue
-                        request, envelope_id = self._decode_llm_request(m.payload)
-                        if request is None:
-                            continue
-                        logger.info(
-                            "llm/request received id=%s stream=%s use_rag=%s",
-                            request.id,
-                            request.stream,
-                            request.use_rag,
-                        )
-                        text = (request.text or "").strip()
-                        if not text:
-                            logger.debug("llm/request ignored id=%s (empty text)", request.id)
-                            continue
-                        want_stream = bool(request.stream)
-                        use_rag = RAG_ENABLED if request.use_rag is None else bool(request.use_rag)
-                        rag_k = request.rag_k if (request.rag_k is not None and request.rag_k > 0) else RAG_TOP_K
-                        system = request.system
-                        params = request.params or {}
-                        model = params.get("model", LLM_MODEL)
-                        max_tokens = int(params.get("max_tokens", LLM_MAX_TOKENS))
-                        temperature = float(params.get("temperature", LLM_TEMPERATURE))
-                        top_p = float(params.get("top_p", LLM_TOP_P))
-
-                        req_id = request.id
-                        correlation_id = envelope_id or request.message_id
-
-                        # Merge character persona into system prompt
-                        system = self._build_system_prompt(system)
-
-                        context = ""
-                        if use_rag:
-                            context = await self._do_rag(client, text, rag_k, correlation_id)
-                        prompt = text
-                        if context:
-                            prompt = RAG_PROMPT_TEMPLATE.format(context=context, user=text)
-
-                        # Format conversation history for chat completion
-                        messages = []
-                        if request.conversation_history:
-                            for msg in request.conversation_history:
-                                messages.append({
-                                    "role": msg.role,
-                                    "content": msg.content
-                                })
-                        # Add current user message
-                        messages.append({
-                            "role": "user", 
-                            "content": prompt
-                        })
-
-                        # Include tools if available and enabled
-                        tools = self.tools if TOOL_CALLING_ENABLED and self.tools else None
-
-                        # Fast-fail when required creds are missing (avoid long HTTP timeouts)
-                        if isinstance(self.provider, OpenAIProvider) and not OPENAI_API_KEY:
-                            logger.warning("OPENAI_API_KEY not set; responding with error for id=%s", req_id)
-                            error_resp = LLMResponse(
-                                id=req_id,
-                                error="OPENAI_API_KEY not set",
-                                provider=self.provider.name,
-                                model=model,
-                            )
-                            await self._publish_event(
-                                client,
-                                event_type=EVENT_TYPE_LLM_RESPONSE,
-                                topic=TOPIC_LLM_RESPONSE,
-                                payload=error_resp,
-                                correlate=correlation_id,
-                            )
-                            continue
-
-                        try:
-                            if want_stream and getattr(self.provider, "name", "") == "openai":
-                                seq = 0
-                                full_chunks: list[str] = []
-                                logger.info("Starting streaming for id=%s via provider=%s (system_len=%s, history_len=%d)", 
-                                           req_id, self.provider.name, len(system or ""), len(messages) - 1)
-                                tts_buf = ""
-                                async for ch in self.provider.stream_chat(
-                                    messages=messages,
-                                    model=model,
-                                    max_tokens=max_tokens,
-                                    temperature=temperature,
-                                    top_p=top_p,
-                                    system=system,
-                                    tools=tools,
-                                ):
-                                    seq += 1
-                                    delta_text = ch.get("delta")
-                                    out = LLMStreamDelta(
-                                        id=req_id,
-                                        seq=seq,
-                                        delta=delta_text,
-                                        done=False,
-                                        provider=self.provider.name,
-                                        model=model,
-                                    )
-                                    if delta_text:
-                                        full_chunks.append(delta_text)
-                                    logger.debug("llm/stream id=%s seq=%d len=%d", req_id, seq, len(delta_text or ""))
-                                    await self._publish_event(
-                                        client,
-                                        event_type=EVENT_TYPE_LLM_STREAM,
-                                        topic=TOPIC_LLM_STREAM,
-                                        payload=out,
-                                        correlate=correlation_id,
-                                    )
-                                    # Optional: accumulate and forward sentences to TTS.
-                                    # Note: Router now bridges LLM -> TTS by default; this path remains behind LLM_TTS_STREAM flag for testing.
-                                    if LLM_TTS_STREAM:
-                                        delta = out.delta or ""
-                                        if delta:
-                                            tts_buf += delta
-                                            # If multiple sentence boundaries arrived at once, flush repeatedly
-                                            while self._should_flush(tts_buf, ""):
-                                                sent, remainder = self._split_on_boundary(tts_buf)
-                                                if not sent:
-                                                    break
-                                                logger.info("TTS chunk publish len=%d", len(sent))
-                                                await self._publish_event(
-                                                    client,
-                                                    event_type=EVENT_TYPE_SAY,
-                                                    topic=TOPIC_TTS_SAY,
-                                                    payload=TtsSay(text=sent),
-                                                    correlate=correlation_id,
-                                                )
-                                                tts_buf = remainder
-                                # Stream end
-                                done = LLMStreamDelta(id=req_id, seq=seq + 1, done=True, provider=self.provider.name, model=model)
-                                logger.info("Streaming done for id=%s with %d chunks", req_id, seq)
-                                await self._publish_event(
-                                    client,
-                                    event_type=EVENT_TYPE_LLM_STREAM,
-                                    topic=TOPIC_LLM_STREAM,
-                                    payload=done,
-                                    correlate=correlation_id,
-                                )
-                                # Flush any remainder
-                                if LLM_TTS_STREAM and tts_buf.strip():
-                                    final_sent = tts_buf.strip()
-                                    logger.info("TTS final chunk publish len=%d", len(final_sent))
-                                    await self._publish_event(
-                                        client,
-                                        event_type=EVENT_TYPE_SAY,
-                                        topic=TOPIC_TTS_SAY,
-                                        payload=TtsSay(text=final_sent),
-                                        correlate=correlation_id,
-                                    )
-                                # Publish final accumulated response for downstream consumers
-                                final_text = "".join(full_chunks)
-                                logger.info("Publishing llm/response for id=%s (len=%d)", req_id, len(final_text or ""))
-                                resp = LLMResponse(
-                                    id=req_id,
-                                    reply=final_text or None,
-                                    provider=self.provider.name,
-                                    model=model,
-                                )
-                                logger.info("llm/response id=%s len=%d", req_id, len(final_text or ""))
-                                logger.info("sending event to response topic %s with event type of %s: payload %s", TOPIC_LLM_RESPONSE, EVENT_TYPE_LLM_RESPONSE, resp)
-                                await self._publish_event(
-                                    client,
-                                    event_type=EVENT_TYPE_LLM_RESPONSE,
-                                    topic=TOPIC_LLM_RESPONSE,
-                                    payload=resp,
-                                    correlate=correlation_id,
-                                )
-                            else:
-                                result = await self.provider.generate_chat(
-                                    messages=messages,
-                                    model=model,
-                                    max_tokens=max_tokens,
-                                    temperature=temperature,
-                                    top_p=top_p,
-                                    system=system,
-                                    tools=tools,
-                                )
-                                
-                                # Check for tool calls
-                                tool_calls = self._extract_tool_calls(result)
-                                if tool_calls and TOOL_CALLING_ENABLED:
-                                    # Add assistant message with tool_calls to conversation history
-                                    messages.append({
-                                        "role": "assistant",
-                                        "content": result.text,
-                                        "tool_calls": tool_calls
-                                    })
-                                    # Handle tool calls and send follow-up response
-                                    await self._handle_tool_calls_and_respond(
-                                        client, tool_calls, messages, req_id, correlation_id,
-                                        model, max_tokens, temperature, top_p, system, tools
-                                    )
-                                else:
-                                    # Send direct response
-                                    resp = LLMResponse(
-                                        id=req_id,
-                                        reply=result.text,
-                                        provider=self.provider.name,
-                                        model=model,
-                                        tokens=result.usage or {},
-                                    )
-                                    logger.info("Publishing llm/response for id=%s (len=%d)", req_id, len(result.text or ""))
-                                    await self._publish_event(
-                                        client,
-                                        event_type=EVENT_TYPE_LLM_RESPONSE,
-                                        topic=TOPIC_LLM_RESPONSE,
-                                        payload=resp,
-                                        correlate=correlation_id,
-                                    )
-                        except Exception as e:
-                            logger.exception("generation failed")
-                            error_resp = LLMResponse(
-                                id=req_id,
-                                error=str(e),
-                                provider=self.provider.name,
-                                model=model,
-                            )
-                            await self._publish_event(
-                                client,
-                                event_type=EVENT_TYPE_LLM_RESPONSE,
-                                topic=TOPIC_LLM_RESPONSE,
-                                payload=error_resp,
-                                correlate=correlation_id,
-                            )
+                    await self.router.route_message(
+                        client,
+                        m,
+                        character_current_topic=TOPIC_CHARACTER_CURRENT,
+                        character_result_topic=TOPIC_CHARACTER_RESULT,
+                        tools_registry_topic=TOPIC_TOOLS_REGISTRY,
+                        memory_results_topic=TOPIC_MEMORY_RESULTS,
+                        tool_call_result_topic=TOPIC_TOOL_CALL_RESULT,
+                        llm_request_topic=TOPIC_LLM_REQUEST,
+                    )
         except Exception as e:
             logger.info("MQTT disconnected or error: %s; shutting down gracefully", e)
 

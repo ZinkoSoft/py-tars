@@ -8,29 +8,51 @@ logger = logging.getLogger(__name__)
 
 
 class CharacterManager:
-    """Manages character persona state and system prompt generation."""
+    """Manages character/persona state and system prompt generation."""
     
     def __init__(self):
         self.character: Dict[str, Any] = {}
     
+    def get_name(self) -> Optional[str]:
+        """Get character name."""
+        return self.character.get("name")
+    
+    def update_from_current(self, data: Dict[str, Any]) -> None:
+        """Update character from full snapshot (character/current)."""
+        self.character = data
+        logger.info("Character updated: name=%s", self.character.get("name"))
+    
+    def update_section(self, section_key: str, value: Any) -> None:
+        """Update a single section of character state."""
+        self.character.setdefault(section_key, value)
+        self.character[section_key] = value
+        logger.info("Character section updated: %s", section_key)
+    
+    def merge_update(self, data: Dict[str, Any]) -> None:
+        """Merge partial update into character state."""
+        self.character.update(data)
+        logger.info("Character partially updated")
+    
     def update(self, data: Dict[str, Any]) -> None:
-        """Update character from character/current or character/result."""
-        if not data:
-            return
-            
+        """Update character state from MQTT message.
+        
+        Handles both full snapshots and section updates.
+        DEPRECATED: Use update_from_current, update_section, or merge_update instead.
+        
+        Args:
+            data: Character data from MQTT (full snapshot or section update)
+        """
         if "name" in data:
             # Full character snapshot
-            self.character = data
+            self.update_from_current(data)
         elif "section" in data and "value" in data:
             # Section update
             section_key = data.get("section")
             if isinstance(section_key, str):
-                self.character[section_key] = data.get("value")
+                self.update_section(section_key, data.get("value"))
         else:
             # Partial update
-            self.character.update(data)
-        
-        logger.info("Character updated: name=%s", self.character.get("name"))
+            self.merge_update(data)
     
     def build_system_prompt(self, base_system: Optional[str] = None) -> Optional[str]:
         """Build system prompt from character traits and optional base prompt.

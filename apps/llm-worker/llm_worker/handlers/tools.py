@@ -96,3 +96,15 @@ class ToolExecutor:
                 "tool_call_id": result["call_id"]
             })
         return messages
+    
+    async def load_tools(self, payload: bytes) -> None:
+        """Load tools from raw payload (wrapper for backward compatibility)."""
+        try:
+            data = json.loads(payload)
+            await self.load_tools_from_registry(data)
+        except Exception as e:
+            logger.error("Failed to load tools from payload: %s", e)
+    
+    async def handle_tool_result(self, payload: bytes) -> None:
+        """Handle tool result (legacy compatibility - no-op with direct MCP)."""
+        logger.debug("Tool result received (legacy handler - ignored with direct MCP)")
