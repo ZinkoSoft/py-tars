@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from urllib.parse import urlparse
 from typing import Any, Dict, Optional, Tuple
 
 import asyncio_mqtt as mqtt
 import orjson as json
 from pydantic import ValidationError
 
+from .mqtt_client import MQTTClient
 from .config import (
     MQTT_URL,
     LOG_LEVEL,
@@ -78,11 +78,6 @@ logging.basicConfig(
 logger = logging.getLogger("llm-worker")
 
 
-def parse_mqtt(url: str):
-    u = urlparse(url)
-    return (u.hostname or "127.0.0.1", u.port or 1883, u.username, u.password)
-
-
 class LLMService:
     def __init__(self):
         self._register_topics()
@@ -102,6 +97,8 @@ class LLMService:
         self._pending_rag: Dict[str, asyncio.Future[str]] = {}
         # Pending tool calls (keyed by call_id) - uses futures for non-blocking wait
         self._tool_futures: Dict[str, asyncio.Future[dict]] = {}
+        # MQTT client wrapper
+        self.mqtt_client = MQTTClient(MQTT_URL, client_id="tars-llm", source_name="llm-worker")
 
     def _register_topics(self) -> None:
         register(EVENT_TYPE_LLM_CANCEL, TOPIC_LLM_CANCEL)
@@ -407,35 +404,25 @@ class LLMService:
             return ""
 
     async def run(self):
-        host, port, user, pwd = parse_mqtt(MQTT_URL)
-        logger.info("Connecting to MQTT %s:%s", host, port)
         try:
-            async with mqtt.Client(hostname=host, port=port, username=user, password=pwd, client_id="tars-llm") as client:
-                await client.publish(TOPIC_HEALTH, json.dumps({"ok": True, "event": "ready"}), retain=True)
-                async with client.messages() as mstream:
-                    # Subscribe to LLM requests and character/current (retained)
-                    await client.subscribe(TOPIC_LLM_REQUEST)
-                    await client.subscribe(TOPIC_CHARACTER_CURRENT)
-                    await client.subscribe(TOPIC_CHARACTER_RESULT)
-                    # Subscribe to memory/results for RAG queries (persistent subscription)
-                    if RAG_ENABLED:
-                        await client.subscribe(TOPIC_MEMORY_RESULTS)
-                        logger.info("Subscribed to %s for RAG queries", TOPIC_MEMORY_RESULTS)
-                    logger.info("Subscribed to %s, %s and %s", TOPIC_LLM_REQUEST, TOPIC_CHARACTER_CURRENT, TOPIC_CHARACTER_RESULT)
-                    
-                    # Subscribe to tool topics if tool calling is enabled
-                    if TOOL_CALLING_ENABLED:
-                        await client.subscribe(TOPIC_TOOLS_REGISTRY)
-                        await client.subscribe(TOPIC_TOOL_CALL_RESULT)
-                        logger.info("Subscribed to tool topics: %s, %s", TOPIC_TOOLS_REGISTRY, TOPIC_TOOL_CALL_RESULT)
-                    
-                    # Request the current character snapshot once (memory-worker should respond or retained current will arrive)
-                    try:
-                        await client.publish(TOPIC_CHARACTER_GET, json.dumps({"section": None}))
-                        logger.info("Requested character/get on startup")
-                    except Exception:
-                        logger.debug("character/get publish failed (may be offline)")
-                    async for m in mstream:
+            async with await self.mqtt_client.connect() as client:
+                await self.mqtt_client.publish_health(client, TOPIC_HEALTH)
+                
+                # Subscribe to all topics
+                await self.mqtt_client.subscribe_all(
+                    client,
+                    llm_request_topic=TOPIC_LLM_REQUEST,
+                    character_current_topic=TOPIC_CHARACTER_CURRENT,
+                    character_result_topic=TOPIC_CHARACTER_RESULT,
+                    character_get_topic=TOPIC_CHARACTER_GET,
+                    rag_enabled=RAG_ENABLED,
+                    memory_results_topic=TOPIC_MEMORY_RESULTS,
+                    tool_calling_enabled=TOOL_CALLING_ENABLED,
+                    tools_registry_topic=TOPIC_TOOLS_REGISTRY,
+                )
+                
+                # Process messages
+                async for m in self.mqtt_client.message_stream(client):
                         topic = str(getattr(m, "topic", ""))
                         if topic == TOPIC_CHARACTER_CURRENT:
                             # Update persona from retained/current payload
