@@ -10,6 +10,7 @@ import orjson
 from typing import Any, Dict, List, Optional
 
 from mcp.client.session import ClientSession
+from mcp.client.stdio import stdio_client, StdioServerParameters
 from mcp.client.streamable_http import streamablehttp_client
 
 logger = logging.getLogger(__name__)
@@ -20,9 +21,10 @@ class MCPToolClient:
     
     def __init__(self):
         self.sessions: Dict[str, ClientSession] = {}
-        self.contexts: Dict[str, Any] = {}  # Store context managers for cleanup
+        self.contexts: List[Any] = []  # Store context managers to keep them alive
         self.tools: Dict[str, dict] = {}  # tool_name -> {server, mcp_tool_name, schema}
         self._initialized = False
+        self._context_task: Optional[asyncio.Task] = None
         
     async def initialize_from_registry(self, registry_payload: dict):
         """Initialize tools from the tool registry.
@@ -66,12 +68,66 @@ class MCPToolClient:
                 servers_by_name[server_name].append(tool_name)
             
             logger.info(f"Loaded {len(self.tools)} tools from {len(servers_by_name)} servers")
+            
+            # Note: We don't connect here anymore. Connection happens lazily on first tool execution.
+            # This avoids async context issues during message processing.
+            
             self._initialized = True
             
         except Exception as e:
             logger.error(f"Failed to initialize from registry: {e}", exc_info=True)
             
-    async def connect_to_server(self, server_name: str, url: str):
+    async def _execute_with_stdio(self, server_name: str, command: str, args: list, tool_name: str, arguments: dict) -> dict:
+        """Execute a tool by launching stdio subprocess for each call.
+        
+        This is simpler than managing long-lived connections and avoids
+        async context issues.
+        
+        Args:
+            server_name: Name of the server
+            command: Command to launch (e.g., "python")
+            args: Arguments for the command (e.g., ["-m", "tars_mcp_character"])
+            tool_name: MCP tool name (without prefix)
+            arguments: Tool arguments
+            
+        Returns:
+            Dict with 'content' or 'error'
+        """
+        try:
+            logger.info(f"Launching MCP server for tool execution: {command} {' '.join(args)}")
+            # Use python -m for better stdio handling compared to console scripts
+            server_params = StdioServerParameters(
+                command=command,
+                args=args,
+            )
+            
+            async with stdio_client(server_params) as (read_stream, write_stream):
+                # Create and initialize session
+                sess = ClientSession(read_stream, write_stream)
+                init_result = await sess.initialize()
+                logger.debug(f"Session initialized: {init_result}")
+                
+                # Execute tool
+                logger.info(f"Executing tool: {server_name}:{tool_name} with args: {arguments}")
+                result = await sess.call_tool(tool_name, arguments)
+                
+                # Extract content
+                if hasattr(result, 'content') and result.content:
+                    content_text = " ".join(
+                        item.text if hasattr(item, 'text') else str(item)
+                        for item in result.content
+                    )
+                    logger.info(f"Tool result: {content_text}")
+                    return {"content": content_text}
+                else:
+                    logger.warning(f"Tool returned no content: {result}")
+                    return {"content": ""}
+                    
+        except Exception as e:
+            logger.error(f"Tool execution failed: {e}", exc_info=True)
+            return {"error": str(e)}
+            
+    async def connect_to_http_server(self, server_name: str, url: str):
         """Connect to an MCP server via HTTP.
         
         Args:
@@ -91,7 +147,7 @@ class MCPToolClient:
             
             # Initialize session
             init_result = await sess.initialize()
-            logger.info(f"✅ Connected to MCP server: {server_name}")
+            logger.info(f"✅ Connected to MCP HTTP server: {server_name}")
             logger.debug(f"Session initialized: {init_result}")
             
             # Store both for cleanup
@@ -99,14 +155,14 @@ class MCPToolClient:
             self.contexts[server_name] = http_context
             
         except Exception as e:
-            logger.error(f"Failed to connect to MCP server {server_name}: {e}", exc_info=True)
+            logger.error(f"Failed to connect to MCP HTTP server {server_name}: {e}", exc_info=True)
             
     async def execute_tool(self, tool_name: str, arguments: dict) -> dict:
-        """Execute a tool by name.
+        """Execute a tool via MCP.
         
         Args:
-            tool_name: Full tool name (e.g., mcp__test-server__add)
-            arguments: Tool arguments as dict
+            tool_name: Full tool name (mcp__server__tool)
+            arguments: Tool arguments
             
         Returns:
             Dict with 'content' or 'error'
@@ -121,52 +177,23 @@ class MCPToolClient:
         server_name = tool_info["server"]
         mcp_tool_name = tool_info["mcp_tool_name"]
         
-        session = self.sessions.get(server_name)
-        if not session:
-            return {"error": f"Not connected to server: {server_name}"}
+        # Map server names to Python module commands
+        # Use python -m instead of console script for better stdio handling
+        command_map = {
+            "tars-character": ("python", ["-m", "tars_mcp_character"]),
+        }
+        
+        command_info = command_map.get(server_name)
+        if not command_info:
+            return {"error": f"Unknown server: {server_name}"}
             
-        try:
-            logger.info(f"Executing tool: {server_name}:{mcp_tool_name} with args: {arguments}")
-            
-            # Call the MCP server
-            result = await session.call_tool(mcp_tool_name, arguments)
-            
-            # Extract content from CallToolResult
-            if hasattr(result, 'content') and result.content:
-                # result.content is a list of content items
-                content_text = " ".join(
-                    item.text if hasattr(item, 'text') else str(item)
-                    for item in result.content
-                )
-                logger.info(f"Tool result: {content_text}")
-                return {"content": content_text}
-            else:
-                logger.warning(f"Tool returned no content: {result}")
-                return {"content": ""}
-                
-        except Exception as e:
-            logger.error(f"Tool execution failed: {e}", exc_info=True)
-            return {"error": str(e)}
+        command, args = command_info
+        return await self._execute_with_stdio(server_name, command, args, mcp_tool_name, arguments)
             
     async def close(self):
-        """Close all MCP sessions."""
-        for name in list(self.sessions.keys()):
-            try:
-                # Close session first
-                if name in self.sessions:
-                    await self.sessions[name].__aexit__(None, None, None)
-                    logger.info(f"Closed session: {name}")
-                
-                # Then close HTTP context
-                if name in self.contexts:
-                    await self.contexts[name].__aexit__(None, None, None)
-                    logger.info(f"Closed context: {name}")
-                    
-            except Exception as e:
-                logger.error(f"Error closing {name}: {e}")
-        
-        self.sessions.clear()
-        self.contexts.clear()
+        """Close client - nothing to clean up with per-call subprocess approach."""
+        self.tools.clear()
+        self._initialized = False
 
 
 # Global instance

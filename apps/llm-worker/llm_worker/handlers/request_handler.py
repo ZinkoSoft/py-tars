@@ -353,7 +353,7 @@ class RequestHandler:
             "tool_calls": tool_calls
         })
         
-        # Execute tools
+        # Execute tools (pass client for tool MQTT publishing)
         tool_results = await self.tool_executor.execute_tool_calls(tool_calls, self.mqtt_client, client)
         
         # Add tool result messages

@@ -83,41 +83,33 @@ async def adjust_personality_trait(trait_name: str, new_value: int) -> dict[str,
         }
     
     try:
-        # Create typed payload
+        # Create typed payload for the trait update
         trait_update = CharacterTraitUpdate(
             trait=trait_name.lower(),
             value=new_value,
         )
         
-        # Wrap in envelope and publish to memory-worker via MQTT
-        envelope = Envelope.new(
-            event_type=EVENT_TYPE_CHARACTER_UPDATE,
-            data=trait_update,
-            source="mcp-character",
-        )
-        
-        async with mqtt.Client(MQTT_URL) as client:
-            await client.publish(
-                TOPIC_CHARACTER_UPDATE,
-                envelope.model_dump_json(),
-                qos=1,
-            )
-            
-            logger.info(f"Published trait update: {trait_name}={new_value}")
-            
-            return {
-                "success": True,
-                "trait": trait_name.lower(),
-                "old_value": "unknown",  # Memory-worker tracks old value
-                "new_value": new_value,
-                "message": f"Trait '{trait_name}' adjusted to {new_value}%",
-            }
+        # Return the update data - the LLM worker will publish it to MQTT
+        # This avoids DNS resolution issues with subprocess MQTT connections
+        return {
+            "success": True,
+            "trait": trait_name.lower(),
+            "old_value": "unknown",  # Memory-worker tracks old value
+            "new_value": new_value,
+            "message": f"Trait '{trait_name}' adjusted to {new_value}%",
+            "mqtt_publish": {
+                "topic": TOPIC_CHARACTER_UPDATE,
+                "event_type": EVENT_TYPE_CHARACTER_UPDATE,
+                "data": trait_update.model_dump(),
+                "source": "mcp-character",
+            },
+        }
     
     except Exception as e:
-        logger.error(f"Failed to adjust trait: {e}", exc_info=True)
+        logger.error(f"Failed to prepare trait update: {e}", exc_info=True)
         return {
             "success": False,
-            "error": f"Failed to communicate trait change: {str(e)}",
+            "error": f"Failed to prepare trait change: {str(e)}",
         }
 
 

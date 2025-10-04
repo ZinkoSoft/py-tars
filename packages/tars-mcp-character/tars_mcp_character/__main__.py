@@ -6,8 +6,9 @@ from .server import app
 
 def main():
     """Main entry point for the MCP server."""
-    # FastMCP CLI handles stdio/http/sse automatically
-    app.run()
+    # Explicitly run in stdio mode for MCP client compatibility
+    # When invoked from command line, stdio is the default transport
+    app.run(transport="stdio")
 
 if __name__ == "__main__":
     main()

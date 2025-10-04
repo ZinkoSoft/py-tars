@@ -274,7 +274,7 @@ services:
     container_name: tars-llm
     env_file: ../.env
     environment:
-      MQTT_URL: mqtt://mqtt:1883
+      MQTT_URL: mqtt://${MQTT_USER}:${MQTT_PASS}@mqtt:1883
       MQTT_HOST: mqtt
       MQTT_PORT: "1883"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}

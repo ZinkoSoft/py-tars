@@ -16,10 +16,10 @@ logger = logging.getLogger(__name__)
 class ToolExecutor:
     """Handles MCP tool execution and conversation management."""
     
-    def __init__(self):
+    def __init__(self, mqtt_client=None):
         self.tools: List[dict] = []
         self._initialized = False
-        self._pending_tool_calls: Dict[str, asyncio.Future] = {}  # call_id -> Future
+        self.mqtt_client = mqtt_client
     
     async def load_tools_from_registry(self, registry_payload: dict) -> None:
         """Load tools from MCP bridge registry and initialize client."""
@@ -45,13 +45,13 @@ class ToolExecutor:
             return result.tool_calls
         return []
     
-    async def execute_tool_calls(self, tool_calls: List[dict], mqtt_client, client) -> List[dict]:
-        """Execute tool calls via MQTT to mcp-bridge.
+    async def execute_tool_calls(self, tool_calls: List[dict], mqtt_client_wrapper=None, client=None) -> List[dict]:
+        """Execute tool calls directly via MCP protocol.
         
         Args:
             tool_calls: List of tool calls from LLM
-            mqtt_client: MQTT client wrapper
-            client: Connected MQTT client
+            mqtt_client_wrapper: MQTT client wrapper (for helper methods)
+            client: Actual asyncio-mqtt Client (for publishing)
             
         Returns:
             List of results with call_id and content/error
@@ -60,9 +60,11 @@ class ToolExecutor:
             logger.warning("Tool executor not initialized")
             return []
         
+        mcp_client = get_mcp_client()
+        mqtt_wrapper = mqtt_client_wrapper or self.mqtt_client
+        mqtt_client = client
         results = []
         
-        # Publish all tool calls to MQTT and create futures
         for call in tool_calls:
             call_id = call.get("id")
             if not call_id:
@@ -73,63 +75,68 @@ class ToolExecutor:
             
             try:
                 arguments = json.loads(arguments_str)
-                logger.info("Requesting tool execution via MQTT: %s (call_id=%s)", tool_name, call_id)
+                logger.info("Executing tool: %s with args: %s", tool_name, arguments)
                 
-                # Create future for this call
-                future = asyncio.Future()
-                self._pending_tool_calls[call_id] = future
+                # Execute tool directly via MCP
+                result = await mcp_client.execute_tool(tool_name, arguments)
                 
-                # Publish tool call request to mcp-bridge
-                await mqtt_client.publish_tool_call(client, call_id, tool_name, arguments)
+                # Parse content if it's a JSON string
+                content = result.get("content", "")
+                if content:
+                    try:
+                        parsed = json.loads(content)
+                        # If result contains MQTT publish request, handle it
+                        if mqtt_client and isinstance(parsed, dict) and "mqtt_publish" in parsed:
+                            mqtt_data = parsed.pop("mqtt_publish")
+                            await self._publish_tool_mqtt(mqtt_wrapper, mqtt_client, mqtt_data)
+                            # Update content with the parsed result (without mqtt_publish)
+                            result["content"] = json.dumps(parsed).decode('utf-8')
+                    except json.JSONDecodeError:
+                        # Content is not JSON, leave as is
+                        pass
+                
+                result["call_id"] = call_id
+                results.append(result)
                     
             except Exception as e:
-                logger.error("Failed to publish tool call %s: %s", tool_name, e, exc_info=True)
+                logger.error("Tool %s failed: %s", tool_name, e, exc_info=True)
                 results.append({"call_id": call_id, "error": str(e)})
-        
-        # Wait for all results with timeout
-        timeout = 30.0  # 30 second timeout for tool execution
-        for call_id in list(self._pending_tool_calls.keys()):
-            future = self._pending_tool_calls.get(call_id)
-            if not future:
-                continue
-                
-            try:
-                logger.debug("Waiting for tool result: call_id=%s (timeout=%ss)", call_id, timeout)
-                result = await asyncio.wait_for(future, timeout=timeout)
-                results.append(result)
-            except asyncio.TimeoutError:
-                error_msg = f"Tool execution timeout ({timeout}s)"
-                logger.error("Tool call timeout: call_id=%s", call_id)
-                results.append({"call_id": call_id, "error": error_msg})
-            finally:
-                # Clean up future
-                self._pending_tool_calls.pop(call_id, None)
         
         return results
     
-    def handle_tool_result(self, call_id: str, content: str = None, error: str = None):
-        """Handle tool execution result from mcp-bridge.
+    async def _publish_tool_mqtt(self, mqtt_wrapper, client, mqtt_data: dict) -> None:
+        """Publish tool result data to MQTT.
         
         Args:
-            call_id: Tool call ID
-            content: Tool result content (success)
-            error: Error message (failure)
+            mqtt_wrapper: MQTT client wrapper with helper methods
+            client: Actual asyncio-mqtt Client
+            mqtt_data: Dict with topic, event_type, data, source
         """
-        future = self._pending_tool_calls.get(call_id)
-        if not future or future.done():
-            logger.warning("Received tool result for unknown or completed call_id: %s", call_id)
-            return
-        
-        result = {"call_id": call_id}
-        if error:
-            result["error"] = error
-            logger.info("Tool call %s failed: %s", call_id, error)
-        else:
-            result["content"] = content or ""
-            logger.info("Tool call %s succeeded (%d chars)", call_id, len(content or ""))
-        
-        # Resolve the future
-        future.set_result(result)
+        try:
+            from tars.contracts.envelope import Envelope
+            
+            topic = mqtt_data.get("topic")
+            event_type = mqtt_data.get("event_type")
+            data = mqtt_data.get("data")
+            source = mqtt_data.get("source", "mcp-tool")
+            
+            # Wrap in envelope
+            envelope = Envelope.new(
+                event_type=event_type,
+                data=data,
+                source=source,
+            )
+            
+            # Publish to MQTT using asyncio-mqtt client
+            await client.publish(
+                topic,
+                envelope.model_dump_json().encode(),
+                qos=1,
+            )
+            logger.info(f"Published tool result to MQTT: {topic}")
+            
+        except Exception as e:
+            logger.error(f"Failed to publish tool MQTT data: {e}", exc_info=True)
     
     @staticmethod
     def format_tool_messages(tool_results: List[dict]) -> List[dict]:

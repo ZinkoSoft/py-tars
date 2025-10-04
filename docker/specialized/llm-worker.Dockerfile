@@ -19,6 +19,12 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir /tmp/tars-core && \
     rm -rf /tmp/tars-core
 
+# Install tars-mcp-character (MCP server for personality adjustments)
+COPY packages/tars-mcp-character /tmp/tars-mcp-character
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir /tmp/tars-mcp-character && \
+    rm -rf /tmp/tars-mcp-character
+
 # Install LLM worker dependencies ONLY (cached unless pyproject.toml changes)
 COPY apps/llm-worker/pyproject.toml /tmp/llm-worker/pyproject.toml
 COPY apps/llm-worker/README.md /tmp/llm-worker/README.md
