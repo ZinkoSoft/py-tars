@@ -1,31 +1,17 @@
 """TARS MCP Server - Character and Personality Management.
 
-This MCP server provides tools for TARS to manage its own personality traits
-and character settings through MQTT m        # Wrap in envelope
-        envelope = Envelope.new(
-            event_type=EVENT_TYPE_CHARACTER_GET,
-            data=char_request,
-            source="mcp-character",
-        )es to the memory-worker.
+This is a pure MCP server that provides tools for TARS personality management.
+It returns structured data that the llm-worker will use to publish MQTT messages.
+
+NO MQTT code should be in this server - it's a pure tool provider.
 """
 from __future__ import annotations
 
-import asyncio
 import os
 import logging
 from typing import Any
 
-import orjson as json
 from mcp.server.fastmcp import FastMCP
-import asyncio_mqtt as mqtt
-
-from tars.contracts.v1.memory import (
-    CharacterTraitUpdate,
-    CharacterResetTraits,
-    CharacterGetRequest,
-    EVENT_TYPE_CHARACTER_UPDATE,
-)
-from tars.contracts.envelope import Envelope
 
 # Configure logging
 logging.basicConfig(
@@ -37,13 +23,12 @@ logger = logging.getLogger("tars-mcp-server")
 # Create FastMCP app
 app = FastMCP("TARS Character Manager")
 
-# MQTT configuration
-MQTT_URL = os.getenv("MQTT_URL", "mqtt://tars:pass@mqtt:1883")
+# MQTT configuration (for return values only, not for publishing)
 TOPIC_CHARACTER_UPDATE = os.getenv("TOPIC_CHARACTER_UPDATE", "character/update")
 
 
 @app.tool()
-async def adjust_personality_trait(trait_name: str, new_value: int) -> dict[str, Any]:
+def adjust_personality_trait(trait_name: str, new_value: int) -> dict[str, Any]:
     """Adjust a TARS personality trait value.
     
     TARS can use this to dynamically modify its own personality traits based on
@@ -55,7 +40,7 @@ async def adjust_personality_trait(trait_name: str, new_value: int) -> dict[str,
         new_value: New value for the trait (0-100 scale)
     
     Returns:
-        dict with status and updated trait information
+        dict with status and mqtt_publish directive for llm-worker
     
     Example:
         User: "Set your humor to 50%"
@@ -83,24 +68,20 @@ async def adjust_personality_trait(trait_name: str, new_value: int) -> dict[str,
         }
     
     try:
-        # Create typed payload for the trait update
-        trait_update = CharacterTraitUpdate(
-            trait=trait_name.lower(),
-            value=new_value,
-        )
-        
         # Return the update data - the LLM worker will publish it to MQTT
-        # This avoids DNS resolution issues with subprocess MQTT connections
+        # Pure MCP server - no MQTT dependencies here
         return {
             "success": True,
             "trait": trait_name.lower(),
-            "old_value": "unknown",  # Memory-worker tracks old value
             "new_value": new_value,
-            "message": f"Trait '{trait_name}' adjusted to {new_value}%",
+            "message": f"Trait '{trait_name}' will be adjusted to {new_value}%",
             "mqtt_publish": {
                 "topic": TOPIC_CHARACTER_UPDATE,
-                "event_type": EVENT_TYPE_CHARACTER_UPDATE,
-                "data": trait_update.model_dump(),
+                "event_type": "character.trait.update",
+                "data": {
+                    "trait": trait_name.lower(),
+                    "value": new_value,
+                },
                 "source": "mcp-character",
             },
         }
@@ -114,87 +95,62 @@ async def adjust_personality_trait(trait_name: str, new_value: int) -> dict[str,
 
 
 @app.tool()
-async def get_current_traits() -> dict[str, Any]:
+def get_current_traits() -> dict[str, Any]:
     """Get TARS's current personality trait values.
     
     Returns all current trait settings so TARS can reference them in conversation.
     
     Returns:
-        dict with current trait values
+        dict with mqtt_publish directive to query traits
     """
     try:
-        # Create typed query request
-        char_request = CharacterGetRequest(section="traits")
-        
-        # Wrap in envelope
-        envelope = Envelope.new(
-            event_type="character.get",
-            data=char_request,
-            source="mcp-character",
-        )
-        
-        # Query current character state from memory-worker
-        async with mqtt.Client(MQTT_URL) as client:
-            await client.publish(
-                "character/get",
-                envelope.model_dump_json(),
-                qos=1,
-            )
-            
-            # Wait for response (with timeout)
-            # Note: This is a simplified implementation
-            # In production, you'd use a proper request-response pattern
-            await asyncio.sleep(0.5)
-            
-            return {
-                "success": True,
-                "message": "Trait query sent. Check character/current topic for latest values.",
-                "note": "Actual values are maintained by memory-worker",
-            }
+        # Pure MCP server - return directive for llm-worker to publish MQTT query
+        return {
+            "success": True,
+            "message": "Trait query will be sent to memory-worker",
+            "mqtt_publish": {
+                "topic": "character/get",
+                "event_type": "character.get",
+                "data": {
+                    "section": "traits",
+                },
+                "source": "mcp-character",
+            },
+        }
     
     except Exception as e:
-        logger.error(f"Failed to get traits: {e}", exc_info=True)
+        logger.error(f"Failed to prepare trait query: {e}", exc_info=True)
         return {
             "success": False,
-            "error": f"Failed to query traits: {str(e)}",
+            "error": f"Failed to prepare trait query: {str(e)}",
         }
 
 
 @app.tool()
-async def reset_all_traits() -> dict[str, Any]:
+def reset_all_traits() -> dict[str, Any]:
     """Reset all personality traits to default values from character.toml.
     
     Returns:
-        dict with status of reset operation
+        dict with mqtt_publish directive to reset traits
     """
     try:
-        # Create typed reset request
-        reset_request = CharacterResetTraits()
-        
-        # Wrap in envelope
-        envelope = Envelope.new(
-            event_type=EVENT_TYPE_CHARACTER_UPDATE,
-            data=reset_request,
-            source="mcp-character",
-        )
-        
-        async with mqtt.Client(MQTT_URL) as client:
-            await client.publish(
-                TOPIC_CHARACTER_UPDATE,
-                envelope.model_dump_json(),
-                qos=1,
-            )
-            
-            logger.info("Published trait reset request")
-            
-            return {
-                "success": True,
-                "message": "All traits reset to default values from character.toml",
-            }
+        # Pure MCP server - return directive for llm-worker to publish MQTT command
+        return {
+            "success": True,
+            "message": "All traits will be reset to default values",
+            "mqtt_publish": {
+                "topic": TOPIC_CHARACTER_UPDATE,
+                "event_type": "character.trait.reset",
+                "data": {
+                    "reset_all": True,
+                },
+                "source": "mcp-character",
+            },
+        }
     
     except Exception as e:
-        logger.error(f"Failed to reset traits: {e}", exc_info=True)
+        logger.error(f"Failed to prepare trait reset: {e}", exc_info=True)
         return {
             "success": False,
-            "error": f"Failed to reset traits: {str(e)}",
+            "error": f"Failed to prepare trait reset: {str(e)}",
         }

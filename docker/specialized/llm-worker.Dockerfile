@@ -20,9 +20,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     rm -rf /tmp/tars-core
 
 # Install tars-mcp-character (MCP server for personality adjustments)
+# Pure MCP server with no MQTT dependencies - v0.1.1
 COPY packages/tars-mcp-character /tmp/tars-mcp-character
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir /tmp/tars-mcp-character && \
+RUN pip install --no-cache-dir /tmp/tars-mcp-character && \
     rm -rf /tmp/tars-mcp-character
 
 # Install LLM worker dependencies ONLY (cached unless pyproject.toml changes)

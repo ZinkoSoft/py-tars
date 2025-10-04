@@ -48,11 +48,13 @@ A pluggable LLM microservice for TARS with streaming support, tool calling, RAG 
 - `RAG_TOP_K` - Number of documents to retrieve (default: `5`)
 - `RAG_PROMPT_TEMPLATE` - Template for injecting RAG context into prompts
 
-### Tool Calling (MCP)
+#### Tool Calling (MCP)
 - `TOOL_CALLING_ENABLED` - Enable tool calling (default: `false`)
 - `TOPIC_TOOLS_REGISTRY` - Topic for tool registry updates (default: `tools/registry`)
 - `TOPIC_TOOL_CALL_REQUEST` - Topic for tool call requests (default: `tools/call/request`)
 - `TOPIC_TOOL_CALL_RESULT` - Topic for tool call results (default: `tools/call/result`)
+
+**MCP Server Configuration**: Tools are registered via `tools/registry` topic and executed via stdio subprocess transport. Each tool server must be a standalone Python module that can be invoked as `python -m <module_name>`.
 
 ### Streaming & TTS
 - `LLM_TTS_STREAM` - Forward LLM stream to TTS (default: `false`)
@@ -249,6 +251,146 @@ Following py-tars async best practices:
 - **Timeouts**: All external calls have timeouts (5s for RAG, 30s for tools)
 - **Cancellation**: Proper `CancelledError` propagation
 - **No blocking**: Event loop never blocks >50ms
+
+## MCP Client Implementation
+
+### Overview
+The LLM worker integrates with MCP (Model Context Protocol) servers via **stdio subprocess transport**. Each tool call spawns a dedicated subprocess, executes the tool via JSON-RPC, and returns the result.
+
+### Architecture
+- **MCP Client**: `llm_worker/mcp_client.py` - Direct stdio transport implementation
+- **Tool Executor**: `llm_worker/handlers/tools.py` - Tool registry and execution orchestration
+- **Transport**: Stdio subprocess with `StdioServerParameters`
+- **Protocol**: JSON-RPC 2.0 over stdin/stdout
+
+### Critical Implementation Detail: Async Context Manager
+
+**The Fix**: `ClientSession` MUST be used as an async context manager for proper protocol lifecycle:
+
+```python
+from mcp import StdioServerParameters, ClientSession, stdio_client
+
+async def execute_tool(server_name: str, command: str, args: list, tool_name: str, arguments: dict):
+    """Execute MCP tool via stdio subprocess."""
+    server_params = StdioServerParameters(command=command, args=args)
+    
+    # ✅ CORRECT: Nested async context managers
+    async with stdio_client(server_params) as (read_stream, write_stream):
+        async with ClientSession(read_stream, write_stream) as session:
+            # Initialize the MCP session (establishes protocol version, capabilities)
+            await session.initialize()
+            
+            # Execute the tool call
+            result = await session.call_tool(tool_name, arguments)
+            
+            # Extract content from result
+            if hasattr(result, 'content') and result.content:
+                return result.content[0].text if result.content else "{}"
+            return "{}"
+```
+
+**Why This Matters**:
+- Without the async context manager, `session.initialize()` hangs indefinitely
+- Context manager handles proper protocol handshake and cleanup
+- Ensures stdio streams are properly flushed and closed
+
+**What We Tried (and failed)**:
+- ❌ Direct `ClientSession(read, write)` without context manager → hung at initialize
+- ❌ Manual session lifecycle management → protocol errors
+- ❌ Polling for results → never received responses
+
+### Tool Registry Format
+
+Tools are registered via `tools/registry` MQTT topic:
+
+```json
+{
+  "tools": [
+    {
+      "name": "adjust_personality_trait",
+      "description": "Adjust TARS personality trait value",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "trait_name": {"type": "string", "description": "Trait to adjust"},
+          "new_value": {"type": "integer", "minimum": 0, "maximum": 100}
+        },
+        "required": ["trait_name", "new_value"]
+      },
+      "mcp_server": "tars_mcp_character",
+      "mcp_command": "python",
+      "mcp_args": ["-m", "tars_mcp_character"]
+    }
+  ]
+}
+```
+
+### Tool Execution Flow
+
+1. **LLM detects tool call** in response (via function calling)
+2. **ToolExecutor.execute_tool()** invoked with tool name + arguments
+3. **MCPClient._execute_with_stdio()** spawns subprocess:
+   - Command: `python -m tars_mcp_character`
+   - Protocol: JSON-RPC over stdin/stdout
+4. **Session initialization**: Protocol version negotiation + capability exchange
+5. **Tool execution**: `session.call_tool(name, args)` via JSON-RPC
+6. **Result extraction**: Parse content from MCP response
+7. **MQTT publish**: Extract `mqtt_publish` directives and publish to MQTT
+8. **Follow-up response**: LLM generates final response with tool results in context
+
+### MCP Server Requirements
+
+For a tool server to work with this client:
+
+1. **Standalone module**: Must be runnable as `python -m <module_name>`
+2. **Pure MCP protocol**: Server should NOT have MQTT dependencies (client handles publishing)
+3. **JSON-RPC stdio**: Read from stdin, write to stdout
+4. **Proper initialization**: Respond to `initialize` method with protocol version
+5. **Tool metadata**: Return structured results with optional `mqtt_publish` directives
+
+Example minimal MCP server:
+```python
+from mcp.server.fastmcp import FastMCP
+
+app = FastMCP("My Tool Server")
+
+@app.tool()
+def my_tool(param: str) -> dict:
+    return {
+        "success": True,
+        "result": f"Processed: {param}",
+        "mqtt_publish": {
+            "topic": "my/topic",
+            "data": {"param": param}
+        }
+    }
+```
+
+### Debugging MCP Issues
+
+**Test server manually** (stdin/stdout):
+```bash
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | python -m your_mcp_server
+```
+
+**Expected response**:
+```json
+{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"...","version":"..."}}}
+```
+
+**Common issues**:
+- Server hangs → Check for blocking I/O or missing async context manager
+- Protocol errors → Verify JSON-RPC 2.0 compliance
+- Import errors → Ensure server has no conflicting async event loops (e.g., asyncio-mqtt)
+
+### Package Requirements
+
+The MCP client requires the full CLI package:
+```toml
+dependencies = ["mcp[cli]>=1.16.0"]
+```
+
+The `[cli]` extra includes stdio transport dependencies that are NOT in the base `mcp` package.
 
 ## SOLID Compliance
 

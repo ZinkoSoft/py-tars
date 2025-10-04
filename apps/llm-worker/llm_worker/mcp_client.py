@@ -9,7 +9,7 @@ import logging
 import orjson
 from typing import Any, Dict, List, Optional
 
-from mcp.client.session import ClientSession
+from mcp import ClientSession
 from mcp.client.stdio import stdio_client, StdioServerParameters
 from mcp.client.streamable_http import streamablehttp_client
 
@@ -101,27 +101,37 @@ class MCPToolClient:
                 args=args,
             )
             
+            logger.info(f"Creating stdio_client with command: {command} {args}")
             async with stdio_client(server_params) as (read_stream, write_stream):
                 # Create and initialize session
-                sess = ClientSession(read_stream, write_stream)
-                init_result = await sess.initialize()
-                logger.debug(f"Session initialized: {init_result}")
-                
-                # Execute tool
-                logger.info(f"Executing tool: {server_name}:{tool_name} with args: {arguments}")
-                result = await sess.call_tool(tool_name, arguments)
-                
-                # Extract content
-                if hasattr(result, 'content') and result.content:
-                    content_text = " ".join(
-                        item.text if hasattr(item, 'text') else str(item)
-                        for item in result.content
-                    )
-                    logger.info(f"Tool result: {content_text}")
-                    return {"content": content_text}
-                else:
-                    logger.warning(f"Tool returned no content: {result}")
-                    return {"content": ""}
+                logger.info(f"stdio_client context entered, streams: read={type(read_stream).__name__}, write={type(write_stream).__name__}")
+                async with ClientSession(read_stream, write_stream) as session:
+                    logger.info(f"ClientSession created, calling initialize()...")
+                    try:
+                        await session.initialize()
+                        logger.info("Session initialized successfully")
+                    except asyncio.TimeoutError:
+                        logger.error(f"Timeout waiting for initialize response from {command}")
+                        raise
+                    except Exception as e:
+                        logger.error(f"Error during initialize: {e}", exc_info=True)
+                        raise
+                    
+                    # Execute tool
+                    logger.info(f"Executing tool: {server_name}:{tool_name} with args: {arguments}")
+                    result = await session.call_tool(tool_name, arguments)
+                    
+                    # Extract content
+                    if hasattr(result, 'content') and result.content:
+                        content_text = " ".join(
+                            item.text if hasattr(item, 'text') else str(item)
+                            for item in result.content
+                        )
+                        logger.info(f"Tool result: {content_text}")
+                        return {"content": content_text}
+                    else:
+                        logger.warning(f"Tool returned no content: {result}")
+                        return {"content": ""}
                     
         except Exception as e:
             logger.error(f"Tool execution failed: {e}", exc_info=True)
