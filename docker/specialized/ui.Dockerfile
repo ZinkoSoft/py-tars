@@ -4,17 +4,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc python3-dev \
     libasound2 \
-    libx11-6 \
-    libxext6 \
-    libxrender1 \
-    libxrandr2 \
-    libxcursor1 \
-    libxi6 \
-    libsdl2-2.0-0 \
-    libsdl2-ttf-2.0-0 \
-    fonts-dejavu-core \
-    ca-certificates \
+    libdrm2 libgbm1 libegl1 libgles2 libgl1 libglx0 libglx-mesa0 libglu1-mesa \
+    libx11-6 libx11-xcb1 libxext6 libxrender1 libxrandr2 libxcursor1 libxi6 \
+    libxfixes3 libxdamage1 libxxf86vm1 libxshmfence1 \
+    # ---- add these XCB pieces (important) ----
+    libxcb1 libxcb-dri2-0 libxcb-dri3-0 libxcb-present0 libxcb-shm0 \
+    libxcb-sync1 libxcb-randr0 libxcb-xfixes0 libxcb-glx0 \
+    # ------------------------------------------
+    mesa-utils mesa-utils-extra glmark2-es2 kmscube \
+    fontconfig fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

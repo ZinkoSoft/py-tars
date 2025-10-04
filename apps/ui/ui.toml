@@ -13,7 +13,7 @@ fullscreen = true
 
 [layout]
 file = "layout.json"
-rotation = 90
+rotation = 270
 
 [topics]
 audio = "stt/audio_fft"

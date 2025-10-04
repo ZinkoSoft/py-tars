@@ -245,6 +245,8 @@ services:
     image: tars/ui:dev
     container_name: tars-ui
     env_file: ../.env
+    ipc: host  # Share IPC namespace for X11
+    shm_size: "512m"     # (optional but nice)
     environment:
       MQTT_URL: mqtt://mqtt:1883
       MQTT_HOST: mqtt
@@ -252,18 +254,39 @@ services:
       UI_CONFIG: /config/ui.toml
       DISPLAY: ${DISPLAY:-:1}
       SDL_VIDEODRIVER: ${SDL_VIDEODRIVER:-x11}
+      SDL_VIDEO_X11_FORCE_EGL: "1"        # <- force EGL instead of GLX on X11
+      SDL_HINT_OPENGL_ES_DRIVER: "1"      # <- hint SDL to prefer OpenGL ES driver
+      SDL_OPENGL_ES_DRIVER: "1"           # <- older alias of the same hint
       XAUTHORITY: ${XAUTHORITY:-/tmp/.docker_xauth}
       FFT_WS_ENABLE: 1
       FFT_WS_HOST: 0.0.0.0
       FFT_WS_PORT: 8765
       FFT_WS_PATH: /fft
+      # Disable MIT-SHM to avoid attach errors
+      SDL_VIDEO_X11_XSHM: "0"
+      # OpenGL environment variables
+      MESA_LOADER_DRIVER_OVERRIDE: panfrost # <- prefer panfrost on RK3588
+      LIBGL_ALWAYS_INDIRECT: "0"
+      LIBGL_ALWAYS_SOFTWARE: "0"
+      # Force software rendering until GPU driver is fixed
+      UI_SOFTWARE_RENDERING: ${UI_SOFTWARE_RENDERING:-0}
+      PYOPENGL_PLATFORM: egl # <- use EGL backend for PyOpenGL
+      SDL_AUDIODRIVER: dummy
     depends_on:
       mqtt:
         condition: service_started
     volumes:
       - ../apps/ui/ui.toml:/config/ui.toml:ro
-      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
       - /run/user/1000/gdm/Xauthority:${XAUTHORITY:-/tmp/.docker_xauth}:ro
+      # GPU/DRI access for hardware-accelerated OpenGL
+      - /dev/dri:/dev/dri:rw
+    devices:
+      # Grant access to GPU devices for OpenGL acceleration
+      - /dev/dri:/dev/dri
+    group_add:
+      - "44"   # 44 on your host
+      - "992"  # 992 on your host
     restart: unless-stopped
 
   llm:
