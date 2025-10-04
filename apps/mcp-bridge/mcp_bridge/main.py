@@ -1,12 +1,14 @@
 import asyncio
 import logging
 import os
+from pathlib import Path
 
 import yaml
 from mcp.client.session import ClientSession
 from mcp.client.stdio import stdio_client, StdioServerParameters
 from mcp.client.streamable_http import streamablehttp_client
 
+from .discovery import ServerDiscoveryService, MCPServerMetadata, TransportType
 from .mqtt_client import MCPBridgeMQTTClient
 
 logging.basicConfig(level=logging.INFO)
@@ -26,8 +28,72 @@ def tool_to_openai_function(server_name, t) -> dict:
         }
     }
 
+async def discover_servers():
+    """Discover MCP servers using the new discovery system.
+    
+    Returns:
+        List of MCPServerMetadata objects.
+    """
+    # Get paths from environment or use defaults
+    workspace_root = Path(os.getenv("WORKSPACE_ROOT", "/workspace"))
+    packages_path = Path(os.getenv("MCP_LOCAL_PACKAGES_PATH", workspace_root / "packages"))
+    extensions_path = Path(os.getenv("MCP_EXTENSIONS_PATH", workspace_root / "extensions" / "mcp-servers"))
+    config_path = Path(os.getenv("MCP_SERVERS_YAML", workspace_root / "ops" / "mcp" / "mcp.server.yml"))
+    
+    # Initialize discovery service
+    discovery = ServerDiscoveryService(
+        packages_path=packages_path,
+        extensions_path=extensions_path,
+        config_path=config_path,
+        workspace_root=workspace_root,
+    )
+    
+    # Discover all servers
+    servers = await discovery.discover_all()
+    
+    logger.info(f"✅ Discovered {len(servers)} MCP servers")
+    for server in servers:
+        logger.info(f"  - {server}")
+    
+    return servers
+
+
+def metadata_to_legacy_config(metadata: MCPServerMetadata) -> dict:
+    """Convert MCPServerMetadata to legacy server config format.
+    
+    This maintains backward compatibility with existing connection code.
+    
+    Args:
+        metadata: Server metadata from discovery
+    
+    Returns:
+        Dictionary in the old YAML config format.
+    """
+    config = {
+        "name": metadata.name,
+        "transport": metadata.transport.value,
+    }
+    
+    if metadata.transport == TransportType.STDIO:
+        config["command"] = metadata.command
+        config["args"] = metadata.args
+        if metadata.env:
+            config["env"] = metadata.env
+    elif metadata.transport == TransportType.HTTP:
+        config["url"] = metadata.url
+    
+    if metadata.tools_allowlist:
+        config["tools_allowlist"] = metadata.tools_allowlist
+    
+    return config
+
+
 async def load_servers_yaml():
-    """Load MCP server configuration from YAML file."""
+    """Load MCP server configuration from YAML file.
+    
+    DEPRECATED: Use discover_servers() instead for dynamic discovery.
+    This function is kept for backward compatibility.
+    """
     yaml_path = os.getenv("MCP_SERVERS_YAML", "/config/mcp.server.yml")
     try:
         with open(yaml_path, 'r') as f:
@@ -131,8 +197,18 @@ async def main():
     async with await mqtt_client.connect() as mqtt:
         logger.info("Connected to MQTT")
 
-        # Load YAML, iterate servers → connect & enumerate tools
-        servers = await load_servers_yaml()
+        # 🆕 NEW: Use dynamic discovery system
+        use_discovery = os.getenv("MCP_USE_DISCOVERY", "true").lower() == "true"
+        
+        if use_discovery:
+            logger.info("🔍 Using dynamic server discovery")
+            discovered_servers = await discover_servers()
+            # Convert to legacy format for existing connection code
+            servers = [metadata_to_legacy_config(m) for m in discovered_servers]
+        else:
+            logger.info("⚙️ Using legacy YAML config")
+            servers = await load_servers_yaml()
+        
         tool_funcs = []
         sessions: dict[str, ClientSession] = {}
         active_contexts = []  # Keep context managers alive for the program duration
