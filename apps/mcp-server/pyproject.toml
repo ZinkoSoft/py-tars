@@ -13,7 +13,8 @@ dependencies = [
   "pydantic>=2.7",
   "orjson>=3.9",
   "python-dotenv>=1.0",     # convenient env loading for secrets/keys
-  "asyncio-mqtt>=0.16.2",   # if any tools need to publish/subscribe to MQTT
+  "asyncio-mqtt>=0.16.2",   # if any tools need to publish/subscribe to MQTT,
+  "tars-core>=0.1.0"
 ]
 
 [project.optional-dependencies]

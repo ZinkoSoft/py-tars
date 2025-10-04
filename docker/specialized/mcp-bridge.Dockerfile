@@ -16,7 +16,22 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir /tmp/tars-core && \
     rm -rf /tmp/tars-core
 
-# Install dependencies only (not the package itself)
+# Install built-in MCP servers (tars-mcp-character, etc.)
+COPY packages/tars-mcp-character /tmp/tars-mcp-character
+RUN pip install --no-cache-dir /tmp/tars-mcp-character && \
+    rm -rf /tmp/tars-mcp-character
+
+# Install user extension MCP servers (if any exist)
+COPY extensions/mcp-servers /tmp/extensions/mcp-servers
+RUN for dir in /tmp/extensions/mcp-servers/*/; do \
+      if [ -f "$dir/pyproject.toml" ]; then \
+        echo "Installing extension: $(basename $dir)"; \
+        pip install --no-cache-dir "$dir"; \
+      fi; \
+    done && \
+    rm -rf /tmp/extensions
+
+# Install mcp-bridge dependencies only (not the package itself)
 COPY apps/mcp-bridge/pyproject.toml /tmp/mcp-bridge/pyproject.toml
 RUN python -c "import tomllib; print('\n'.join(tomllib.load(open('/tmp/mcp-bridge/pyproject.toml','rb'))['project']['dependencies']))" > /tmp/requirements.txt && \
     pip install --no-cache-dir -r /tmp/requirements.txt && \

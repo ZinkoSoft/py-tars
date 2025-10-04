@@ -1,8 +1,17 @@
 servers:
-  - name: test-server
-    transport: http
-    url: "http://mcp-test-server:8080/mcp"
-    tools_allowlist: ["hello", "add", "get_time"]
+  # TARS Character Management Server (built-in)
+  - name: tars-character
+    transport: stdio
+    command: "python"
+    args: ["-m", "tars_mcp_character"]
+    tools_allowlist: ["adjust_personality_trait", "get_current_traits", "reset_all_traits"]
+  
+  # Test server (uncomment if you have mcp-test-server running)
+  # - name: test-server
+  #   transport: http
+  #   url: "http://mcp-test-server:8080/mcp"
+  #   tools_allowlist: ["hello", "add", "get_time"]
+  
   # Stdio servers (currently having handshake issues):
   # - name: filesystem
   #   transport: stdio

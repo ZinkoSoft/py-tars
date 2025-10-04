@@ -122,6 +122,11 @@ ops/mosquitto-data/*
 # Memory Worker data
 data/*
 
+# User MCP server extensions (keep directory, ignore user servers)
+extensions/mcp-servers/*
+!extensions/mcp-servers/README.md
+!extensions/mcp-servers/.gitkeep
+
 .github
 
 server/models-cache

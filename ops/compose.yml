@@ -327,6 +327,26 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  mcp-server:
+    build:
+      context: ..
+      dockerfile: docker/specialized/mcp-server.Dockerfile
+    image: tars/mcp-server:dev
+    container_name: tars-mcp-server
+    env_file: ../.env
+    environment:
+      MQTT_URL: mqtt://mqtt:1883
+      MQTT_HOST: mqtt
+      MQTT_PORT: "1883"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    command: ["tars-mcp-server", "sse", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    depends_on:
+      mqtt:
+        condition: service_started
+    restart: unless-stopped
+
   mcp-bridge:
     build:
       context: ..
