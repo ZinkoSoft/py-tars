@@ -18,6 +18,8 @@ logger = logging.getLogger("mcp-bridge.mqtt")
 
 # MQTT Topics
 TOPIC_TOOL_REGISTRY = "llm/tools/registry"
+TOPIC_TOOL_CALL = "llm/tools/call"
+TOPIC_TOOL_RESULT = "llm/tools/result"
 TOPIC_HEALTH_MCP_BRIDGE = "system/health/mcp-bridge"
 TOPIC_HEALTH_LLM = "system/health/llm"
 
@@ -66,6 +68,26 @@ class MCPBridgeMQTTClient:
         logger.info("✅ Published %d tools to %s (retained)", len(tools), TOPIC_TOOL_REGISTRY)
     
     @staticmethod
+    async def publish_tool_registry_non_retained(client: Mqtt, tools: list[dict]) -> None:
+        """Publish tool registry as non-retained message.
+        
+        This is a workaround for asyncio-mqtt not reliably delivering retained messages
+        to subscribers. Used when LLM worker restarts to ensure immediate delivery.
+        
+        Args:
+            client: Connected MQTT client
+            tools: List of tool function definitions
+        """
+        registry_payload = orjson.dumps({"tools": tools})
+        await client.publish(
+            TOPIC_TOOL_REGISTRY,
+            registry_payload,
+            qos=1,
+            retain=False  # Non-retained for immediate delivery
+        )
+        logger.info("✅ Published %d tools to %s (non-retained, immediate)", len(tools), TOPIC_TOOL_REGISTRY)
+    
+    @staticmethod
     async def publish_health(
         client: Mqtt,
         event: str = "ready",
@@ -103,6 +125,50 @@ class MCPBridgeMQTTClient:
         """
         await client.subscribe(TOPIC_HEALTH_LLM)
         logger.info("📡 Subscribed to %s", TOPIC_HEALTH_LLM)
+    
+    @staticmethod
+    async def subscribe_tool_calls(client: Mqtt) -> None:
+        """Subscribe to tool execution requests from llm-worker.
+        
+        Args:
+            client: Connected MQTT client
+        """
+        await client.subscribe(TOPIC_TOOL_CALL)
+        logger.info("📡 Subscribed to %s", TOPIC_TOOL_CALL)
+    
+    @staticmethod
+    async def publish_tool_result(
+        client: Mqtt,
+        call_id: str,
+        content: str = None,
+        error: str = None
+    ) -> None:
+        """Publish tool execution result to MQTT.
+        
+        Args:
+            client: Connected MQTT client
+            call_id: Tool call ID (for correlation)
+            content: Tool result content (success)
+            error: Error message (failure)
+        """
+        result = {
+            "call_id": call_id,
+        }
+        
+        if error:
+            result["error"] = error
+            logger.info(f"Publishing tool result for {call_id}: ERROR - {error}")
+        else:
+            result["content"] = content or ""
+            logger.info(f"Publishing tool result for {call_id}: SUCCESS ({len(content or '')} chars)")
+        
+        payload = orjson.dumps(result)
+        await client.publish(
+            TOPIC_TOOL_RESULT,
+            payload,
+            qos=1,
+            retain=False
+        )
     
     @staticmethod
     def is_llm_ready_event(payload: bytes) -> bool:

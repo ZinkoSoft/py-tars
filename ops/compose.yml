@@ -286,15 +286,12 @@ services:
       TOOL_CALLING_ENABLED: ${TOOL_CALLING_ENABLED:-false}
       OPENAI_RESPONSES_MODELS: ${OPENAI_RESPONSES_MODELS:-gpt-5*,gpt-5-mini,gpt-5-nano}
       TOPIC_TOOLS_REGISTRY: ${TOPIC_TOOLS_REGISTRY:-llm/tools/registry}
-      TOPIC_TOOL_CALL_REQUEST: ${TOPIC_TOOL_CALL_REQUEST:-llm/tool.call.request}
-      TOPIC_TOOL_CALL_RESULT: ${TOPIC_TOOL_CALL_RESULT:-llm/tool.call.result}
+      TOPIC_TOOL_CALL_RESULT: ${TOPIC_TOOL_CALL_RESULT:-llm/tools/result}
       PYTHONPATH: /workspace/apps/llm-worker
     volumes:
       - ..:/workspace:ro
     depends_on:
       mqtt:
-        condition: service_started
-      mcp-bridge:
         condition: service_started
     restart: unless-stopped
 
@@ -322,26 +319,6 @@ services:
       - ../data/memory:/data
       - ../apps/voice/characters:/config/characters:ro
       - ..:/workspace:ro
-    depends_on:
-      mqtt:
-        condition: service_started
-    restart: unless-stopped
-
-  mcp-server:
-    build:
-      context: ..
-      dockerfile: docker/specialized/mcp-server.Dockerfile
-    image: tars/mcp-server:dev
-    container_name: tars-mcp-server
-    env_file: ../.env
-    environment:
-      MQTT_URL: mqtt://mqtt:1883
-      MQTT_HOST: mqtt
-      MQTT_PORT: "1883"
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    command: ["tars-mcp-server", "sse", "--port", "8000"]
-    ports:
-      - "8000:8000"
     depends_on:
       mqtt:
         condition: service_started

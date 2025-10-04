@@ -80,6 +80,7 @@ class MQTTClient:
         memory_results_topic: Optional[str] = None,
         tool_calling_enabled: bool = False,
         tools_registry_topic: Optional[str] = None,
+        tools_result_topic: Optional[str] = None,
     ) -> None:
         """Subscribe to all required MQTT topics for LLM worker."""
         # Core subscriptions
@@ -99,10 +100,14 @@ class MQTTClient:
             await client.subscribe(memory_results_topic)
             logger.info("Subscribed to %s for RAG queries", memory_results_topic)
         
-        # Optional tool calling subscription
-        if tool_calling_enabled and tools_registry_topic:
-            await client.subscribe(tools_registry_topic)
-            logger.info("Subscribed to tool registry: %s", tools_registry_topic)
+        # Optional tool calling subscriptions
+        if tool_calling_enabled:
+            if tools_registry_topic:
+                await client.subscribe(tools_registry_topic)
+                logger.info("Subscribed to tool registry: %s", tools_registry_topic)
+            if tools_result_topic:
+                await client.subscribe(tools_result_topic)
+                logger.info("Subscribed to tool results: %s", tools_result_topic)
         
         # Request initial character state
         try:
@@ -110,6 +115,29 @@ class MQTTClient:
             logger.info("Requested character/get on startup")
         except Exception:
             logger.debug("character/get publish failed (may be offline)")
+    
+    async def publish_tool_call(
+        self,
+        client: mqtt.Client,
+        call_id: str,
+        tool_name: str,
+        arguments: dict
+    ) -> None:
+        """Publish tool call request to mcp-bridge.
+        
+        Args:
+            client: MQTT client
+            call_id: Unique call ID for correlation
+            tool_name: Tool name (format: mcp__server-name__tool-name)
+            arguments: Tool arguments dict
+        """
+        payload = {
+            "call_id": call_id,
+            "tool_name": tool_name,
+            "arguments": arguments
+        }
+        await client.publish("llm/tools/call", json.dumps(payload), qos=1, retain=False)
+        logger.info("Published tool call to llm/tools/call: %s (call_id=%s)", tool_name, call_id)
     
     async def message_stream(self, client: mqtt.Client) -> AsyncIterator:
         """Get async iterator for MQTT messages."""

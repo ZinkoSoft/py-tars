@@ -1,6 +1,7 @@
 """LLM request processing handler."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, Optional, Tuple
 
@@ -152,6 +153,13 @@ class RequestHandler:
         # Tools
         tool_calling_enabled = self.config.get("TOOL_CALLING_ENABLED", False)
         tools = self.tool_executor.tools if tool_calling_enabled and self.tool_executor.tools else None
+        
+        # Debug: log tool status
+        logger.info(
+            "Tool calling: enabled=%s, tools_available=%d",
+            tool_calling_enabled,
+            len(self.tool_executor.tools) if self.tool_executor.tools else 0
+        )
         
         return {
             "text": text,
@@ -319,7 +327,11 @@ class RequestHandler:
         
         # Check for tool calls
         tool_calls = self.tool_executor.extract_tool_calls(result)
+        logger.info("Tool calls extracted: %s (count=%d)", "yes" if tool_calls else "no", len(tool_calls) if tool_calls else 0)
+        if tool_calls:
+            logger.info("Tool calls: %s", tool_calls)
         if tool_calls and self.config.get("TOOL_CALLING_ENABLED", False):
+            logger.info("Handling %d tool call(s) for id=%s", len(tool_calls), params["req_id"])
             await self._handle_tool_calls(client, params, messages, result, tool_calls)
         else:
             # Direct response
@@ -342,7 +354,7 @@ class RequestHandler:
         })
         
         # Execute tools
-        tool_results = await self.tool_executor.execute_tool_calls(tool_calls)
+        tool_results = await self.tool_executor.execute_tool_calls(tool_calls, self.mqtt_client, client)
         
         # Add tool result messages
         tool_messages = self.tool_executor.format_tool_messages(tool_results)

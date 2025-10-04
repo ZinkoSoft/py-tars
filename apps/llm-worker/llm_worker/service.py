@@ -31,16 +31,13 @@ from .config import (
     TOPIC_CHARACTER_RESULT,
     TOOL_CALLING_ENABLED,
     TOPIC_TOOLS_REGISTRY,
+    TOPIC_TOOL_CALL_RESULT,
     # TTS streaming config
     LLM_TTS_STREAM,
     TOPIC_TTS_SAY,
     STREAM_MIN_CHARS,
     STREAM_MAX_CHARS,
     STREAM_BOUNDARY_CHARS,
-    # Tool calling config
-    TOOL_CALLING_ENABLED,
-    TOPIC_TOOLS_REGISTRY,
-    TOPIC_TOOL_CALL_REQUEST,
 )
 from .providers.openai import OpenAIProvider
 
@@ -115,7 +112,6 @@ class LLMService:
         register(EVENT_TYPE_LLM_STREAM, TOPIC_LLM_STREAM)
         register(EVENT_TYPE_SAY, TOPIC_TTS_SAY)
         register(EVENT_TYPE_TOOLS_REGISTRY, TOPIC_TOOLS_REGISTRY)
-        register(EVENT_TYPE_TOOL_CALL_REQUEST, TOPIC_TOOL_CALL_REQUEST)
     
     def _build_config(self) -> Dict[str, Any]:
         """Build configuration dictionary for handlers."""
@@ -164,16 +160,24 @@ class LLMService:
                     memory_results_topic=TOPIC_MEMORY_RESULTS,
                     tool_calling_enabled=TOOL_CALLING_ENABLED,
                     tools_registry_topic=TOPIC_TOOLS_REGISTRY,
+                    tools_result_topic=TOPIC_TOOL_CALL_RESULT,
                 )
+                
+                # CRITICAL: Small delay to allow retained messages to arrive before starting message loop
+                # This ensures tool registry and character state are received before processing requests
+                await asyncio.sleep(0.5)
+                logger.info("Starting message processing loop")
                 
                 # Process messages via router
                 async for m in self.mqtt_client.message_stream(client):
+                    logger.debug("Message received: topic=%s payload_size=%d", m.topic, len(m.payload))
                     await self.router.route_message(
                         client,
                         m,
                         character_current_topic=TOPIC_CHARACTER_CURRENT,
                         character_result_topic=TOPIC_CHARACTER_RESULT,
                         tools_registry_topic=TOPIC_TOOLS_REGISTRY,
+                        tools_result_topic=TOPIC_TOOL_CALL_RESULT,
                         memory_results_topic=TOPIC_MEMORY_RESULTS,
                         llm_request_topic=TOPIC_LLM_REQUEST,
                     )

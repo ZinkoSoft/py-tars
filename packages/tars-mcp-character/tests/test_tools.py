@@ -39,10 +39,10 @@ class TestAdjustPersonalityTrait:
     @pytest.mark.asyncio
     async def test_adjust_trait_max_value(self, mock_mqtt_client, mock_env_vars):
         """Test adjusting a trait to maximum value (100)."""            
-        result = await adjust_personality_trait(trait_name="loyalty", new_value=100)
+        result = await adjust_personality_trait(trait_name="curiosity", new_value=100)
         
         assert result["success"] is True
-        assert result["trait"] == "loyalty"
+        assert result["trait"] == "curiosity"
         assert result["new_value"] == 100
 
     @pytest.mark.asyncio
@@ -77,14 +77,18 @@ class TestAdjustPersonalityTrait:
         assert "Valid traits:" in result["error"]
         
         # Verify MQTT publish was NOT called
-        mock_mqtt_client.publish.assert_not_called()    @pytest.mark.asyncio
+        mock_mqtt_client.publish.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_adjust_trait_whitespace_name(self, mock_mqtt_client, mock_env_vars):
         """Test adjusting a trait with whitespace-only name."""
         result = await adjust_personality_trait(trait_name="   ", new_value=50)
         
         assert result["success"] is False
         assert "Unknown trait" in result["error"]
-        assert "Valid traits:" in result["error"]    @pytest.mark.asyncio
+        assert "Valid traits:" in result["error"]
+
+    @pytest.mark.asyncio
     async def test_adjust_trait_case_insensitive(self, mock_mqtt_client, mock_env_vars):
         """Test that trait names are handled case-insensitively."""            
         result = await adjust_personality_trait(trait_name="HUMOR", new_value=60)
@@ -115,9 +119,11 @@ class TestAdjustPersonalityTrait:
         import orjson
         from tars.contracts.envelope import Envelope
         
-        envelope_data = orjson.loads(payload_bytes)        # Verify envelope structure
-        assert "event_type" in envelope_data
-        assert envelope_data["event_type"] == "character.update"
+        envelope_data = orjson.loads(payload_bytes)
+        
+        # Verify envelope structure
+        assert "type" in envelope_data
+        assert envelope_data["type"] == "character.update"
         assert "data" in envelope_data
         
         # Verify data structure
@@ -136,7 +142,7 @@ class TestGetCurrentTraits:
         result = await get_current_traits()
             
         assert result["success"] is True
-        assert "Query published" in result["message"]
+        assert "Trait query sent" in result["message"]
         
         # Verify MQTT publish was called
         mock_mqtt_client.publish.assert_called_once()
@@ -158,8 +164,9 @@ class TestGetCurrentTraits:
         # Verify envelope structure
         assert "type" in envelope_data
         assert envelope_data["type"] == "character.get"
-        assert "data" in envelope_data    @pytest.mark.asyncio
-        
+        assert "data" in envelope_data
+
+    @pytest.mark.asyncio
     async def test_get_traits_mqtt_error(self, mock_mqtt_client, mock_env_vars):
         """Test handling of MQTT publish errors during get request."""
         mock_mqtt_client.publish.side_effect = Exception("Connection lost")            
@@ -195,13 +202,13 @@ class TestResetAllTraits:
         payload_bytes = call_args[0][1]
         
         import orjson
-        from tars.contracts.v1.envelope import Envelope
+        from tars.contracts.envelope import Envelope
         
         envelope_data = orjson.loads(payload_bytes)
         
         # Verify envelope structure
-        assert "event_type" in envelope_data
-        assert envelope_data["event_type"] == "character.update"
+        assert "type" in envelope_data
+        assert envelope_data["type"] == "character.update"
         assert "data" in envelope_data
         
         # Verify data structure
@@ -225,7 +232,7 @@ class TestValidationEdgeCases:
     @pytest.mark.parametrize("value", [0, 1, 25, 50, 75, 99, 100])
     async def test_all_valid_values(self, mock_mqtt_client, mock_env_vars, value):
         """Test all valid values from 0 to 100."""            
-        result = await adjust_personality_trait(trait_name="test_trait", new_value=value)
+        result = await adjust_personality_trait(trait_name="humor", new_value=value)
         
         assert result["success"] is True
         assert result["new_value"] == value
@@ -234,7 +241,7 @@ class TestValidationEdgeCases:
     @pytest.mark.parametrize("value", [-1, -100, 101, 150, 1000])
     async def test_all_invalid_values(self, mock_mqtt_client, mock_env_vars, value):
         """Test various invalid values outside 0-100 range."""            
-        result = await adjust_personality_trait(trait_name="test_trait", new_value=value)
+        result = await adjust_personality_trait(trait_name="humor", new_value=value)
             
         assert result["success"] is False
         assert "must be between 0-100" in result["error"]
@@ -259,17 +266,17 @@ class TestValidationEdgeCases:
 
     @pytest.mark.asyncio
     async def test_unicode_trait_name(self, mock_mqtt_client, mock_env_vars):
-        """Test that unicode trait names are handled."""            
+        """Test that unicode trait names are handled (rejected as invalid)."""            
         result = await adjust_personality_trait(trait_name="émotivité", new_value=50)
             
-        assert result["success"] is True
-        assert result["trait"] == "émotivité"
+        assert result["success"] is False
+        assert "Unknown trait" in result["error"]
 
     @pytest.mark.asyncio
     async def test_very_long_trait_name(self, mock_mqtt_client, mock_env_vars):
-        """Test handling of very long trait names."""
+        """Test handling of very long trait names (rejected as invalid)."""
         long_name = "a" * 1000            
         result = await adjust_personality_trait(trait_name=long_name, new_value=50)
         
-        assert result["success"] is True
-        assert result["trait"] == long_name
+        assert result["success"] is False
+        assert "Unknown trait" in result["error"]

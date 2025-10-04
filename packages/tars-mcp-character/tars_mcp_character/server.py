@@ -135,9 +135,10 @@ async def get_current_traits() -> dict[str, Any]:
         char_request = CharacterGetRequest(section="traits")
         
         # Wrap in envelope
-        envelope = Envelope(
+        envelope = Envelope.new(
             event_type="character.get",
-            data=char_request.model_dump(),
+            data=char_request,
+            source="mcp-character",
         )
         
         # Query current character state from memory-worker

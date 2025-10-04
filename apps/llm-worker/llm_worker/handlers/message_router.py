@@ -45,6 +45,7 @@ class MessageRouter:
         character_current_topic: str,
         character_result_topic: str,
         tools_registry_topic: str,
+        tools_result_topic: str,
         memory_results_topic: str,
         llm_request_topic: str,
     ) -> None:
@@ -68,7 +69,29 @@ class MessageRouter:
         
         # Tool registry
         if topic == tools_registry_topic:
-            await self.tool_handler.load_tools(message.payload)
+            logger.debug("Received tool registry message on topic: %s", topic)
+            try:
+                registry_data = json.loads(message.payload)
+                logger.debug("Parsed registry data with %d tools", len(registry_data.get("tools", [])))
+                await self.tool_handler.load_tools_from_registry(registry_data)
+            except Exception as e:
+                logger.warning("Failed to load tools from registry: %s", e, exc_info=True)
+            return
+        
+        # Tool results
+        if topic == tools_result_topic:
+            logger.debug("Received tool result on topic: %s", topic)
+            try:
+                result_data = json.loads(message.payload)
+                call_id = result_data.get("call_id")
+                content = result_data.get("content")
+                error = result_data.get("error")
+                if call_id:
+                    self.tool_handler.handle_tool_result(call_id, content, error)
+                else:
+                    logger.warning("Tool result missing call_id: %s", result_data)
+            except Exception as e:
+                logger.warning("Failed to handle tool result: %s", e, exc_info=True)
             return
         
         # Memory/RAG results
