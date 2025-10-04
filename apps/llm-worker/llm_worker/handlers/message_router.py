@@ -46,7 +46,6 @@ class MessageRouter:
         character_result_topic: str,
         tools_registry_topic: str,
         memory_results_topic: str,
-        tool_call_result_topic: str,
         llm_request_topic: str,
     ) -> None:
         """Route a single MQTT message to the appropriate handler.
@@ -74,12 +73,11 @@ class MessageRouter:
         
         # Memory/RAG results
         if topic == memory_results_topic:
-            await self.rag_handler.handle_results(message.payload)
-            return
-        
-        # Tool call results (legacy, kept for compatibility)
-        if topic == tool_call_result_topic:
-            await self.tool_handler.handle_tool_result(message.payload)
+            try:
+                data = json.loads(message.payload)
+                self.rag_handler.handle_results(data)
+            except Exception as e:
+                logger.warning("Failed to handle memory/results: %s", e)
             return
         
         # LLM requests

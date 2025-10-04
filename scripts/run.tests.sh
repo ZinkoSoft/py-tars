@@ -25,25 +25,31 @@ install_requirements() {
   info "Upgrading pip/setuptools/wheel"
   pip install --upgrade pip setuptools wheel
 
+  # Install tars-core first (dependency for other packages)
   if [[ -f "${REPO_ROOT}/packages/tars-core/pyproject.toml" ]]; then
     info "Installing tars-core package (editable)"
     pip install -e "${REPO_ROOT}/packages/tars-core"
   fi
 
-  if [[ -f "${REPO_ROOT}/apps/router/pyproject.toml" ]]; then
-    info "Installing router package (editable)"
-    pip install -e "${REPO_ROOT}/apps/router"
-  fi
+  # Install all apps with pyproject.toml in editable mode
+  local apps_with_pyproject=(
+    "apps/router"
+    "apps/llm-worker"
+    "apps/mcp-bridge"
+    "apps/memory-worker"
+    "apps/movement-service"
+    "apps/stt-worker"
+    "apps/tts-worker"
+    "apps/wake-activation"
+  )
 
-  if [[ -f "${REPO_ROOT}/apps/wake-activation/pyproject.toml" ]]; then
-    info "Installing wake activation package (editable)"
-    pip install -e "${REPO_ROOT}/apps/wake-activation"
-  fi
-
-  if [[ -f "${REPO_ROOT}/apps/stt-worker/pyproject.toml" ]]; then
-    info "Installing stt-worker package (editable)"
-    pip install -e "${REPO_ROOT}/apps/stt-worker"
-  fi
+  for app_path in "${apps_with_pyproject[@]}"; do
+    local abs_path="${REPO_ROOT}/${app_path}/pyproject.toml"
+    if [[ -f "${abs_path}" ]]; then
+      info "Installing ${app_path} package (editable)"
+      pip install -e "${REPO_ROOT}/${app_path}"
+    fi
+  done
 
   local requirements=(
     "apps/stt-worker/requirements.txt"

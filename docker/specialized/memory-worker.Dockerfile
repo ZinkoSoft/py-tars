@@ -15,18 +15,16 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # Install memory-worker dependencies ONLY (cached unless pyproject.toml changes)
 COPY apps/memory-worker/pyproject.toml /tmp/memory-worker/pyproject.toml
-COPY apps/memory-worker/README.md /tmp/memory-worker/README.md
-# Create empty package structure for pip install to work
-RUN mkdir -p /tmp/memory-worker/memory_worker && \
-    touch /tmp/memory-worker/memory_worker/__init__.py
-RUN pip install --no-cache-dir /tmp/memory-worker && \
-    rm -rf /tmp/memory-worker
+RUN python -c "import tomllib; print('\n'.join(tomllib.load(open('/tmp/memory-worker/pyproject.toml','rb'))['project']['dependencies']))" > /tmp/requirements.txt && \
+    pip install --no-cache-dir -r /tmp/requirements.txt && \
+    rm -rf /tmp/memory-worker /tmp/requirements.txt
 
-# Copy source code LAST (this layer invalidates when source changes)
-COPY apps/memory-worker/memory_worker /app/memory_worker
+# Source code will be provided via volume mount at /workspace/apps/memory-worker
+# This enables live code updates without container rebuild
 
-ENV PYTHONUNBUFFERED=1
-ENV HF_HOME=/data/model_cache \
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    HF_HOME=/data/model_cache \
     SENTENCE_TRANSFORMERS_HOME=/data/model_cache \
     TRANSFORMERS_CACHE=/data/model_cache \
     TORCH_HOME=/data/model_cache

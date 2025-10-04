@@ -57,6 +57,9 @@ services:
       ROUTER_STREAM_MAX_CHARS: ${STREAM_MAX_CHARS:-240}
       ROUTER_STREAM_BOUNDARY_CHARS: ${STREAM_BOUNDARY_CHARS:-.!?;:}
       ROUTER_TTS_VOICE: ${ROUTER_TTS_VOICE:-/voices/TARS.onnx}
+      PYTHONPATH: /workspace/apps/router
+    volumes:
+      - ..:/workspace:ro
     depends_on:
       mqtt:
         condition: service_started
@@ -83,6 +86,7 @@ services:
       TTS_WAKE_CACHE_ENABLE: ${TTS_WAKE_CACHE_ENABLE:-1}
       TTS_WAKE_CACHE_DIR: ${TTS_WAKE_CACHE_DIR:-/data/tts-cache}
       TTS_WAKE_CACHE_MAX: ${TTS_WAKE_CACHE_MAX:-16}
+      PYTHONPATH: /workspace/apps/tts-worker
 
     depends_on:
       mqtt:
@@ -94,6 +98,7 @@ services:
       - ../apps/tts-worker/voices:/voice-models:ro
       - /run/user/1000/pulse:/run/user/1000/pulse:ro
       - ../data/tts-cache:/data/tts-cache
+      - ..:/workspace:ro
 
   stt:
     build:
@@ -129,6 +134,7 @@ services:
       FFT_WS_HOST: ${FFT_WS_HOST:-0.0.0.0}
       FFT_WS_PORT: ${FFT_WS_PORT:-8765}
       FFT_WS_PATH: ${FFT_WS_PATH:-/fft}
+      PYTHONPATH: /workspace/apps/stt-worker
     depends_on:
       mqtt:
         condition: service_started
@@ -139,6 +145,7 @@ services:
       - /run/user/1000/pulse:/run/user/1000/pulse:ro
       - ../models/whisper:/host-models
       - wake-cache:/tmp/tars
+      - ..:/workspace:ro
 
   wake-activation:
     build:
@@ -159,6 +166,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       WAKE_AUDIO_FANOUT: ${WAKE_AUDIO_FANOUT:-/tmp/tars/audio-fanout.sock}
       WAKE_MODEL_PATH: ${WAKE_MODEL_PATH:-/models/openwakeword/hey_tars.tflite}
+      PYTHONPATH: /workspace/apps/wake-activation
     depends_on:
       mqtt:
         condition: service_started
@@ -167,6 +175,7 @@ services:
     volumes:
       - ../models/openwakeword:/models/openwakeword:ro
       - wake-cache:/tmp/tars
+      - ..:/workspace:ro
     restart: unless-stopped
 
   ui-web:
@@ -300,18 +309,6 @@ services:
     depends_on:
       mqtt:
         condition: service_started
-      mcp-test-server:
-        condition: service_started
-    restart: unless-stopped
-
-  mcp-test-server:
-    build:
-      context: ../apps/mcp-tools/test
-      dockerfile: Dockerfile
-    image: tars/mcp-test-server:dev
-    container_name: tars-mcp-test-server
-    ports:
-      - "8080:8080"
     restart: unless-stopped
 
 # Optional: define multiple network(s)

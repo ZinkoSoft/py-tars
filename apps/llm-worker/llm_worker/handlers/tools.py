@@ -1,9 +1,8 @@
 """Tool calling and execution."""
 from __future__ import annotations
 
-import asyncio
 import logging
-from typing import Any, Dict, List, Optional
+from typing import List
 
 import orjson as json
 
@@ -31,7 +30,7 @@ class ToolExecutor:
                 await mcp_client.initialize_from_registry(registry_payload)
                 
                 # TODO: Get server URLs from config instead of hardcoded
-                await mcp_client.connect_to_server("test-server", "http://mcp-test-server:8080/mcp")
+                await mcp_client.connect_to_server("test-server", "http://mcp-test-server:8088/mcp")
                 self._initialized = True
                 logger.info("MCP client initialized and connected")
         except Exception as e:
@@ -96,15 +95,3 @@ class ToolExecutor:
                 "tool_call_id": result["call_id"]
             })
         return messages
-    
-    async def load_tools(self, payload: bytes) -> None:
-        """Load tools from raw payload (wrapper for backward compatibility)."""
-        try:
-            data = json.loads(payload)
-            await self.load_tools_from_registry(data)
-        except Exception as e:
-            logger.error("Failed to load tools from payload: %s", e)
-    
-    async def handle_tool_result(self, payload: bytes) -> None:
-        """Handle tool result (legacy compatibility - no-op with direct MCP)."""
-        logger.debug("Tool result received (legacy handler - ignored with direct MCP)")

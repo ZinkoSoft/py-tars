@@ -62,8 +62,13 @@ class RAGHandler:
         snippets = []
         for r in results:
             doc = r.get("document") or {}
-            text = doc.get("text") or json.dumps(doc)
-            snippets.append(text)
+            text = doc.get("text")
+            if text:
+                snippets.append(text)
+            else:
+                # Fallback to JSON serialization (decode bytes to str)
+                json_bytes = json.dumps(doc)
+                snippets.append(json_bytes.decode('utf-8') if isinstance(json_bytes, bytes) else json_bytes)
         
         context = "\n".join(snippets)
         future.set_result(context)

@@ -31,21 +31,20 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Install STT worker dependencies ONLY (cached unless requirements.txt or pyproject.toml changes)
 COPY apps/stt-worker/requirements.txt /app/requirements.txt
 COPY apps/stt-worker/pyproject.toml /tmp/stt-worker/pyproject.toml
-COPY apps/stt-worker/README.md /tmp/stt-worker/README.md
-# Create empty package structure for pip install to work
-RUN mkdir -p /tmp/stt-worker/stt_worker && \
-    touch /tmp/stt-worker/stt_worker/__init__.py
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r /app/requirements.txt && \
-    pip install /tmp/stt-worker && \
-    rm -rf /tmp/stt-worker
+    python -c "import tomllib; print('\n'.join(tomllib.load(open('/tmp/stt-worker/pyproject.toml','rb'))['project']['dependencies']))" > /tmp/stt-requirements.txt && \
+    pip install -r /tmp/stt-requirements.txt && \
+    rm -rf /tmp/stt-worker /tmp/stt-requirements.txt
 
-# Copy source code LAST (this layer invalidates most frequently)
-COPY apps/stt-worker/stt_worker /app/stt_worker
-COPY apps/stt-worker/*.py /app/
+# Source code will be provided via volume mount at /workspace/apps/stt-worker
+# This enables live code updates without container rebuild
 
 # Create directories for models
 RUN mkdir -p /app/models /host-models
 
+# Set PYTHONPATH to workspace mount (will be overridden by compose.yml)
+ENV PYTHONPATH=/app
+
 # Use entrypoint to copy models from host mount if available
-ENTRYPOINT ["/bin/sh", "-c", "if [ -d /host-models ] && [ -n \"$(ls -A /host-models 2>/dev/null)\" ]; then echo 'Copying models from host...'; cp -r /host-models/* /app/models/ 2>/dev/null || true; fi; exec python /app/main.py"]
+ENTRYPOINT ["/bin/sh", "-c", "if [ -d /host-models ] && [ -n \"$(ls -A /host-models 2>/dev/null)\" ]; then echo 'Copying models from host...'; cp -r /host-models/* /app/models/ 2>/dev/null || true; fi; exec python -m stt_worker"]

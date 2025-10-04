@@ -1,19 +1,17 @@
-import asyncio, orjson, os, logging
-from pydantic import BaseModel
-from aiomqtt import Client as Mqtt
+import asyncio
+import logging
+import os
+
+import yaml
 from mcp.client.session import ClientSession
 from mcp.client.stdio import stdio_client, StdioServerParameters
 from mcp.client.streamable_http import streamablehttp_client
-import yaml
+
+from .mqtt_client import MCPBridgeMQTTClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("mcp-bridge")
 
-class McpToolSpec(BaseModel):
-    server: str
-    name: str
-    description: str | None = None
-    parameters: dict  # JSON Schema
 
 def tool_to_openai_function(server_name, t) -> dict:
     # t is an MCP Tool (SDK object) with .name, .description, .inputSchema (JSONSchema)
@@ -41,13 +39,24 @@ async def load_servers_yaml():
         logger.error(f"Failed to load MCP servers YAML: {e}")
         return []
 
-async def main():
-    host = os.getenv("MQTT_HOST", "127.0.0.1")
-    port = int(os.getenv("MQTT_PORT", "1883"))
-    user = os.getenv("MQTT_USER")
-    pwd = os.getenv("MQTT_PASS")
+async def heartbeat_loop(mqtt):
+    """Send periodic health heartbeats.
     
-    async with Mqtt(hostname=host, port=port, username=user, password=pwd) as mqtt:
+    Args:
+        mqtt: Connected MQTT client
+    """
+    try:
+        while True:
+            await asyncio.sleep(60)
+            await MCPBridgeMQTTClient.publish_health(mqtt, event="heartbeat")
+    except asyncio.CancelledError:
+        logger.debug("Heartbeat loop cancelled")
+
+async def main():
+    # Initialize MQTT client
+    mqtt_client = MCPBridgeMQTTClient()
+    
+    async with await mqtt_client.connect() as mqtt:
         logger.info("Connected to MQTT")
 
         # Load YAML, iterate servers → connect & enumerate tools
@@ -134,62 +143,44 @@ async def main():
                 continue
 
         # Publish merged registry for llm-worker (retained so new subscribers get it)
-        registry_payload = orjson.dumps({"tools": tool_funcs})
-        logger.info(f"Publishing {len(tool_funcs)} tools to registry (payload size: {len(registry_payload)} bytes, retained=True)")
-        await mqtt.publish("llm/tools/registry", registry_payload, qos=1, retain=True)
-        logger.info(f"✅ Published {len(tool_funcs)} tools to llm/tools/registry (retained)")
+        await MCPBridgeMQTTClient.publish_tool_registry(mqtt, tool_funcs)
 
         # Publish health
-        await mqtt.publish("system/health/mcp-bridge", orjson.dumps({"ok": True, "event": "ready"}), retain=True)
+        await MCPBridgeMQTTClient.publish_health(mqtt, event="ready")
 
-        # Handle tool calls from llm-worker
-        await mqtt.subscribe("llm/tool.call.request/#")
-        logger.info("Subscribed to tool call requests")
-        async for m in mqtt.messages:
-                try:
-                    msg = orjson.loads(m.payload)
-                    # Extract data payload (message is wrapped in event envelope)
-                    req = msg.get("data", msg)  # Support both wrapped and direct formats
-                    # Parse new format: "mcp__server__tool"
-                    parts = req["name"].split("__")
-                    if len(parts) != 3 or parts[0] != "mcp":
-                        raise ValueError(f"Invalid tool name format: {req['name']}")
-                    _, server, tool = parts
-                    args = req.get("arguments", {})
-                    logger.info(f"Tool call: {server}:{tool} with args: {args}")
-                    result = await sessions[server].call_tool(tool, args)  # SDK invoke
-                    logger.debug(f"Tool result type: {type(result)}, hasattr content: {hasattr(result, 'content')}")
-                    # Extract content from CallToolResult (has content array with TextContent/ImageContent/etc)
-                    result_content = []
-                    for content_item in result.content:
-                        if hasattr(content_item, 'text'):
-                            result_content.append(content_item.text)
-                        elif hasattr(content_item, 'model_dump'):
-                            result_content.append(content_item.model_dump())
-                    # Join text content or return structured content
-                    result_value = " ".join(result_content) if all(isinstance(c, str) for c in result_content) else result_content
-                    logger.info(f"Tool result extracted: {result_value}")
-                    await mqtt.publish("llm/tool.call.result", orjson.dumps({
-                        "call_id": req["call_id"], "result": result_value
-                    }), qos=1)
-                    logger.info(f"✅ Tool call result published for call_id: {req['call_id']}")
-                except Exception as e:
-                    logger.error(f"Tool call failed: {e}")
-                    # Publish error result
-                    try:
-                        call_id = req.get("call_id", "unknown")
-                        await mqtt.publish("llm/tool.call.result", orjson.dumps({
-                            "call_id": call_id, "error": str(e)
-                        }), qos=1)
-                    except:
-                        pass
+        # Subscribe to LLM worker health to detect restarts
+        await MCPBridgeMQTTClient.subscribe_llm_health(mqtt)
 
-        # Cleanup: close all active contexts
-        for context, _ in active_contexts:
+        # Tool execution is now handled directly by llm-worker via direct MCP connections
+        # mcp-bridge only handles tool discovery and registry publishing
+        logger.info("✅ MCP Bridge ready - tool registry published, monitoring LLM health")
+        logger.info("   (Tool execution is handled by llm-worker)")
+        
+        # Keep the service alive, maintain MCP connections, and monitor LLM health
+        try:
+            heartbeat_task = asyncio.create_task(heartbeat_loop(mqtt))
+            
+            async with mqtt.messages() as messages:
+                async for message in messages:
+                    # Check if LLM worker restarted
+                    if MCPBridgeMQTTClient.is_llm_ready_event(message.payload):
+                        logger.info("🔄 LLM worker restarted - re-publishing tool registry")
+                        await MCPBridgeMQTTClient.publish_tool_registry(mqtt, tool_funcs)
+        except asyncio.CancelledError:
+            logger.info("Shutdown signal received")
+            heartbeat_task.cancel()
             try:
-                await context.__aexit__(None, None, None)
-            except Exception as e:
-                logger.error(f"Error closing context: {e}")
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+        finally:
+            # Cleanup: close all active contexts
+            logger.info("Closing MCP connections...")
+            for context, _ in active_contexts:
+                try:
+                    await context.__aexit__(None, None, None)
+                except Exception as e:
+                    logger.error(f"Error closing context: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())

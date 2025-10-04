@@ -3,12 +3,14 @@ name = "tars-mcp-bridge"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-  "aiomqtt>=1.0.0",
+  "asyncio-mqtt>=0.16.2",
+  "paho-mqtt<2.0",
   "orjson>=3.11.0",
   "pydantic>=2.7",
   "mcp>=1.2.0",   # official MCP Python SDK
   "tenacity>=8.4",
-  "PyYAML>=6.0"
+  "PyYAML>=6.0",
+  "tars-core>=0.1.0"
 ]
 
 [project.scripts]
