@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "generated_at": "2025-01-20T12:00:00Z",
+  "servers": [
+    {
+      "name": "character-server",
+      "source": "local",
+      "transport": "stdio",
+      "command": "python",
+      "args": ["-m", "tars_mcp_character"],
+      "env": {},
+      "allowed_tools": null,
+      "package_name": "tars-mcp-character",
+      "installed": true,
+      "install_path": "/workspace/packages/tars-mcp-character",
+      "url": null
+    },
+    {
+      "name": "filesystem",
+      "source": "extension",
+      "transport": "stdio",
+      "command": "python",
+      "args": ["-m", "mcp_server_filesystem"],
+      "env": {},
+      "allowed_tools": [
+        "read_file",
+        "write_file",
+        "list_directory"
+      ],
+      "package_name": "mcp-server-filesystem",
+      "installed": true,
+      "install_path": "/home/user/.venv/lib/python3.12/site-packages/mcp_server_filesystem",
+      "url": null
+    },
+    {
+      "name": "external-server",
+      "source": "external",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["--yes", "@example/mcp-server"],
+      "env": {
+        "API_KEY": "your-api-key-here"
+      },
+      "allowed_tools": null,
+      "package_name": "@example/mcp-server",
+      "installed": false,
+      "install_path": null,
+      "url": null
+    },
+    {
+      "name": "http-api",
+      "source": "external",
+      "transport": "http",
+      "command": null,
+      "args": [],
+      "env": {},
+      "allowed_tools": null,
+      "package_name": null,
+      "installed": false,
+      "install_path": null,
+      "url": "http://localhost:8080/mcp"
+    }
+  ],
+  "discovery_summary": {
+    "total_servers": 4,
+    "by_source": {
+      "local": 1,
+      "extension": 1,
+      "external": 2
+    },
+    "by_transport": {
+      "stdio": 3,
+      "http": 1
+    }
+  },
+  "installation_summary": {
+    "total_servers": 4,
+    "installed": 2,
+    "already_installed": 0,
+    "failed": 0,
+    "skipped": 2,
+    "success_rate": 1.0,
+    "duration_sec": 12.5
+  }
+}

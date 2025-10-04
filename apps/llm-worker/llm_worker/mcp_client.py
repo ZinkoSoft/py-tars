@@ -6,7 +6,6 @@ Loads tools from registry and executes them via MCP protocol.
 """
 import asyncio
 import logging
-import orjson
 from typing import Any, Dict, List, Optional
 
 from mcp import ClientSession

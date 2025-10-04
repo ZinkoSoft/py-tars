@@ -2,7 +2,10 @@
 
 A modular **AI “brain” stack** for the Orange Pi 5 Max that handles:
 - **STT** (speech → text via Faster-Whisper)
-- **Router** (rule-based intent routing, fallback smalltalk)
+- **Router** (rule-  ├─ wake-activation/         # OpenWakeWord detection
+  ├─ llm-worker/              # LLM text generation with tool calling
+  ├─ mcp-bridge/              # Build-time MCP server discovery & configuration
+  ├─ memory-worker/           # Vector memory & character profilesd intent routing, fallback smalltalk)
 - **TTS** (text → voice via Piper)
 - **MQTT backbone** to glue everything together  
 
@@ -32,36 +35,70 @@ Motion and battery subsystems (ESP32-S3, LiPo pack, etc.) can connect later thro
 
 ### MCP Tool Integration
 
-TARS supports **Model Context Protocol (MCP)** for extending LLM capabilities with external tools. The MCP Bridge service connects to MCP-compatible servers and exposes their tools to the LLM worker.
+TARS supports **Model Context Protocol (MCP)** for extending LLM capabilities with external tools. MCP servers are discovered and configured at **Docker build time**, then used by llm-worker at runtime.
 
 **How It Works:**
-1. **MCP Bridge** loads server configurations from `ops/mcp/mcp.server.yml`
-2. **Tool Discovery** - Bridge connects to each MCP server and enumerates available tools
-3. **Registry Publishing** - Tools are published to `llm/tools/registry` as OpenAI-compatible function specs
-4. **LLM Enhancement** - LLM Worker receives tool registry and includes tools in API requests
-5. **Tool Execution** - When LLM calls tools, requests go via MQTT to MCP Bridge
-6. **Result Integration** - Tool results are returned and LLM generates follow-up responses
+1. **Build-Time Discovery** - MCP Bridge runs during `docker compose build llm`:
+   - Scans `packages/tars-mcp-*/` for local MCP server packages
+   - Scans `extensions/mcp-servers/` for extension packages
+   - Loads external server configs from `ops/mcp/mcp.server.yml`
+2. **Package Installation** - Python MCP packages are installed via pip (parallel)
+3. **Config Generation** - Bridge generates `mcp-servers.json` configuration file
+4. **Image Embedding** - Config is baked into the llm-worker Docker image at `/app/config/mcp-servers.json`
+5. **Runtime Connection** - LLM Worker reads config at startup and connects to MCP servers
+6. **Tool Execution** - When LLM calls tools, llm-worker executes them via MCP protocol
 
-**Example Configuration** (`ops/mcp/mcp.server.yml`):
-```yaml
-servers:
-  - name: filesystem
-    transport: stdio
-    command: "mcp-filesystem"
-    args: ["--root","/home/user/work"]
-    tools_allowlist: ["read_file","write_file","list_dir"]
+**Architecture:**
+```
+BUILD TIME (Docker Build):
+  MCP Bridge → Discover Servers → Install Packages → Generate Config → Bake into Image
+
+RUNTIME (llm-worker):
+  Read Config → Connect to MCP Servers → Register Tools → Execute Tool Calls
+```
+
+**Adding MCP Servers:**
+
+1. **Local Package** (recommended for Python tools):
+   ```bash
+   # Create package following naming convention
+   packages/tars-mcp-mytools/
+   ├── pyproject.toml
+   └── src/tars_mcp_mytools/
+       └── server.py
+   ```
+
+2. **External Config** (for npm packages or custom commands):
+   ```yaml
+   # ops/mcp/mcp.server.yml
+   servers:
+     - name: filesystem
+       transport: stdio
+       command: "npx"
+       args: ["--yes", "@modelcontextprotocol/server-filesystem", "/workspace"]
+       allowed_tools: ["read_file", "write_file", "list_dir"]
+   ```
+
+3. **Extension Directory** (for third-party packages):
+   ```bash
+   # Place external MCP servers here
+   extensions/mcp-servers/custom-server/
+   ```
+
+**Rebuild After Changes:**
+```bash
+cd ops
+docker compose build llm --no-cache  # MCP Bridge runs during build
+docker compose up -d llm
 ```
 
 **Supported Tool Types:**
-- **Filesystem Tools** - read/write files, list directories
+- **Character Traits** - Adjust TARS personality dynamically (`tars-mcp-character`)
+- **Filesystem Tools** - Read/write files, list directories
 - **API Tools** - HTTP requests, database queries
-- **Custom Tools** - any MCP-compatible server implementation
+- **Custom Tools** - Any MCP-compatible server implementation
 
-**Enabling Tool Calling:**
-```bash
-# In .env file
-TOOL_CALLING_ENABLED=1
-```
+**Note:** MCP Bridge is **not a runtime service** - it only runs during Docker builds to prepare the configuration. All runtime tool execution is handled by llm-worker.
 
 ---
 
@@ -92,7 +129,7 @@ TOOL_CALLING_ENABLED=1
 - **Wake Activation** — OpenWakeWord-based wake phrase detection
 - **Router** — intent routing, wake word handling, live mode control
 - **LLM Worker** — OpenAI/Gemini/local LLM text generation with optional RAG and tool calling
-- **MCP Bridge** — Model Context Protocol integration enabling LLM tool usage (filesystem, APIs, etc.)
+- **MCP Bridge** (build-time) — Discovers and configures MCP servers during Docker image builds
 - **Memory Worker** — vector database for conversation memory and character profiles
 - **TTS Worker** — text-to-speech using Piper or ElevenLabs  
 - **Camera Service** — live video streaming via MQTT for mobile robot vision
@@ -211,8 +248,12 @@ mkdir -p apps/tts-worker/voices
 
 ### 5. Configure MCP Tools (Optional)
 ```bash
-# Edit MCP server configuration
+# MCP servers are auto-discovered from packages/tars-mcp-* at build time
+# For external servers (npm, custom commands), edit:
 nano ops/mcp/mcp.server.yml
+
+# Example local package (automatically discovered):
+# packages/tars-mcp-character/ - TARS personality trait adjustment tools
 
 # Enable tool calling in environment
 echo "TOOL_CALLING_ENABLED=1" >> .env
@@ -220,10 +261,13 @@ echo "TOOL_CALLING_ENABLED=1" >> .env
 
 ### 6. Build & Deploy
 ```bash
-# Build and start all services
+# Build and start all services (MCP Bridge runs during llm build)
 cd ops
 docker compose build
 docker compose up -d
+
+# Verify MCP configuration was generated (if tool calling enabled)
+docker run --rm tars/llm:dev cat /app/config/mcp-servers.json | jq .
 
 # Check service health
 docker compose ps
@@ -358,15 +402,18 @@ mosquitto_pub -h 127.0.0.1 -p 1883 -u tars -P change_me -t llm/request \
 
 **MCP Tool Calling:**
 ```bash
-# Monitor tool registry
+# Verify MCP config was generated at build time
+docker run --rm tars/llm:dev cat /app/config/mcp-servers.json | jq .
+
+# Monitor tool registry (published by llm-worker at startup)
 mosquitto_sub -h 127.0.0.1 -p 1883 -u tars -P change_me -t 'llm/tools/registry' -v
 
-# Monitor tool calls
+# Monitor tool calls (handled by llm-worker at runtime)
 mosquitto_sub -h 127.0.0.1 -p 1883 -u tars -P change_me -t 'llm/tool.call.+' -v
 
-# Test tool-enabled conversation
+# Test tool-enabled conversation (example: adjust TARS personality traits)
 mosquitto_pub -h 127.0.0.1 -p 1883 -u tars -P change_me -t llm/request \
-  -m '{"type":"llm.request","source":"test","data":{"messages":[{"role":"user","content":"List the files in the current directory"}]}}'
+  -m '{"type":"llm.request","source":"test","data":{"messages":[{"role":"user","content":"Make yourself more confident"}]}}'
 ```
 
 ### 4. End-to-End Conversation Test
@@ -449,7 +496,7 @@ Extend `apps/llm-worker/llm_worker/providers/` with new provider implementations
 - **🎤 Multi-Backend STT:** Local Whisper, OpenAI API, or WebSocket server
 - **🎯 Wake Word Detection:** "Hey TARS" activation using OpenWakeWord  
 - **🤖 LLM Integration:** OpenAI, Gemini, xAI Grok, or local models with tool calling
-- **🛠️ MCP Tool Support:** Model Context Protocol integration for filesystem access, APIs, and custom tools
+- **🛠️ MCP Tool Support:** Build-time MCP server discovery with runtime tool execution (character traits, filesystem, APIs)
 - **🧠 Memory System:** RAG-powered conversation memory with character profiles
 - **🔊 Flexible TTS:** Local Piper or cloud ElevenLabs synthesis
 - **📹 Camera Streaming:** Live video feed for mobile robot vision
@@ -487,7 +534,7 @@ Extend `apps/llm-worker/llm_worker/providers/` with new provider implementations
 - [x] **STT Worker** with multiple backends (Whisper, OpenAI, WebSocket)
 - [x] **Wake Word Detection** using OpenWakeWord 
 - [x] **LLM Integration** with multiple providers (OpenAI, Gemini, xAI Grok, local models)
-- [x] **MCP Tool Integration** for LLM tool calling via Model Context Protocol
+- [x] **MCP Tool Integration** - Build-time discovery and configuration, runtime execution via Model Context Protocol
 - [x] **Memory System** with RAG and character profiles
 - [x] **Streaming TTS** with Piper and ElevenLabs support
 - [x] **Camera Service** with live video streaming via MQTT

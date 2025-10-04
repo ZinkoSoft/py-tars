@@ -1,356 +1,148 @@
+"""MCP Bridge - Build-time MCP server discovery, installation, and configuration generation.
+
+This is a ONE-SHOT script that runs at Docker build time (not a runtime service).
+It discovers MCP servers, installs them, generates mcp-servers.json, and exits.
+
+The generated config file is consumed by llm-worker at runtime.
+"""
 import asyncio
 import logging
 import os
+import sys
 from pathlib import Path
 
-import yaml
-from mcp.client.session import ClientSession
-from mcp.client.stdio import stdio_client, StdioServerParameters
-from mcp.client.streamable_http import streamablehttp_client
+from .discovery import ServerDiscoveryService
+from .installation import InstallationService
+from .config_generator import ConfigGenerator
+from .config_generator.writer import ConfigWriter
 
-from .discovery import ServerDiscoveryService, MCPServerMetadata, TransportType
-from .mqtt_client import MCPBridgeMQTTClient
-
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger("mcp-bridge")
 
 
-def tool_to_openai_function(server_name, t) -> dict:
-    # t is an MCP Tool (SDK object) with .name, .description, .inputSchema (JSONSchema)
-    # Note: MCP uses camelCase (inputSchema), not snake_case (input_schema)
-    # OpenAI function names: use underscores instead of colons (colons may cause issues)
-    return {
-        "type": "function",
-        "function": {
-            "name": f"mcp__{server_name}__{t.name}",
-            "description": t.description or "",
-            "parameters": t.inputSchema or {"type":"object","properties":{}}
-        }
-    }
-
-async def discover_servers():
-    """Discover MCP servers using the new discovery system.
-    
-    Returns:
-        List of MCPServerMetadata objects.
-    """
-    # Get paths from environment or use defaults
-    workspace_root = Path(os.getenv("WORKSPACE_ROOT", "/workspace"))
-    packages_path = Path(os.getenv("MCP_LOCAL_PACKAGES_PATH", workspace_root / "packages"))
-    extensions_path = Path(os.getenv("MCP_EXTENSIONS_PATH", workspace_root / "extensions" / "mcp-servers"))
-    config_path = Path(os.getenv("MCP_SERVERS_YAML", workspace_root / "ops" / "mcp" / "mcp.server.yml"))
-    
-    # Initialize discovery service
-    discovery = ServerDiscoveryService(
-        packages_path=packages_path,
-        extensions_path=extensions_path,
-        config_path=config_path,
-        workspace_root=workspace_root,
-    )
-    
-    # Discover all servers
-    servers = await discovery.discover_all()
-    
-    logger.info(f"✅ Discovered {len(servers)} MCP servers")
-    for server in servers:
-        logger.info(f"  - {server}")
-    
-    return servers
-
-
-def metadata_to_legacy_config(metadata: MCPServerMetadata) -> dict:
-    """Convert MCPServerMetadata to legacy server config format.
-    
-    This maintains backward compatibility with existing connection code.
-    
-    Args:
-        metadata: Server metadata from discovery
-    
-    Returns:
-        Dictionary in the old YAML config format.
-    """
-    config = {
-        "name": metadata.name,
-        "transport": metadata.transport.value,
-    }
-    
-    if metadata.transport == TransportType.STDIO:
-        config["command"] = metadata.command
-        config["args"] = metadata.args
-        if metadata.env:
-            config["env"] = metadata.env
-    elif metadata.transport == TransportType.HTTP:
-        config["url"] = metadata.url
-    
-    if metadata.tools_allowlist:
-        config["tools_allowlist"] = metadata.tools_allowlist
-    
-    return config
-
-
-async def load_servers_yaml():
-    """Load MCP server configuration from YAML file.
-    
-    DEPRECATED: Use discover_servers() instead for dynamic discovery.
-    This function is kept for backward compatibility.
-    """
-    yaml_path = os.getenv("MCP_SERVERS_YAML", "/config/mcp.server.yml")
-    try:
-        with open(yaml_path, 'r') as f:
-            config = yaml.safe_load(f)
-        servers = config.get("servers", []) or []  # Handle None case when key exists with no value
-        logger.info(f"Loaded {len(servers)} MCP servers from {yaml_path}")
-        return servers
-    except Exception as e:
-        logger.error(f"Failed to load MCP servers YAML: {e}")
-        return []
-
-async def heartbeat_loop(mqtt):
-    """Send periodic health heartbeats.
-    
-    Args:
-        mqtt: Connected MQTT client
-    """
-    try:
-        while True:
-            await asyncio.sleep(60)
-            await MCPBridgeMQTTClient.publish_health(mqtt, event="heartbeat")
-    except asyncio.CancelledError:
-        logger.debug("Heartbeat loop cancelled")
-
-async def handle_tool_call(mqtt, payload: bytes, sessions: dict):
-    """Handle tool execution request from llm-worker.
-    
-    Args:
-        mqtt: Connected MQTT client
-        payload: JSON payload from llm/tools/call topic
-                 Expected: {call_id, tool_name, arguments}
-        sessions: Dict of server_name -> ClientSession
-    """
-    import orjson
-    
-    try:
-        data = orjson.loads(payload)
-        call_id = data.get("call_id")
-        tool_name = data.get("tool_name")
-        arguments = data.get("arguments", {})
-        
-        if not call_id or not tool_name:
-            logger.error(f"Invalid tool call request: missing call_id or tool_name")
-            return
-        
-        logger.info(f"Executing tool call: {tool_name} (call_id={call_id})")
-        
-        # Parse tool name: mcp__server-name__tool-name
-        if not tool_name.startswith("mcp__"):
-            await MCPBridgeMQTTClient.publish_tool_result(
-                mqtt, call_id, error=f"Not an MCP tool: {tool_name}"
-            )
-            return
-        
-        parts = tool_name.split("__")
-        if len(parts) != 3:
-            await MCPBridgeMQTTClient.publish_tool_result(
-                mqtt, call_id, error=f"Invalid MCP tool name format: {tool_name}"
-            )
-            return
-        
-        _, server_name, mcp_tool_name = parts
-        
-        # Get session for this server
-        session = sessions.get(server_name)
-        if not session:
-            await MCPBridgeMQTTClient.publish_tool_result(
-                mqtt, call_id, error=f"Server not connected: {server_name}"
-            )
-            return
-        
-        # Execute tool via MCP
-        try:
-            logger.debug(f"Calling MCP tool: {server_name}:{mcp_tool_name} with args: {arguments}")
-            result = await session.call_tool(mcp_tool_name, arguments)
-            
-            # Extract content from CallToolResult
-            if hasattr(result, 'content') and result.content:
-                # result.content is a list of content items
-                content_text = " ".join(
-                    item.text if hasattr(item, 'text') else str(item)
-                    for item in result.content
-                )
-                logger.info(f"Tool {tool_name} succeeded: {content_text[:100]}")
-                await MCPBridgeMQTTClient.publish_tool_result(mqtt, call_id, content=content_text)
-            else:
-                logger.warning(f"Tool {tool_name} returned no content")
-                await MCPBridgeMQTTClient.publish_tool_result(mqtt, call_id, content="")
-                
-        except Exception as e:
-            logger.error(f"Tool {tool_name} execution failed: {e}", exc_info=True)
-            await MCPBridgeMQTTClient.publish_tool_result(mqtt, call_id, error=str(e))
-            
-    except Exception as e:
-        logger.error(f"Error handling tool call: {e}", exc_info=True)
-
 async def main():
-    # Initialize MQTT client
-    mqtt_client = MCPBridgeMQTTClient()
+    """Run complete MCP bridge pipeline: discover -> install -> generate config -> exit.
     
-    async with await mqtt_client.connect() as mqtt:
-        logger.info("Connected to MQTT")
-
-        # 🆕 NEW: Use dynamic discovery system
-        use_discovery = os.getenv("MCP_USE_DISCOVERY", "true").lower() == "true"
+    Exit codes:
+        0: Success (all or partial success with >= 50% install rate)
+        1: Failure (no servers discovered or install rate < 50%)
+    """
+    try:
+        # ========== Phase 1: Discovery ==========
+        logger.info("=" * 60)
+        logger.info("Phase 1: MCP Server Discovery")
+        logger.info("=" * 60)
         
-        if use_discovery:
-            logger.info("🔍 Using dynamic server discovery")
-            discovered_servers = await discover_servers()
-            # Convert to legacy format for existing connection code
-            servers = [metadata_to_legacy_config(m) for m in discovered_servers]
+        # Get paths from environment
+        workspace_root = Path(os.getenv("WORKSPACE_ROOT", "/workspace"))
+        packages_path = Path(os.getenv("MCP_LOCAL_PACKAGES_PATH", workspace_root / "packages"))
+        extensions_path = Path(os.getenv("MCP_EXTENSIONS_PATH", workspace_root / "extensions" / "mcp-servers"))
+        config_path = Path(os.getenv("MCP_SERVERS_YAML", workspace_root / "ops" / "mcp" / "mcp.server.yml"))
+        
+        logger.info(f"Workspace root: {workspace_root}")
+        logger.info(f"Local packages: {packages_path}")
+        logger.info(f"Extensions: {extensions_path}")
+        logger.info(f"External config: {config_path}")
+        
+        # Initialize discovery service
+        discovery = ServerDiscoveryService(
+            packages_path=packages_path,
+            extensions_path=extensions_path,
+            config_path=config_path,
+            workspace_root=workspace_root,
+        )
+        
+        # Discover all servers
+        discovered_servers = await discovery.discover_all()
+        
+        logger.info("")
+        logger.info(f"✅ Discovery complete: {len(discovered_servers)} servers found")
+        
+        if not discovered_servers:
+            logger.warning("⚠️  No MCP servers discovered - nothing to install")
+            logger.info("Exiting with success (nothing to do)")
+            return 0
+        
+        # ========== Phase 2: Installation ==========
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info("Phase 2: Package Installation")
+        logger.info("=" * 60)
+        
+        installation_service = InstallationService(
+            skip_already_installed=True,
+            fail_fast=False,
+        )
+        
+        install_summary = await installation_service.install_all(discovered_servers)
+        
+        logger.info("")
+        logger.info(f"✅ Installation complete in {install_summary.total_duration_sec:.1f}s")
+        logger.info(f"   Total servers: {install_summary.total_servers}")
+        logger.info(f"   Installed: {install_summary.installed}")
+        logger.info(f"   Already installed: {install_summary.already_installed}")
+        logger.info(f"   Skipped: {install_summary.skipped}")
+        logger.info(f"   Failed: {install_summary.failed}")
+        logger.info(f"   Success rate: {install_summary.success_rate * 100:.1f}%")
+        
+        # ========== Phase 3: Configuration Generation ==========
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info("Phase 3: Configuration Generation")
+        logger.info("=" * 60)
+        
+        # Generate configuration
+        config_generator = ConfigGenerator()
+        config = config_generator.generate(
+            discovered_servers=discovered_servers,
+            installation_summary=install_summary,
+        )
+        
+        logger.info(f"Generated configuration for {len(config.servers)} servers")
+        
+        # Write configuration to disk
+        output_dir = Path(os.getenv("MCP_OUTPUT_DIR", workspace_root / "config"))
+        config_filename = os.getenv("MCP_CONFIG_FILENAME", "mcp-servers.json")
+        
+        logger.info(f"Writing configuration to: {output_dir / config_filename}")
+        
+        config_writer = ConfigWriter(
+            output_dir=output_dir,
+            filename=config_filename,
+        )
+        
+        config_path_str = config_writer.write(config)
+        config_path = Path(config_path_str)
+        
+        logger.info(f"✅ Configuration written: {config_path}")
+        logger.info(f"   File size: {config_path.stat().st_size} bytes")
+        
+        # ========== Summary ==========
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info("MCP Bridge Complete")
+        logger.info("=" * 60)
+        logger.info(f"Discovered: {len(discovered_servers)} servers")
+        logger.info(f"Installed: {install_summary.installed + install_summary.already_installed}/{install_summary.total_servers}")
+        logger.info(f"Config file: {config_path}")
+        logger.info("")
+        
+        # Determine exit code based on success rate
+        if install_summary.success_rate >= 0.5:
+            logger.info("✅ Build succeeded (>= 50% install success)")
+            return 0
         else:
-            logger.info("⚙️ Using legacy YAML config")
-            servers = await load_servers_yaml()
-        
-        tool_funcs = []
-        sessions: dict[str, ClientSession] = {}
-        active_contexts = []  # Keep context managers alive for the program duration
-
-        for s in servers:
-            try:
-                logger.info(f"Connecting to MCP server: {s['name']}...")
-                transport = s.get("transport", "stdio")
-                
-                if transport == "http":
-                    # HTTP/streamable-http transport
-                    url = s.get("url")
-                    if not url:
-                        logger.error(f"HTTP transport requires 'url' for server {s['name']}")
-                        continue
-                    
-                    logger.debug(f"Connecting via HTTP to {url}")
-                    context = streamablehttp_client(url)
-                    try:
-                        read_stream, write_stream, _ = await context.__aenter__()
-                        active_contexts.append((context, (read_stream, write_stream)))
-                    except Exception as e:
-                        logger.error(f"❌ Failed to connect to HTTP MCP server {s['name']} at {url}: {type(e).__name__}: {e}")
-                        continue
-                    
-                elif transport == "stdio":
-                    # stdio transport
-                    params = StdioServerParameters(
-                        command=s["command"],
-                        args=s.get("args", []),
-                        env=s.get("env", {})
-                    )
-                    logger.debug(f"Starting stdio client for {s['name']}")
-                    context = stdio_client(params)
-                    cm = await context.__aenter__()
-                    active_contexts.append((context, cm))
-                    read_stream, write_stream = cm
-                    
-                else:
-                    logger.error(f"Unknown transport '{transport}' for server {s['name']}")
-                    continue
-                
-                logger.debug(f"Creating ClientSession for {s['name']}")
-                sess = ClientSession(read_stream, write_stream)
-                
-                # ClientSession needs to be entered as a context manager
-                logger.debug(f"Entering ClientSession context for {s['name']}")
-                try:
-                    await sess.__aenter__()
-                except Exception as e:
-                    logger.error(f"❌ Error entering session context for {s['name']}: {e}", exc_info=True)
-                    continue
-                
-                logger.info(f"Initializing MCP session for {s['name']}...")
-                try:
-                    # Try initializing with a reasonable timeout
-                    init_result = await asyncio.wait_for(sess.initialize(), timeout=30.0)
-                    logger.info(f"✅ Session initialized for {s['name']}: {init_result}")
-                except asyncio.TimeoutError:
-                    logger.error(f"❌ Timeout (30s) initializing session for {s['name']}")
-                    logger.error(f"   This usually means the MCP server is not responding to initialize request")
-                    continue
-                except Exception as e:
-                    logger.error(f"❌ Error initializing session for {s['name']}: {type(e).__name__}: {e}", exc_info=True)
-                    continue
-                    
-                sessions[s["name"]] = sess
-                logger.info(f"✅ Connected to MCP server: {s['name']}")
-
-                # List tools (per MCP spec)
-                logger.debug(f"Listing tools from {s['name']}")
-                tools_result = await sess.list_tools()
-                tools = tools_result.tools if hasattr(tools_result, 'tools') else tools_result
-                logger.info(f"Found {len(tools)} tools in {s['name']}")
-                
-                for t in tools:
-                    if s.get("tools_allowlist") and t.name not in s["tools_allowlist"]:
-                        logger.debug(f"Skipping tool {t.name} (not in allowlist)")
-                        continue
-                    tool_funcs.append(tool_to_openai_function(s["name"], t))
-                    logger.info(f"✅ Added tool: {s['name']}:{t.name}")
-            except Exception as e:
-                logger.error(f"❌ Failed to connect to MCP server {s['name']}: {e}", exc_info=True)
-                continue
-
-        # Publish merged registry for llm-worker (retained so new subscribers get it)
-        await MCPBridgeMQTTClient.publish_tool_registry(mqtt, tool_funcs)
-
-        # Publish health
-        await MCPBridgeMQTTClient.publish_health(mqtt, event="ready")
-
-        logger.info("✅ MCP Bridge ready - tool registry published, monitoring tool calls and LLM health")
-        
-        # Keep the service alive, maintain MCP connections, and handle tool execution
-        try:
-            heartbeat_task = asyncio.create_task(heartbeat_loop(mqtt))
+            logger.error(f"❌ Build failed (< 50% install success: {install_summary.success_rate * 100:.1f}%)")
+            return 1
             
-            # CRITICAL: Start message iterator BEFORE subscribing to avoid asyncio-mqtt bug
-            # where subscriptions after iterator start don't deliver messages
-            async with mqtt.messages() as messages:
-                # Subscribe to LLM worker health to detect restarts
-                await MCPBridgeMQTTClient.subscribe_llm_health(mqtt)
+    except Exception as e:
+        logger.error(f"❌ Fatal error in MCP bridge: {e}", exc_info=True)
+        return 1
 
-                # Subscribe to tool call requests
-                await MCPBridgeMQTTClient.subscribe_tool_calls(mqtt)
-                
-                # Small delay to ensure subscriptions are fully registered
-                await asyncio.sleep(0.1)
-                
-                async for message in messages:
-                    logger.debug("Received message: topic=%s payload_len=%d", message.topic, len(message.payload))
-                    
-                    # Handle tool execution requests
-                    if message.topic == "llm/tools/call":
-                        logger.info("📞 Tool call received: %s", message.payload.decode())
-                        asyncio.create_task(handle_tool_call(mqtt, message.payload, sessions))
-                    
-                    # Check if LLM worker restarted
-                    elif MCPBridgeMQTTClient.is_llm_ready_event(message.payload):
-                        logger.info("🔄 LLM worker restarted - re-publishing tool registry")
-                        await MCPBridgeMQTTClient.publish_tool_registry(mqtt, tool_funcs)
-                        # CRITICAL: Publish a second non-retained message to work around asyncio-mqtt
-                        # retained message delivery issue. The retained message ensures persistence,
-                        # but non-retained ensures immediate delivery to active subscribers.
-                        # Wait for LLM to fully start its message loop (0.5s delay + processing time)
-                        await asyncio.sleep(1.0)
-                        await MCPBridgeMQTTClient.publish_tool_registry_non_retained(mqtt, tool_funcs)
-        except asyncio.CancelledError:
-            logger.info("Shutdown signal received")
-            heartbeat_task.cancel()
-            try:
-                await heartbeat_task
-            except asyncio.CancelledError:
-                pass
-        finally:
-            # Cleanup: close all active contexts
-            logger.info("Closing MCP connections...")
-            for context, _ in active_contexts:
-                try:
-                    await context.__aexit__(None, None, None)
-                except Exception as e:
-                    logger.error(f"Error closing context: {e}")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    exit_code = asyncio.run(main())
+    sys.exit(exit_code)
