@@ -22,6 +22,7 @@ class TtsSay(BaseModel):
     style: str | None = None
     stt_ts: float | None = None
     wake_ack: bool | None = None
+    system_announce: bool | None = None  # System announcements don't open response windows
 
     model_config = {"extra": "forbid"}
 
@@ -42,5 +43,6 @@ class TtsStatus(BaseModel):
     utt_id: Optional[str] = None
     reason: Optional[str] = None
     wake_ack: Optional[bool] = None
+    system_announce: Optional[bool] = None  # System announcements don't open response windows
 
     model_config = {"extra": "forbid"}

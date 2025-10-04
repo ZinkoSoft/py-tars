@@ -96,6 +96,7 @@ class TTSService:
             utt_id: Optional[str],
             reason: Optional[str],
             wake_ack: Optional[bool],
+            system_announce: Optional[bool],
         ) -> None:
             await self._publish_status(
                 client,
@@ -104,6 +105,7 @@ class TTSService:
                 utt_id=utt_id,
                 reason=reason,
                 wake_ack=wake_ack,
+                system_announce=system_announce,
             )
 
         return TTSCallbacks(publish_status=publish_status)
@@ -166,6 +168,7 @@ class TTSService:
         reason: Optional[str] = None,
         log_level: int = logging.INFO,
         wake_ack: Optional[bool] = None,
+        system_announce: Optional[bool] = None,
     ) -> None:
         status = TtsStatus(
             event=event,
@@ -173,6 +176,7 @@ class TTSService:
             utt_id=utt_id,
             reason=reason,
             wake_ack=wake_ack,
+            system_announce=system_announce,
         )
         message_id = await self._publish_event(EVENT_TYPE_TTS_STATUS, status, qos=1)
         if message_id is None:

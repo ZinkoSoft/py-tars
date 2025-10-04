@@ -241,6 +241,7 @@ class STTWorker:
 
         text = status.text or ""
         wake_ack = bool(status.wake_ack)
+        system_announce = bool(status.system_announce)
 
         if status.event == "speaking_start":
             if wake_ack:
@@ -250,6 +251,11 @@ class STTWorker:
                     self.audio_capture.unmute("tts wake_ack start")
                     self.recent_unmute_time = time.time()
                 self._resume_after_tts = False
+                return
+            if system_announce:
+                logger.debug("System announce speaking_start received; keeping microphone muted")
+                self.pending_tts = False
+                # Don't unmute, don't change resume state
                 return
             self.state.last_tts_text = text.strip()
             self._remember_tts_resume_state()
@@ -266,6 +272,11 @@ class STTWorker:
             if wake_ack:
                 logger.debug("Wake ack speaking_end received; no mute adjustments needed")
                 self._resume_after_tts = False
+                return
+            if system_announce:
+                logger.debug("System announce speaking_end received; no response window opened")
+                self.pending_tts = False
+                # Don't open response window for system announcements
                 return
 
             async def delayed_unmute() -> None:

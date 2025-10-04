@@ -78,6 +78,7 @@ class RouterPolicy:
                 text=self.settings.online_text,
                 style="neutral",
                 utt_id="boot",
+                system_announce=True,  # Don't open response window for system boot announcement
                 correlate=ctx.id_from(event),
             )
             self._log_metrics(ctx)
@@ -411,6 +412,7 @@ class RouterPolicy:
         style: str = "neutral",
         utt_id: Optional[str] = None,
         wake_ack: Optional[bool] = None,
+        system_announce: Optional[bool] = None,
         correlate: Optional[str] = None,
         stt_ts: Optional[float] = None,
     ) -> None:
@@ -423,6 +425,7 @@ class RouterPolicy:
             utt_id=utt_id,
             style=style,
             wake_ack=wake_ack,
+            system_announce=system_announce,
             stt_ts=stt_ts,
         )
         await ctx.publish(EVENT_TYPE_SAY, say, correlate=correlate, qos=1)
@@ -432,6 +435,7 @@ class RouterPolicy:
                 "utt_id": utt_id,
                 "len": len(text),
                 "wake_ack": wake_ack,
+                "system_announce": system_announce,
                 "stream_mode": self.settings.router_llm_tts_stream,
             },
         )

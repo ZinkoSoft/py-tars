@@ -42,7 +42,7 @@ class Synthesizer(Protocol):
 class TTSCallbacks:
     """Callback bundle for publishing status events to the transport layer."""
 
-    publish_status: Callable[[StatusEvent, str, Optional[str], Optional[str], Optional[bool]], Awaitable[None]]
+    publish_status: Callable[[StatusEvent, str, Optional[str], Optional[str], Optional[bool], Optional[bool]], Awaitable[None]]
 
 
 @dataclass(slots=True)
@@ -196,20 +196,22 @@ class TTSDomainService:
         stt_ts = say.stt_ts
         utt_id_raw = say.utt_id
         wake_ack = bool(say.wake_ack)
+        system_announce = bool(say.system_announce)
         style = say.style
         logger.info(
-            "TTS request received: text='%s' len=%d utt_id=%s style=%s streaming=%s pipeline=%s",
+            "TTS request received: text='%s' len=%d utt_id=%s style=%s streaming=%s pipeline=%s system_announce=%s",
             text[:80].replace("\n", " ") + ("..." if len(text) > 80 else ""),
             len(text),
             utt_id_raw,
             style,
             self._config.streaming_enabled,
             self._config.pipeline_enabled,
+            system_announce,
         )
 
         if self._config.aggregate_enabled and isinstance(utt_id_raw, str) and utt_id_raw:
-            if wake_ack:
-                logger.debug("Bypassing aggregation for wake ack utterance")
+            if wake_ack or system_announce:
+                logger.debug("Bypassing aggregation for wake ack or system announce utterance")
             else:
                 if self._agg_id and self._agg_id != utt_id_raw and self._agg_texts:
                     await self._flush_aggregate(callbacks, stt_ts)
@@ -222,8 +224,8 @@ class TTSDomainService:
             await self._flush_aggregate(callbacks, stt_ts)
 
         normalized_id = self._normalize_utt_id(utt_id_raw if isinstance(utt_id_raw, str) else None)
-        await self._speak(text, stt_ts, callbacks, utt_id=normalized_id, wake_ack=wake_ack)
-        logger.info("TTS playback finished for utt_id=%s wake_ack=%s", normalized_id, wake_ack)
+        await self._speak(text, stt_ts, callbacks, utt_id=normalized_id, wake_ack=wake_ack, system_announce=system_announce)
+        logger.info("TTS playback finished for utt_id=%s wake_ack=%s system_announce=%s", normalized_id, wake_ack, system_announce)
 
     async def handle_control(self, control: TTSControlMessage, callbacks: TTSCallbacks) -> None:
         session = self._match_session(control.request_id)
@@ -333,6 +335,7 @@ class TTSDomainService:
         streaming_override: Optional[bool] = None,
         pipeline_override: Optional[bool] = None,
         wake_ack: bool = False,
+        system_announce: bool = False,
     ) -> None:
         synth = self._wake_synth if wake_ack and self._wake_synth is not None else self._primary_synth
 
@@ -349,6 +352,7 @@ class TTSDomainService:
                     utt_id=session.utt_id,
                     reason=None,
                     wake_ack=wake_ack,
+                    system_announce=system_announce,
                 )
 
                 t0 = time.time()
@@ -391,6 +395,7 @@ class TTSDomainService:
                     utt_id=session.utt_id,
                     reason=reason,
                     wake_ack=wake_ack,
+                    system_announce=system_announce,
                 )
                 logger.debug("Playback end (len=%d)", len(text or ""))
             finally:
@@ -428,6 +433,7 @@ class TTSDomainService:
             utt_id=session.utt_id,
             reason=reason,
             wake_ack=None,
+            system_announce=None,
         )
 
     async def _apply_resume(self, session: PlaybackSession, reason: str, callbacks: TTSCallbacks) -> None:
@@ -459,6 +465,7 @@ class TTSDomainService:
             utt_id=session.utt_id,
             reason=reason,
             wake_ack=None,
+            system_announce=None,
         )
 
     async def _apply_stop(self, session: PlaybackSession, reason: str, callbacks: TTSCallbacks) -> None:
@@ -483,6 +490,7 @@ class TTSDomainService:
             utt_id=session.utt_id,
             reason=reason,
             wake_ack=None,
+            system_announce=None,
         )
 
     def _ensure_active_proc(self, session: PlaybackSession) -> Optional[subprocess.Popen]:
