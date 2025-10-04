@@ -1,0 +1,37 @@
+# ALSA configuration for Docker containers
+# Route default device through PulseAudio to access all audio devices
+
+pcm.!default {
+    type pulse
+    hint {
+        show on
+        description "Default PulseAudio Output/Input"
+    }
+}
+
+ctl.!default {
+    type pulse
+}
+
+# Direct hardware device aliases (if needed)
+pcm.airhug {
+    type plughw
+    card 3
+    device 0
+}
+
+ctl.airhug {
+    type hw
+    card 3
+}
+
+pcm.es8388 {
+    type plughw
+    card 2
+    device 0
+}
+
+ctl.es8388 {
+    type hw
+    card 2
+}

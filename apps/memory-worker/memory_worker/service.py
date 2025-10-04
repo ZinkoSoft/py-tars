@@ -25,6 +25,7 @@ from .config import (
     TOPIC_CHAR_CURRENT,
     TOPIC_CHAR_GET,
     TOPIC_CHAR_RESULT,
+    TOPIC_CHAR_UPDATE,
     TOPIC_HEALTH,
     TOPIC_QUERY,
     TOPIC_RESULTS,
@@ -48,12 +49,15 @@ from tars.contracts.v1.memory import (
     EVENT_TYPE_CHARACTER_CURRENT,
     EVENT_TYPE_CHARACTER_GET,
     EVENT_TYPE_CHARACTER_RESULT,
+    EVENT_TYPE_CHARACTER_UPDATE,
     EVENT_TYPE_MEMORY_HEALTH,
     EVENT_TYPE_MEMORY_QUERY,
     EVENT_TYPE_MEMORY_RESULTS,
     CharacterGetRequest,
+    CharacterResetTraits,
     CharacterSection,
     CharacterSnapshot,
+    CharacterTraitUpdate,
     MemoryQuery,
     MemoryResult,
     MemoryResults,
@@ -137,6 +141,7 @@ class MemoryService:
         register(EVENT_TYPE_CHARACTER_GET, TOPIC_CHAR_GET)
         register(EVENT_TYPE_CHARACTER_RESULT, TOPIC_CHAR_RESULT)
         register(EVENT_TYPE_CHARACTER_CURRENT, TOPIC_CHAR_CURRENT)
+        register(EVENT_TYPE_CHARACTER_UPDATE, TOPIC_CHAR_UPDATE)
         register(EVENT_TYPE_STT_FINAL, TOPIC_STT_FINAL)
         register(EVENT_TYPE_SAY, TOPIC_TTS_SAY)
 
@@ -192,7 +197,7 @@ class MemoryService:
                 await self._publish_character_current(client)
                 
                 # Subscribe to all topics
-                topics = [TOPIC_STT_FINAL, TOPIC_TTS_SAY, TOPIC_QUERY, TOPIC_CHAR_GET]
+                topics = [TOPIC_STT_FINAL, TOPIC_TTS_SAY, TOPIC_QUERY, TOPIC_CHAR_GET, TOPIC_CHAR_UPDATE]
                 await self.mqtt_client.subscribe(client, topics)
                 
                 async with client.messages() as stream:
@@ -209,6 +214,8 @@ class MemoryService:
                             elif topic == TOPIC_CHAR_GET:
                                 request, correlate = self._decode_character_get(payload)
                                 await self._handle_char_get(client, request, correlate)
+                            elif topic == TOPIC_CHAR_UPDATE:
+                                await self._handle_character_update(client, payload)
                             elif topic in (TOPIC_STT_FINAL, TOPIC_TTS_SAY):
                                 await self._ingest_document(topic, payload)
                             else:
@@ -310,6 +317,66 @@ class MemoryService:
             qos=0,
             retain=False,
         )
+
+    async def _handle_character_update(self, client: mqtt.Client, payload: bytes) -> None:
+        """Handle character/update messages to modify traits dynamically.
+        
+        Supported operations (typed with Pydantic models):
+        1. Trait update: CharacterTraitUpdate(trait="humor", value=50)
+        2. Reset all traits: CharacterResetTraits()
+        """
+        try:
+            data, _ = self._decode_payload(payload)
+            if not data:
+                logger.warning("Empty character/update payload")
+                return
+            
+            # Try to parse as CharacterResetTraits first
+            if "action" in data and data["action"] == "reset_traits":
+                try:
+                    reset_req = CharacterResetTraits.model_validate(data)
+                    logger.info("Resetting all traits to defaults from character.toml")
+                    self.character = self._load_character()
+                    await self._publish_character_current(client)
+                    logger.info(
+                        "Reset complete: %d traits restored from %s",
+                        len(self.character.traits),
+                        CHARACTER_NAME,
+                    )
+                    return
+                except ValidationError as e:
+                    logger.warning("Invalid CharacterResetTraits payload: %s", e)
+                    return
+            
+            # Try to parse as CharacterTraitUpdate
+            if data.get("section") == "traits" and "trait" in data and "value" in data:
+                try:
+                    trait_update = CharacterTraitUpdate.model_validate(data)
+                    
+                    # Get old value for logging
+                    old_value = self.character.traits.get(trait_update.trait, "(not set)")
+                    
+                    # Update trait
+                    self.character.traits[trait_update.trait] = trait_update.value
+                    
+                    # Publish updated character
+                    await self._publish_character_current(client)
+                    
+                    logger.info(
+                        "Updated trait '%s': %s → %d (retained character/current published)",
+                        trait_update.trait,
+                        old_value,
+                        trait_update.value,
+                    )
+                    return
+                except ValidationError as e:
+                    logger.warning("Invalid CharacterTraitUpdate payload: %s", e)
+                    return
+            
+            logger.debug("Unhandled character/update format: %s", data)
+        
+        except Exception as exc:
+            logger.exception("Failed to handle character/update: %s", exc)
 
     async def _ingest_document(self, topic: str, payload: bytes) -> None:
         """Ingest document asynchronously to avoid blocking event loop during embedding."""
@@ -419,6 +486,9 @@ class MemoryService:
             traits = data.get("traits", {}) or {}
             voice = data.get("voice", {}) or {}
             meta = data.get("meta", {}) or {}
+            scenario = data.get("scenario", {}) or {}
+            personality_notes = data.get("personality_notes", {}) or {}
+            example_interactions = data.get("example_interactions", {}) or {}
             snapshot = CharacterSnapshot(
                 name=name,
                 description=description or None,
@@ -426,6 +496,9 @@ class MemoryService:
                 traits=traits,
                 voice=voice,
                 meta=meta,
+                scenario=scenario,
+                personality_notes=personality_notes,
+                example_interactions=example_interactions,
             )
             logger.info("Loaded character '%s' with %d traits", snapshot.name, len(traits))
             return snapshot

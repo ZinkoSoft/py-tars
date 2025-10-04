@@ -31,7 +31,16 @@ def main():
     
     # Check if camera is enabled
     if not cfg.enabled:
-        logging.info("Camera service is disabled via CAMERA_ENABLED config. Exiting.")
+        logging.info("Camera service is disabled via CAMERA_ENABLED config. Staying idle.")
+        # Keep container running but idle - wait for signals
+        signal.signal(signal.SIGINT, lambda s, f: None)
+        signal.signal(signal.SIGTERM, lambda s, f: None)
+        try:
+            import time
+            while True:
+                time.sleep(3600)  # Sleep for 1 hour intervals
+        except KeyboardInterrupt:
+            pass
         return
     
     service = CameraService(cfg)

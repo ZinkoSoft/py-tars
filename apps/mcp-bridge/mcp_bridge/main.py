@@ -32,7 +32,7 @@ async def load_servers_yaml():
     try:
         with open(yaml_path, 'r') as f:
             config = yaml.safe_load(f)
-        servers = config.get("servers", [])
+        servers = config.get("servers", []) or []  # Handle None case when key exists with no value
         logger.info(f"Loaded {len(servers)} MCP servers from {yaml_path}")
         return servers
     except Exception as e:
@@ -79,8 +79,12 @@ async def main():
                     
                     logger.debug(f"Connecting via HTTP to {url}")
                     context = streamablehttp_client(url)
-                    read_stream, write_stream, _ = await context.__aenter__()
-                    active_contexts.append((context, (read_stream, write_stream)))
+                    try:
+                        read_stream, write_stream, _ = await context.__aenter__()
+                        active_contexts.append((context, (read_stream, write_stream)))
+                    except Exception as e:
+                        logger.error(f"❌ Failed to connect to HTTP MCP server {s['name']} at {url}: {type(e).__name__}: {e}")
+                        continue
                     
                 elif transport == "stdio":
                     # stdio transport

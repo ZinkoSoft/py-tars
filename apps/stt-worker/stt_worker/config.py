@@ -11,6 +11,7 @@ STT_BACKEND = os.getenv("STT_BACKEND", "whisper")
 WS_URL = os.getenv("WS_URL", "ws://127.0.0.1:9000/stt")
 AUDIO_FANOUT_PATH = os.getenv("AUDIO_FANOUT_PATH", "/tmp/tars/audio-fanout.sock")
 AUDIO_FANOUT_RATE = int(os.getenv("AUDIO_FANOUT_RATE", "16000"))
+AUDIO_DEVICE_NAME = os.getenv("AUDIO_DEVICE_NAME", "")
 SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", "16000"))
 CHUNK_DURATION_MS = int(os.getenv("CHUNK_DURATION_MS", "30"))
 VAD_AGGRESSIVENESS = int(os.getenv("VAD_AGGRESSIVENESS", "2"))
@@ -105,6 +106,7 @@ __all__ = [
     "WS_URL",
     "AUDIO_FANOUT_PATH",
     "AUDIO_FANOUT_RATE",
+    "AUDIO_DEVICE_NAME",
     "SAMPLE_RATE",
     "CHUNK_DURATION_MS",
     "VAD_AGGRESSIVENESS",

@@ -171,7 +171,7 @@ class RequestHandler:
     
     def _check_credentials(self, client: mqtt.Client, params: Dict[str, Any]) -> bool:
         """Check if required credentials are present. Publish error if missing."""
-        from .providers.openai import OpenAIProvider
+        from ..providers.openai import OpenAIProvider
         
         openai_key = self.config.get("OPENAI_API_KEY")
         if isinstance(self.provider, OpenAIProvider) and not openai_key:

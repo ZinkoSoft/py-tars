@@ -40,7 +40,7 @@ services:
         APP_PATH: apps/router
         CONTRACTS_PATH: packages/tars-core
         APP_MODULE: main
-    env_file: .env
+    env_file: ../.env
     image: tars/router:dev
     container_name: tars-router
     environment:
@@ -73,7 +73,7 @@ services:
       dockerfile: docker/specialized/tts-worker.Dockerfile
     image: tars/tts:dev
     container_name: tars-tts
-    env_file: .env
+    env_file: ../.env
     environment:
       MQTT_URL: mqtt://mqtt:1883
       MQTT_HOST: mqtt
@@ -106,7 +106,7 @@ services:
       dockerfile: docker/specialized/stt-worker.Dockerfile
     image: tars/stt:dev
     container_name: tars-stt
-    env_file: .env
+    env_file: ../.env
     environment:
       # Broker URL assembled from global creds/host/port
       MQTT_URL: mqtt://mqtt:1883
@@ -125,6 +125,7 @@ services:
       CHUNK_DURATION_MS: ${CHUNK_DURATION_MS:-20}
       VAD_AGGRESSIVENESS: ${VAD_AGGRESSIVENESS:-3}
       SAMPLE_RATE: ${SAMPLE_RATE:-16000}
+      AUDIO_DEVICE_NAME: ${AUDIO_DEVICE_NAME:-}
       AUDIO_FANOUT_PATH: ${WAKE_AUDIO_FANOUT:-/tmp/tars/audio-fanout.sock}
       FFT_PUBLISH: ${FFT_PUBLISH:-0}
       FFT_RATE_HZ: ${FFT_RATE_HZ:-12}
@@ -135,6 +136,8 @@ services:
       FFT_WS_PORT: ${FFT_WS_PORT:-8765}
       FFT_WS_PATH: ${FFT_WS_PATH:-/fft}
       PYTHONPATH: /workspace/apps/stt-worker
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["if [ -d /host-models ] && [ -n \"$(ls -A /host-models 2>/dev/null)\" ]; then echo 'Copying models from host...'; cp -r /host-models/* /app/models/ 2>/dev/null || true; fi; exec python /workspace/apps/stt-worker/main.py"]
     depends_on:
       mqtt:
         condition: service_started
@@ -144,6 +147,7 @@ services:
     volumes:
       - /run/user/1000/pulse:/run/user/1000/pulse:ro
       - ../models/whisper:/host-models
+      - ../docker/asoundrc:/etc/asound.conf:ro
       - wake-cache:/tmp/tars
       - ..:/workspace:ro
 
@@ -158,7 +162,7 @@ services:
         APP_MODULE: wake_activation
     image: tars/wake-activation:dev
     container_name: tars-wake-activation
-    env_file: .env
+    env_file: ../.env
     environment:
       MQTT_URL: mqtt://mqtt:1883
       MQTT_HOST: mqtt
@@ -186,7 +190,7 @@ services:
         SERVICE_PATH: apps/ui-web
     image: tars/ui-web:dev
     container_name: tars-ui-web
-    env_file: .env
+    env_file: ../.env
     environment:
       MQTT_URL: mqtt://mqtt:1883
       MQTT_HOST: mqtt
@@ -206,7 +210,7 @@ services:
       dockerfile: docker/specialized/camera-service.Dockerfile
     image: tars/camera:dev
     container_name: tars-camera
-    env_file: .env
+    env_file: ../.env
     environment:
       MQTT_URL: mqtt://mqtt:1883
       MQTT_HOST: mqtt
@@ -220,8 +224,12 @@ services:
       CAMERA_HTTP_HOST: 0.0.0.0
       CAMERA_HTTP_PORT: ${CAMERA_HTTP_PORT:-8080}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PYTHONPATH: /workspace/apps/camera-service
+    command: ["python", "/workspace/apps/camera-service/main.py"]
     ports:
       - "${CAMERA_HTTP_PORT:-8080}:${CAMERA_HTTP_PORT:-8080}"
+    volumes:
+      - ..:/workspace:ro
     depends_on:
       mqtt:
         condition: service_started
@@ -236,7 +244,7 @@ services:
       dockerfile: docker/specialized/ui.Dockerfile
     image: tars/ui:dev
     container_name: tars-ui
-    env_file: .env
+    env_file: ../.env
     environment:
       MQTT_URL: mqtt://mqtt:1883
       MQTT_HOST: mqtt
@@ -264,16 +272,17 @@ services:
       dockerfile: docker/specialized/llm-worker.Dockerfile
     image: tars/llm:dev
     container_name: tars-llm
-    env_file: .env
+    env_file: ../.env
     environment:
       MQTT_URL: mqtt://mqtt:1883
       MQTT_HOST: mqtt
       MQTT_PORT: "1883"
-      LOG_LEVEL: "INFO"
-      LLM_PROVIDER: openai
-      LLM_MODEL: gpt-4o-mini
-      LLM_MAX_TOKENS: "512"
-      LLM_TEMPERATURE: "0.7"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-512}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.7}
+      LLM_LOG_LEVEL: ${LLM_LOG_LEVEL:-INFO}
       TOOL_CALLING_ENABLED: ${TOOL_CALLING_ENABLED:-false}
       OPENAI_RESPONSES_MODELS: ${OPENAI_RESPONSES_MODELS:-gpt-5*,gpt-5-mini,gpt-5-nano}
       TOPIC_TOOLS_REGISTRY: ${TOPIC_TOOLS_REGISTRY:-llm/tools/registry}
@@ -289,13 +298,42 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  memory:
+    build:
+      context: ..
+      dockerfile: docker/specialized/memory-worker.Dockerfile
+    image: tars/memory:dev
+    container_name: tars-memory
+    env_file: ../.env
+    environment:
+      MQTT_URL: mqtt://mqtt:1883
+      MQTT_HOST: mqtt
+      MQTT_PORT: "1883"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      MEMORY_DIR: /data
+      MEMORY_FILE: memory.pickle.gz
+      CHARACTER_NAME: ${CHARACTER_NAME:-TARS}
+      CHARACTER_DIR: /config/characters
+      EMBED_MODEL: ${EMBED_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      RAG_STRATEGY: ${RAG_STRATEGY:-hybrid}
+      MEMORY_TOP_K: ${MEMORY_TOP_K:-5}
+      PYTHONPATH: /workspace/apps/memory-worker
+    volumes:
+      - ../data/memory:/data
+      - ../apps/voice/characters:/config/characters:ro
+      - ..:/workspace:ro
+    depends_on:
+      mqtt:
+        condition: service_started
+    restart: unless-stopped
+
   mcp-bridge:
     build:
       context: ..
       dockerfile: docker/specialized/mcp-bridge.Dockerfile
     image: tars/mcp-bridge:dev
     container_name: tars-mcp-bridge
-    env_file: .env
+    env_file: ../.env
     environment:
       MQTT_URL: mqtt://mqtt:1883
       MQTT_HOST: mqtt

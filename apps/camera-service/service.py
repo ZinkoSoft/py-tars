@@ -7,10 +7,10 @@ from typing import Optional
 
 from PIL import Image
 
-from .capture import CameraCapture
-from .config import ServiceConfig
-from .mqtt_client import MQTTPublisher
-from .streaming import StreamingServer
+from capture import CameraCapture
+from config import ServiceConfig
+from mqtt_client import MQTTPublisher
+from streaming import StreamingServer
 
 
 logger = logging.getLogger("camera.service")

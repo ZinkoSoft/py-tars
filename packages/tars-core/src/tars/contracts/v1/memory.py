@@ -10,6 +10,7 @@ EVENT_TYPE_MEMORY_RESULTS = "memory.results"
 EVENT_TYPE_CHARACTER_GET = "character.get"
 EVENT_TYPE_CHARACTER_RESULT = "character.result"
 EVENT_TYPE_CHARACTER_CURRENT = "system.character.current"
+EVENT_TYPE_CHARACTER_UPDATE = "character.update"
 EVENT_TYPE_MEMORY_HEALTH = "system.health.memory"
 
 
@@ -48,8 +49,23 @@ class CharacterSnapshot(BaseMemoryMessage):
     traits: dict[str, Any] = Field(default_factory=dict)
     voice: dict[str, Any] = Field(default_factory=dict)
     meta: dict[str, Any] = Field(default_factory=dict)
+    scenario: dict[str, Any] = Field(default_factory=dict)
+    personality_notes: dict[str, Any] = Field(default_factory=dict)
+    example_interactions: dict[str, Any] = Field(default_factory=dict)
 
 
 class CharacterSection(BaseMemoryMessage):
     section: str
     value: dict[str, Any] | str | None = None
+
+
+class CharacterTraitUpdate(BaseMemoryMessage):
+    """Update a single character trait value."""
+    section: str = Field(default="traits")
+    trait: str
+    value: int = Field(ge=0, le=100)
+
+
+class CharacterResetTraits(BaseMemoryMessage):
+    """Reset all traits to defaults from character.toml."""
+    action: str = Field(default="reset_traits")

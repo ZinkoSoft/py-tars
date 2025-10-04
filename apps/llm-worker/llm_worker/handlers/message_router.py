@@ -85,13 +85,24 @@ class MessageRouter:
             await self.request_handler.process_request(client, message.payload)
     
     async def _handle_character_current(self, message) -> None:
-        """Handle character/current retained message."""
+        """Handle character/current retained message with envelope support."""
+        payload_data: Dict[str, Any] = {}
+        
         try:
-            data = json.loads(message.payload)
-            self.character_handler.update_from_current(data)
-            logger.info("character/current updated: name=%s", data.get("name"))
-        except Exception as e:
-            logger.warning("Failed to parse character/current: %s", e)
+            envelope = Envelope.model_validate_json(message.payload)
+            raw_data = envelope.data
+            payload_data = raw_data if isinstance(raw_data, dict) else {}
+        except ValidationError:
+            try:
+                payload_data = json.loads(message.payload)
+            except Exception:
+                payload_data = {}
+        
+        if not payload_data:
+            return
+        
+        self.character_handler.update_from_current(payload_data)
+        logger.info("character/current updated: name=%s", payload_data.get("name"))
     
     async def _handle_character_result(self, message) -> None:
         """Handle character/result message with envelope support."""
