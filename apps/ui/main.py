@@ -204,8 +204,7 @@ class UI:
         self.stt_fade_duration = 3.0
         self.llm_fade_duration = 4.0
         self.components: dict[str, Any] = {}
-        self.spectrum_component: SpectrumBars | None = None
-        self.sinewave_surface: pygame.Surface | None = None  # For SineWaveVisualizer output
+        self.spectrum_component: SpectrumBars | SineWaveVisualizer | None = None
 
         layout_cfg = CFG.get("layout", {}) or {}
         layout_file = str(layout_cfg.get("file", "layout.json"))
@@ -324,11 +323,9 @@ class UI:
             if key == "tars_idle":
                 continue
             try:
-                # Handle SineWaveVisualizer which returns a surface instead of rendering directly
+                # Handle SineWaveVisualizer which renders directly like SpectrumBars
                 if isinstance(component, SineWaveVisualizer):
-                    # Blit the sinewave surface if it exists
-                    if self.sinewave_surface is not None:
-                        self.offscreen_surface.blit(self.sinewave_surface, (0, 0))
+                    component.render(self.offscreen_surface, now, fonts)
                 else:
                     component.render(self.offscreen_surface, now, fonts)
             except Exception as exc:
@@ -510,9 +507,9 @@ def main():
                         fft_vals = payload.get("fft") or []
                         if ui.spectrum_component is not None:
                             if isinstance(ui.spectrum_component, SineWaveVisualizer):
-                                # SineWaveVisualizer returns a surface, store it for rendering
+                                # SineWaveVisualizer updates state like SpectrumBars
                                 spectrum_array = np.array(fft_vals, dtype=np.float32)
-                                ui.sinewave_surface = ui.spectrum_component.update(spectrum_array)
+                                ui.spectrum_component.update(spectrum_array)
                             else:
                                 # SpectrumBars updates internal state
                                 ui.spectrum_component.update(fft_vals)

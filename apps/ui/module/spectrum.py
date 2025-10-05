@@ -153,21 +153,14 @@ class SineWaveVisualizer:
         fade = 1.0 - (inactivity - self.fade_threshold) / self.fade_duration
         return max(0.0, fade)
 
-    def update(self, spectrum: np.ndarray) -> pygame.Surface:
+    def update(self, spectrum: np.ndarray) -> None:
         """
-        Update and render the sine wave visualization with FPS control and fade-out.
+        Update the sine wave visualization state with new spectrum data.
         
         Args:
             spectrum: FFT spectrum data (numpy array of floats)
-            
-        Returns:
-            pygame.Surface: Rendered surface with the sine wave visualization
         """
-        start_time = time.time()  # Track update start time
         now = time.monotonic()
-
-        sinewave_surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
-        sinewave_surface.fill((0, 0, 0, 0))
 
         # Check if we have meaningful spectrum data (check max amplitude, not just any())
         # Use a threshold to filter out background noise
@@ -178,24 +171,6 @@ class SineWaveVisualizer:
         if has_data:
             self.last_update = now
             self.alpha = 1.0
-
-        # Calculate current fade intensity
-        intensity = self._current_intensity(now)
-        
-        # Debug: log max spectrum value occasionally to tune threshold
-        if hasattr(self, '_debug_counter'):
-            self._debug_counter += 1
-        else:
-            self._debug_counter = 0
-        if self._debug_counter % 60 == 0:  # Log every ~2 seconds at 30fps
-            print(f"[SineWave] max_val={max_val:.3f}, has_data={has_data}, last_update={'None' if self.last_update is None else f'{now - self.last_update:.1f}s ago'}, intensity={intensity:.2f}")
-        
-        # Early return if fully faded out (but not on first call with no data yet)
-        if intensity <= 0.0 and self.wave_history:
-            elapsed_time = time.time() - start_time
-            sleep_time = max(0, (1.0 / self.target_fps) - elapsed_time)
-            time.sleep(sleep_time)
-            return sinewave_surface
 
         if has_data:
             spectrum = np.clip(spectrum, 0, np.max(spectrum))
@@ -213,6 +188,22 @@ class SineWaveVisualizer:
 
             self.wave_history.appendleft(sinewave_points.copy())
 
+    def render(self, surface: pygame.Surface, now: float, fonts: Mapping[str, pygame.font.Font]) -> None:
+        """
+        Render the sine wave visualization to the surface.
+        
+        Args:
+            surface: Surface to render to
+            now: Current monotonic time
+            fonts: Font mapping (unused)
+        """
+        # Calculate current fade intensity
+        intensity = self._current_intensity(now)
+        
+        # Skip rendering if fully faded out
+        if intensity <= 0.0:
+            return
+
         # Render all historical waves with perspective, fade, and intensity
         for i, wave in enumerate(reversed(self.wave_history)):
             base_alpha = int(255 * (1 - self.decay ** i))
@@ -224,11 +215,4 @@ class SineWaveVisualizer:
             for j in range(1, len(wave)):
                 start_pos = (wave[j - 1][0] + x_shift, wave[j - 1][1] + y_shift)
                 end_pos = (wave[j][0] + x_shift, wave[j][1] + y_shift)
-                pygame.draw.line(sinewave_surface, color, start_pos, end_pos, 2)
-
-        # ⏳ Limit FPS to target rate
-        elapsed_time = time.time() - start_time
-        sleep_time = max(0, (1.0 / self.target_fps) - elapsed_time)
-        time.sleep(sleep_time)
-
-        return sinewave_surface
+                pygame.draw.line(surface, color, start_pos, end_pos, 2)
