@@ -1,7 +1,9 @@
 """Spectrum visualization component."""
 from __future__ import annotations
 
+import math
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Iterable, Mapping
 
@@ -85,3 +87,148 @@ class SpectrumBars:
                 pygame.Rect(x, y, width_px, height),
                 border_radius=2,
             )
+
+
+class SineWaveVisualizer:
+    """Render a 3D perspective sine wave visualization based on FFT spectrum data."""
+    
+    def __init__(
+        self,
+        box: Box,
+        rotation: int = 0,
+        depth: int = 22,
+        decay: float = 0.9,
+        perspective_shift: tuple[int, int] = (-2, 5),
+        padding: int = 10,
+        target_fps: float = 30.0,
+        fade_threshold: float = 1.0,
+        fade_duration: float = 1.5,
+    ):
+        """
+        Initialize the sine wave visualizer.
+        
+        Args:
+            box: Layout box defining position and dimensions
+            rotation: Display rotation (90, 270 will swap width/height)
+            depth: Number of historical wave frames to keep (default: 22)
+            decay: Decay factor for fade effect on historical waves (default: 0.9)
+            perspective_shift: (x, y) offset per depth layer for 3D effect (default: (-2, 5))
+            padding: Horizontal padding from edges (default: 10)
+            target_fps: Target frame rate for updates (default: 30.0)
+            fade_threshold: Seconds of inactivity before fade starts (default: 1.0)
+            fade_duration: Duration of fade out in seconds (default: 1.5)
+        """
+        self.box = box
+        if rotation in (90, 270):
+            self.width, self.height = box.height, box.width
+        else:
+            self.width = box.width
+            self.height = box.height
+        self.max_amplitude = 70
+        self.wave_history: deque[list[tuple[int, int]]] = deque(maxlen=depth)
+        self.decay = decay
+        self.perspective_shift = perspective_shift
+        self.padding = padding
+        self.target_fps = target_fps
+        self.fade_threshold = fade_threshold
+        self.fade_duration = fade_duration
+        self.last_update: float | None = None
+        self.alpha: float = 1.0
+
+    def _current_intensity(self, now: float) -> float:
+        """
+        Calculate current fade intensity based on time since last update.
+        
+        Args:
+            now: Current monotonic time
+            
+        Returns:
+            Intensity value between 0.0 (fully faded) and 1.0 (fully visible)
+        """
+        if self.last_update is None:
+            return 0.0
+        inactivity = max(0.0, now - self.last_update)
+        if inactivity <= self.fade_threshold:
+            return 1.0
+        fade = 1.0 - (inactivity - self.fade_threshold) / self.fade_duration
+        return max(0.0, fade)
+
+    def update(self, spectrum: np.ndarray) -> pygame.Surface:
+        """
+        Update and render the sine wave visualization with FPS control and fade-out.
+        
+        Args:
+            spectrum: FFT spectrum data (numpy array of floats)
+            
+        Returns:
+            pygame.Surface: Rendered surface with the sine wave visualization
+        """
+        start_time = time.time()  # Track update start time
+        now = time.monotonic()
+
+        sinewave_surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+        sinewave_surface.fill((0, 0, 0, 0))
+
+        # Check if we have meaningful spectrum data (check max amplitude, not just any())
+        # Use a threshold to filter out background noise
+        max_val = np.max(spectrum) if spectrum.size > 0 else 0.0
+        has_data = max_val > 0.1  # Increased threshold to better distinguish audio from noise
+        
+        # Only update last_update timestamp when we have actual audio data
+        if has_data:
+            self.last_update = now
+            self.alpha = 1.0
+
+        # Calculate current fade intensity
+        intensity = self._current_intensity(now)
+        
+        # Debug: log max spectrum value occasionally to tune threshold
+        if hasattr(self, '_debug_counter'):
+            self._debug_counter += 1
+        else:
+            self._debug_counter = 0
+        if self._debug_counter % 60 == 0:  # Log every ~2 seconds at 30fps
+            print(f"[SineWave] max_val={max_val:.3f}, has_data={has_data}, last_update={'None' if self.last_update is None else f'{now - self.last_update:.1f}s ago'}, intensity={intensity:.2f}")
+        
+        # Early return if fully faded out (but not on first call with no data yet)
+        if intensity <= 0.0 and self.wave_history:
+            elapsed_time = time.time() - start_time
+            sleep_time = max(0, (1.0 / self.target_fps) - elapsed_time)
+            time.sleep(sleep_time)
+            return sinewave_surface
+
+        if has_data:
+            spectrum = np.clip(spectrum, 0, np.max(spectrum))
+            spectrum = spectrum / np.max(spectrum)
+            sinewave_points: list[tuple[int, int]] = []
+
+            for x in range(self.padding, self.width - self.padding):
+                width_adj = max(2, self.width - 2 * self.padding)
+                freq_bin = int((x - self.padding) * len(spectrum) / width_adj)
+                amplitude = spectrum[freq_bin] * self.max_amplitude
+                t = (x - self.padding) / width_adj
+
+                y = amplitude * math.sin(2 * math.pi * t * 3) + (self.height // 2)
+                sinewave_points.append((x, int(y)))
+
+            self.wave_history.appendleft(sinewave_points.copy())
+
+        # Render all historical waves with perspective, fade, and intensity
+        for i, wave in enumerate(reversed(self.wave_history)):
+            base_alpha = int(255 * (1 - self.decay ** i))
+            # Apply fade-out intensity to alpha
+            alpha = int(base_alpha * intensity)
+            color = (255, 255, 255, alpha)
+            x_shift = self.perspective_shift[0] * i
+            y_shift = self.perspective_shift[1] * i
+            for j in range(1, len(wave)):
+                start_pos = (wave[j - 1][0] + x_shift, wave[j - 1][1] + y_shift)
+                end_pos = (wave[j][0] + x_shift, wave[j][1] + y_shift)
+                pygame.draw.line(sinewave_surface, color, start_pos, end_pos, 2)
+
+        # ⏳ Limit FPS to target rate
+        elapsed_time = time.time() - start_time
+        sleep_time = max(0, (1.0 / self.target_fps) - elapsed_time)
+        time.sleep(sleep_time)
+
+        return sinewave_surface

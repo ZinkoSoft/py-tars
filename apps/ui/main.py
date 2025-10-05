@@ -38,7 +38,7 @@ from config import load_config
 from fft_ws_client import FFTWebsocketClient
 from mqtt_bridge import MqttBridge
 from module.layout import Box, get_layout_dimensions, load_layout_config
-from module.spectrum import SpectrumBars
+from module.spectrum import SpectrumBars, SineWaveVisualizer
 from module.tars_idle import TarsIdle
 
 # Import typed contracts
@@ -205,6 +205,7 @@ class UI:
         self.llm_fade_duration = 4.0
         self.components: dict[str, Any] = {}
         self.spectrum_component: SpectrumBars | None = None
+        self.sinewave_surface: pygame.Surface | None = None  # For SineWaveVisualizer output
 
         layout_cfg = CFG.get("layout", {}) or {}
         layout_file = str(layout_cfg.get("file", "layout.json"))
@@ -231,6 +232,18 @@ class UI:
                 component = SpectrumBars(box, NUM_BARS)
                 self.components[key] = component
                 self.spectrum_component = component
+            elif key == "sinewave":
+                component = SineWaveVisualizer(
+                    box=box,
+                    rotation=rotation,
+                    depth=22,
+                    decay=0.9,
+                    perspective_shift=(-2, 5),
+                    padding=20,  # Positive padding = margin from edges (zoomed out)
+                    target_fps=30.0,  # Increased from 10 to 30 FPS
+                )
+                self.components[key] = component
+                self.spectrum_component = component  # Treat as spectrum component for FFT updates
             elif key == "tars_idle":
                 component = TarsIdle(box)
                 self.components[key] = component
@@ -311,12 +324,18 @@ class UI:
             if key == "tars_idle":
                 continue
             try:
-                component.render(self.offscreen_surface, now, fonts)
+                # Handle SineWaveVisualizer which returns a surface instead of rendering directly
+                if isinstance(component, SineWaveVisualizer):
+                    # Blit the sinewave surface if it exists
+                    if self.sinewave_surface is not None:
+                        self.offscreen_surface.blit(self.sinewave_surface, (0, 0))
+                else:
+                    component.render(self.offscreen_surface, now, fonts)
             except Exception as exc:
                 logger.error("Component %s render failed: %s", component.__class__.__name__, exc)
 
         spectrum_top = self.height
-        if self.spectrum_component is not None:
+        if self.spectrum_component is not None and hasattr(self.spectrum_component, 'box'):
             spectrum_top = min(spectrum_top, self.spectrum_component.box.y)
 
         margin = 20
@@ -490,7 +509,13 @@ def main():
                         # FFT data is not wrapped in envelope
                         fft_vals = payload.get("fft") or []
                         if ui.spectrum_component is not None:
-                            ui.spectrum_component.update(fft_vals)
+                            if isinstance(ui.spectrum_component, SineWaveVisualizer):
+                                # SineWaveVisualizer returns a surface, store it for rendering
+                                spectrum_array = np.array(fft_vals, dtype=np.float32)
+                                ui.sinewave_surface = ui.spectrum_component.update(spectrum_array)
+                            else:
+                                # SpectrumBars updates internal state
+                                ui.spectrum_component.update(fft_vals)
                 
                 except ValidationError as e:
                     logger.error(f"Invalid payload for topic {topic}: {e}")
