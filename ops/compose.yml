@@ -1,6 +1,12 @@
 # ops/compose.yaml
 # Usage:
-#   docker compose -f ops/compose.yaml up --build
+#   docker compose -f ops/compose.yaml up --build                    # CPU mode (default)
+#   docker compose -f ops/compose.yml -f ops/compose.npu.yml up     # NPU mode (RK3588 devices)
+#
+# NPU Requirements:
+#   - RK3588-based device (Orange Pi 5 Max, Rock 5B, etc.)
+#   - NPU setup: bash scripts/setup-rknpu.sh
+#   - Model conversion: python scripts/convert_tflite_to_rknn.py --input models/openwakeword/hey_tars.tflite --output models/openwakeword/hey_tars.rknn
 #
 # This file reuses ONE generic Dockerfile (docker/app.Dockerfile) for all apps.
 # Each service passes different build args (APP_PATH, APP_MODULE) to build its image.
@@ -198,6 +204,8 @@ services:
       # STT health monitoring
       WAKE_WAIT_FOR_STT_HEALTH: ${WAKE_WAIT_FOR_STT_HEALTH:-1}
       WAKE_STT_HEALTH_TIMEOUT_SEC: ${WAKE_STT_HEALTH_TIMEOUT_SEC:-30}
+      # NPU-specific environment
+      RKNN_LOG_LEVEL: ${RKNN_LOG_LEVEL:-3}
       PYTHONPATH: /workspace/apps/wake-activation
     entrypoint: ["/bin/sh", "-c"]
     command: ["echo 'Wake activation: Waiting for STT service to stabilize...'; sleep 3; echo 'Wake activation: Starting wake word detection'; exec python -m wake_activation"]

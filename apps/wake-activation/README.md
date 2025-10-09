@@ -27,13 +27,13 @@ coordinating microphone mute/unmute plus TTS interruption behavior.
 First, you need to convert the existing OpenWakeWord TFLite model to RKNN format for NPU acceleration:
 
 ```bash
-# Navigate to wake activation directory
-cd apps/wake-activation
+# Navigate to repository root
+cd /path/to/py-tars
 
 # Run the model conversion script (requires hey_tars.tflite in models directory)
 python scripts/convert_tflite_to_rknn.py \
-  --input /models/openwakeword/hey_tars.tflite \
-  --output /models/openwakeword/hey_tars.rknn \
+  --input models/openwakeword/hey_tars.tflite \
+  --output models/openwakeword/hey_tars.rknn \
   --platform rk3588 \
   --quantize_type w8a8
 ```
@@ -53,7 +53,11 @@ ls -la /dev/rknpu /dev/dri/renderD*
 # Verify RKNN runtime library
 ls -la /usr/lib/librknnrt.so
 
+# Run NPU setup script (from repository root)
+bash scripts/setup-rknpu.sh
+
 # Test NPU availability
+cd apps/wake-activation
 python scripts/test_npu_availability.py
 ```
 
@@ -87,17 +91,16 @@ export WAKE_MIN_RETRIGGER_SEC=1.0
 
 ### Step 4: Build and Run NPU-Enabled Container
 
-Use the specialized NPU Docker configuration:
+Use the NPU override file with the main docker compose:
 
 ```bash
-# Build NPU-enabled container
-docker compose -f compose.npu.yml build wake-activation-npu
+# Build and start NPU-accelerated wake activation service
+cd ops
+docker compose -f compose.yml -f compose.npu.yml build wake-activation
+docker compose -f compose.yml -f compose.npu.yml up -d wake-activation
 
-# Test NPU functionality
-docker compose -f compose.npu.yml run --rm wake-activation-npu python /app/scripts/test_npu_docker.py
-
-# Start NPU-accelerated wake activation service
-docker compose -f compose.npu.yml up -d wake-activation-npu
+# Test NPU functionality (optional)
+docker compose -f compose.yml -f compose.npu.yml run --rm wake-activation python /app/scripts/test_npu_docker.py
 ```
 
 ### Step 5: Verify NPU Performance
@@ -106,7 +109,7 @@ Check the logs to confirm NPU acceleration is working:
 
 ```bash
 # View service logs
-docker compose -f compose.npu.yml logs -f wake-activation-npu
+docker compose -f compose.yml -f compose.npu.yml logs -f wake-activation
 
 # Look for these success indicators:
 # ✅ NPU available, using NPU acceleration for wake detection
@@ -150,14 +153,17 @@ pip install rknn-toolkit2==2.3.2
 
 # Try different quantization types
 python scripts/convert_tflite_to_rknn.py --quantize_type w16a16i
+
+# Use the NPU setup script for proper environment
+bash scripts/setup-rknpu.sh --venv
 ```
 
 **Container NPU access issues:**
 ```bash
 # Ensure privileged mode and device mounts
-docker compose -f compose.npu.yml down
-docker compose -f compose.npu.yml build --no-cache wake-activation-npu
-docker compose -f compose.npu.yml up wake-activation-npu
+docker compose -f compose.yml -f compose.npu.yml down
+docker compose -f compose.yml -f compose.npu.yml build --no-cache wake-activation
+docker compose -f compose.yml -f compose.npu.yml up wake-activation
 ```
 
 ## Running locally
@@ -174,24 +180,28 @@ python -m wake_activation
 pip install -e ".[openwakeword]"
 pip install rknn-toolkit-lite2==2.3.2
 
+# Set up NPU hardware (one-time setup)
+bash scripts/setup-rknpu.sh
+
 # Convert model to RKNN format (one-time setup)
 python scripts/convert_tflite_to_rknn.py \
-  --input /models/openwakeword/hey_tars.tflite \
-  --output /models/openwakeword/hey_tars.rknn
+  --input models/openwakeword/hey_tars.tflite \
+  --output models/openwakeword/hey_tars.rknn
 
 # Run with NPU acceleration
 export WAKE_USE_NPU=1
-export WAKE_RKNN_MODEL_PATH=/models/openwakeword/hey_tars.rknn
+export WAKE_RKNN_MODEL_PATH=models/openwakeword/hey_tars.rknn
 python -m wake_activation
 ```
 
 ### Docker (Recommended for NPU)
 ```bash
-# CPU mode
+# CPU mode (default)
+cd ops
 docker compose up wake-activation
 
-# NPU mode (RK3588 devices)
-docker compose -f compose.npu.yml up wake-activation-npu
+# NPU mode (RK3588 devices) - use override file
+docker compose -f compose.yml -f compose.npu.yml up wake-activation
 ```
 
 ## Configuration

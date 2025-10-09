@@ -126,7 +126,7 @@ docker compose up -d llm
 ### Services
 - **MQTT Broker** (Mosquitto) — message bus for all services
 - **STT Worker** — speech-to-text using Faster-Whisper, OpenAI Whisper API, or WebSocket STT
-- **Wake Activation** — OpenWakeWord-based wake phrase detection
+- **Wake Activation** — OpenWakeWord-based wake phrase detection with optional NPU acceleration (RK3588)
 - **Router** — intent routing, wake word handling, live mode control
 - **LLM Worker** — OpenAI/Gemini/local LLM text generation with optional RAG and tool calling
 - **MCP Bridge** (build-time) — Discovers and configures MCP servers during Docker image builds
@@ -135,6 +135,42 @@ docker compose up -d llm
 - **Camera Service** — live video streaming via MQTT for mobile robot vision
 - **UI (Web)** — FastAPI web interface with real-time MQTT display and camera viewer
 - **UI (PyGame)** — optional desktop GUI with audio visualization
+
+#### NPU Acceleration (RK3588 Devices)
+
+TARS supports **hardware-accelerated wake word detection** on RK3588-based devices (Orange Pi 5 Max, Rock 5B, etc.) using the Neural Processing Unit (NPU). This provides **50x performance improvement** over CPU-based detection.
+
+**Benefits:**
+- **Ultra-fast inference**: ~1-2ms vs 50-100ms on CPU
+- **Low power consumption**: Much more efficient than CPU processing  
+- **Real-time responsiveness**: Near-instantaneous wake word detection
+
+**Supported Devices:**
+- Orange Pi 5 Max
+- Rock 5B/5B+
+- Other RK3588/RK3588S devices with NPU support
+
+**Setup Requirements:**
+1. RKNN drivers installed (`/dev/rknpu` device available)
+2. Converted RKNN model (`hey_tars.rknn` from `hey_tars.tflite`)
+3. NPU runtime libraries (`librknnrt.so`)
+
+**Quick NPU Setup:**
+```bash
+# Automated NPU setup (one-time)
+bash scripts/setup-rknpu.sh
+
+# Convert wake word model
+python scripts/convert_tflite_to_rknn.py \
+  --input models/openwakeword/hey_tars.tflite \
+  --output models/openwakeword/hey_tars.rknn
+
+# Run with NPU acceleration
+cd ops
+docker compose --profile npu up wake-activation-npu
+```
+
+See `apps/wake-activation/README.md` for complete setup instructions.
 
 ---
 

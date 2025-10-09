@@ -104,7 +104,9 @@ class WakeActivationService:
     async def run(self) -> None:
         """Run the wake activation event loop until cancelled."""
 
-        logging.basicConfig(level=self.cfg.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+        # Convert string log level to logging constant
+        log_level = getattr(logging, self.cfg.log_level.upper(), logging.INFO)
+        logging.basicConfig(level=log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
         host, port, username, password = self._parse_mqtt_url(self.cfg.mqtt_url)
         self.log.info("Connecting to MQTT broker %s:%s", host, port)
