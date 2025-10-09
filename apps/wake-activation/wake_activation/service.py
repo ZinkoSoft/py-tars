@@ -90,6 +90,10 @@ class WakeActivationService:
         self.log.info("Connecting to MQTT broker %s:%s", host, port)
 
         async with mqtt.Client(hostname=host, port=port, username=username, password=password) as client:
+            # Wait for STT health before starting if enabled
+            if self.cfg.wait_for_stt_health:
+                await self._wait_for_stt_health(client)
+            
             await self._publish_health(client)
             async with TaskGroup() as tg:
                 tg.create_task(self._health_loop(client))
@@ -243,6 +247,7 @@ class WakeActivationService:
             confidence=confidence,
             energy=result.energy,
             ttl_ms=ttl_ms,
+            threshold_used=result.effective_threshold or self.cfg.wake_detection_threshold,
         )
         await self._schedule_idle_timeout(client, session_id)
 
@@ -283,6 +288,7 @@ class WakeActivationService:
             energy=result.energy,
             tts_id=tts_id,
             ttl_ms=ttl_ms,
+            threshold_used=result.effective_threshold or self.cfg.wake_detection_threshold,
         )
         await self._schedule_idle_timeout(client, session_id)
 
@@ -368,6 +374,9 @@ class WakeActivationService:
             energy_window_ms=config.detection_window_ms,
             enable_speex_noise_suppression=config.enable_speex_noise_suppression,
             vad_threshold=config.vad_threshold,
+            energy_boost_factor=config.energy_boost_factor,
+            low_energy_threshold_factor=config.low_energy_threshold_factor,
+            background_noise_sensitivity=config.background_noise_sensitivity,
         )
 
     def _default_audio_client_factory(self, config: WakeActivationConfig, frame_samples: int) -> AudioFanoutClient:
@@ -485,3 +494,55 @@ class WakeActivationService:
         except Exception:
             message = f"{event} {fields}"
         self.log.info(message)
+
+    async def _wait_for_stt_health(self, client: mqtt.Client) -> None:
+        """Wait for STT service to report healthy status before starting audio processing."""
+        self.log.info("Waiting for STT service health on topic '%s'...", self.cfg.stt_health_topic)
+        
+        timeout_task = asyncio.create_task(asyncio.sleep(self.cfg.stt_health_timeout_sec))
+        health_received = False
+        
+        try:
+            async with client.filtered_messages(self.cfg.stt_health_topic) as messages:
+                await client.subscribe(self.cfg.stt_health_topic)
+                
+                async for msg in messages:
+                    if timeout_task.done():
+                        break
+                        
+                    try:
+                        payload = orjson.loads(msg.payload)
+                        # Check both direct format and nested data format
+                        health_data = payload.get("data", payload)
+                        if health_data.get("ok") is True:
+                            self.log.info("✅ STT service is healthy, proceeding with wake activation startup")
+                            health_received = True
+                            break
+                        else:
+                            error = health_data.get("err") or health_data.get("event") or "unknown error"
+                            self.log.warning("STT service reports unhealthy: %s", error)
+                    except Exception as exc:
+                        self.log.debug("Invalid STT health payload: %s (%s)", msg.payload, exc)
+                        
+                    # Check if timeout occurred
+                    if timeout_task.done():
+                        break
+                        
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            if not timeout_task.done():
+                timeout_task.cancel()
+                try:
+                    await timeout_task
+                except asyncio.CancelledError:
+                    pass
+                    
+        if not health_received:
+            self.log.warning(
+                "⚠️  STT health not received within %.1fs, starting anyway (audio fanout may be unstable)",
+                self.cfg.stt_health_timeout_sec
+            )
+        
+        # Small additional delay to let STT fully stabilize
+        await asyncio.sleep(2.0)

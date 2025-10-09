@@ -135,6 +135,12 @@ services:
       FFT_WS_HOST: ${FFT_WS_HOST:-0.0.0.0}
       FFT_WS_PORT: ${FFT_WS_PORT:-8765}
       FFT_WS_PATH: ${FFT_WS_PATH:-/fft}
+      # Noise floor calibration
+      NOISE_FLOOR_CALIB_SECS: ${NOISE_FLOOR_CALIB_SECS:-2.0}
+      NOISE_FLOOR_CALIB_ENABLE: ${NOISE_FLOOR_CALIB_ENABLE:-1}
+      NOISE_FLOOR_ADAPTIVE_ENABLE: ${NOISE_FLOOR_ADAPTIVE_ENABLE:-1}
+      NOISE_FLOOR_THRESHOLD_MULTIPLIER: ${NOISE_FLOOR_THRESHOLD_MULTIPLIER:-3.0}
+      NOISE_FLOOR_UPDATE_INTERVAL: ${NOISE_FLOOR_UPDATE_INTERVAL:-50}
       PYTHONPATH: /workspace/apps/stt-worker
     entrypoint: ["/bin/sh", "-c"]
     command: ["if [ -d /host-models ] && [ -n \"$(ls -A /host-models 2>/dev/null)\" ]; then echo 'Copying models from host...'; cp -r /host-models/* /app/models/ 2>/dev/null || true; fi; exec python /workspace/apps/stt-worker/main.py"]
@@ -142,6 +148,12 @@ services:
       mqtt:
         condition: service_started
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /tmp/tars/audio-fanout.sock && python -c 'import socket; s=socket.socket(socket.AF_UNIX); s.connect(\"/tmp/tars/audio-fanout.sock\"); s.close()' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 15s
     devices:
       - /dev/snd:/dev/snd
     volumes:
@@ -170,12 +182,26 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       WAKE_AUDIO_FANOUT: ${WAKE_AUDIO_FANOUT:-/tmp/tars/audio-fanout.sock}
       WAKE_MODEL_PATH: ${WAKE_MODEL_PATH:-/models/openwakeword/hey_tars.tflite}
+      # Wake sensitivity configuration
+      WAKE_DETECTION_THRESHOLD: ${WAKE_DETECTION_THRESHOLD:-0.35}
+      WAKE_MIN_RETRIGGER_SEC: ${WAKE_MIN_RETRIGGER_SEC:-0.8}
+      WAKE_SPEEX_NOISE_SUPPRESSION: ${WAKE_SPEEX_NOISE_SUPPRESSION:-1}
+      WAKE_VAD_THRESHOLD: ${WAKE_VAD_THRESHOLD:-0.3}
+      # Advanced sensitivity tuning
+      WAKE_ENERGY_BOOST_FACTOR: ${WAKE_ENERGY_BOOST_FACTOR:-1.2}
+      WAKE_LOW_ENERGY_THRESHOLD_FACTOR: ${WAKE_LOW_ENERGY_THRESHOLD_FACTOR:-0.7}
+      WAKE_BACKGROUND_NOISE_SENSITIVITY: ${WAKE_BACKGROUND_NOISE_SENSITIVITY:-1}
+      # STT health monitoring
+      WAKE_WAIT_FOR_STT_HEALTH: ${WAKE_WAIT_FOR_STT_HEALTH:-1}
+      WAKE_STT_HEALTH_TIMEOUT_SEC: ${WAKE_STT_HEALTH_TIMEOUT_SEC:-30}
       PYTHONPATH: /workspace/apps/wake-activation
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["echo 'Wake activation: Waiting for STT service to stabilize...'; sleep 3; echo 'Wake activation: Starting wake word detection'; exec python -m wake_activation"]
     depends_on:
       mqtt:
         condition: service_started
       stt:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - ../models/openwakeword:/models/openwakeword:ro
       - wake-cache:/tmp/tars

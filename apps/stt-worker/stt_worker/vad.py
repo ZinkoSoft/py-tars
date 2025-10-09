@@ -21,7 +21,13 @@ from .config import (
     SILENCE_THRESHOLD_MS,
     VAD_AGGRESSIVENESS,
     VAD_ENHANCED_ANALYSIS,
+    NOISE_FLOOR_CALIB_SECS,
+    NOISE_FLOOR_CALIB_ENABLE,
+    NOISE_FLOOR_ADAPTIVE_ENABLE,
+    NOISE_FLOOR_THRESHOLD_MULTIPLIER,
+    NOISE_FLOOR_UPDATE_INTERVAL,
 )
+from .noise_floor_calibrator import NoiseFloorCalibrator
 
 logger = logging.getLogger("stt-worker.vad")
 
@@ -45,6 +51,19 @@ class VADProcessor:
         # Adaptive noise floor state (RMS units)
         self.noise_floor = float(NOISE_FLOOR_INIT)
         self.last_rms = 0.0
+        
+        # Initialize noise floor calibrator if enabled
+        self.calibrator = None
+        if NOISE_FLOOR_CALIB_ENABLE:
+            calib_config = {
+                'noise_calib_secs': NOISE_FLOOR_CALIB_SECS,
+                'adaptive_enable': bool(NOISE_FLOOR_ADAPTIVE_ENABLE),
+                'threshold_multiplier': NOISE_FLOOR_THRESHOLD_MULTIPLIER,
+                'update_interval': NOISE_FLOOR_UPDATE_INTERVAL,
+            }
+            self.calibrator = NoiseFloorCalibrator(calib_config)
+            self.calibrator.set_sample_rate(sample_rate)
+            logger.info("Noise floor calibration enabled (%.1fs calibration)", NOISE_FLOOR_CALIB_SECS)
 
     def process_chunk(self, audio_chunk: bytes) -> Optional[bytes]:
         """Process a single PCM16LE chunk and return a completed utterance if detected.
@@ -61,20 +80,45 @@ class VADProcessor:
         except Exception:
             return None
 
-        # Update adaptive noise floor using EMA when not in speech (or during trailing silence)
-        if not self.is_speech:
-            self.noise_floor = (1.0 - NOISE_FLOOR_ALPHA) * self.noise_floor + NOISE_FLOOR_ALPHA * rms
+        # Handle noise floor calibration if enabled
+        if self.calibrator is not None:
+            # Bootstrap calibration from initial audio
+            if not self.calibrator.is_calibrated():
+                audio_arr = np.frombuffer(audio_chunk, dtype=np.int16)
+                is_calibrated = self.calibrator.bootstrap_calibration(audio_arr)
+                if not is_calibrated:
+                    # Still calibrating, skip this chunk
+                    return None
+            
+            # Update adaptive noise floor from non-speech segments
+            if NOISE_FLOOR_ADAPTIVE_ENABLE and not self.is_speech:
+                self.calibrator.update_adaptive_noise_floor(rms)
+            
+            # Get adaptive threshold
+            adaptive_gate = self.calibrator.get_adaptive_threshold(NOISE_FLOOR_THRESHOLD_MULTIPLIER)
+            if adaptive_gate is not None:
+                # Use adaptive gate, but respect minimum threshold
+                gate = max(NOISE_MIN_RMS, adaptive_gate)
+            else:
+                # Fallback to original logic during calibration
+                gate = max(NOISE_MIN_RMS, self.noise_floor * NOISE_GATE_OFFSET)
         else:
-            # During speech, avoid training the floor to high levels; decay slowly toward current rms but more conservatively
-            decay_rate = NOISE_FLOOR_ALPHA * 0.1  # Much slower decay during speech
-            self.noise_floor = max(
-                self.noise_floor * (1.0 - decay_rate),
-                min(self.noise_floor, rms),
-            )
+            # Original noise floor logic when calibrator is disabled
+            # Update adaptive noise floor using EMA when not in speech (or during trailing silence)
+            if not self.is_speech:
+                self.noise_floor = (1.0 - NOISE_FLOOR_ALPHA) * self.noise_floor + NOISE_FLOOR_ALPHA * rms
+            else:
+                # During speech, avoid training the floor to high levels; decay slowly toward current rms but more conservatively
+                decay_rate = NOISE_FLOOR_ALPHA * 0.1  # Much slower decay during speech
+                self.noise_floor = max(
+                    self.noise_floor * (1.0 - decay_rate),
+                    min(self.noise_floor, rms),
+                )
+            gate = max(NOISE_MIN_RMS, self.noise_floor * NOISE_GATE_OFFSET)
+
         self.last_rms = rms
 
         # Adaptive gate: require rms above floor * offset OR above absolute minimum
-        gate = max(NOISE_MIN_RMS, self.noise_floor * NOISE_GATE_OFFSET)
         if not self.is_speech and rms < gate:
             return None
 
@@ -96,7 +140,18 @@ class VADProcessor:
 
         if confident_speech:
             if not self.is_speech:
-                logger.info("Speech started (VAD: %s, spectral: %s)", has_speech, speech_like if VAD_ENHANCED_ANALYSIS else "disabled")
+                current_noise_floor = (
+                    self.calibrator.get_noise_floor() if self.calibrator and self.calibrator.is_calibrated()
+                    else self.noise_floor
+                )
+                logger.info(
+                    "Speech started (VAD: %s, spectral: %s, RMS: %.3f, gate: %.3f, noise_floor: %.6f)", 
+                    has_speech, 
+                    speech_like if VAD_ENHANCED_ANALYSIS else "disabled",
+                    rms,
+                    gate,
+                    current_noise_floor,
+                )
                 self.is_speech = True
                 self.speech_buffer = []
             self.speech_buffer.append(audio_chunk)
@@ -192,3 +247,20 @@ class VADProcessor:
         if self.is_speech and self.speech_buffer:
             return b"".join(self.speech_buffer)
         return None
+
+    def get_noise_floor_info(self) -> dict:
+        """Get noise floor calibration information for debugging.
+        
+        Returns:
+            dict: Noise floor state and calibration progress
+        """
+        result = {
+            'legacy_noise_floor': self.noise_floor,
+            'last_rms': self.last_rms,
+            'calibrator_enabled': self.calibrator is not None,
+        }
+        
+        if self.calibrator:
+            result.update(self.calibrator.get_calibration_progress())
+        
+        return result

@@ -33,6 +33,8 @@ from .config import (
     FFT_WS_PORT,
     LOG_LEVEL,
     MQTT_URL,
+    NOISE_FLOOR_CALIB_ENABLE,
+    NOISE_FLOOR_CALIB_SECS,
     PARTIAL_ALPHA_RATIO_MIN,
     PARTIAL_INTERVAL_MS,
     PARTIAL_MIN_CHARS,
@@ -482,6 +484,8 @@ class STTWorker:
         if service is None:
             raise RuntimeError("STT service not initialized")
 
+        calibration_log_counter = 0
+        
         async for chunk in self.audio_capture.get_audio_chunks():
             await asyncio.sleep(0)
             now = time.time()
@@ -496,6 +500,15 @@ class STTWorker:
                     if rms < 180:  # Match NOISE_MIN_RMS threshold
                         continue
 
+            # Periodic logging of calibration status
+            if NOISE_FLOOR_CALIB_ENABLE and self.vad_processor:
+                calibration_log_counter += 1
+                if calibration_log_counter % 500 == 0:  # Log every ~500 chunks
+                    noise_info = self.vad_processor.get_noise_floor_info()
+                    if not noise_info.get('is_calibrated', True):
+                        progress = noise_info.get('progress', 0) * 100
+                        logger.info("Calibrating noise floor: %.1f%% complete", progress)
+                    
             result = await service.process_chunk(chunk, now=now, in_response_window=self._in_response_window)
             if result.error:
                 logger.error(result.error)
@@ -548,6 +561,13 @@ class STTWorker:
                 self.audio_capture.sample_rate,
                 self.audio_capture.frame_size,
             )
+            
+            # Log noise floor calibration status
+            if NOISE_FLOOR_CALIB_ENABLE:
+                logger.info("Noise floor calibration enabled (%.1fs bootstrap period)", NOISE_FLOOR_CALIB_SECS)
+            else:
+                logger.info("Using legacy noise floor adaptation")
+                
             partial_settings = PartialSettings(
                 enabled=bool(self._enable_partials),
                 min_duration_ms=PARTIAL_MIN_DURATION_MS,

@@ -38,6 +38,20 @@ class WakeActivationConfig:
         default_factory=lambda: os.getenv("WAKE_SPEEX_NOISE_SUPPRESSION", "0").lower() in {"1", "true", "yes"}
     )
     vad_threshold: float = field(default_factory=lambda: float(os.getenv("WAKE_VAD_THRESHOLD", "0.0")))
+    
+    # Advanced sensitivity settings
+    energy_boost_factor: float = field(default_factory=lambda: float(os.getenv("WAKE_ENERGY_BOOST_FACTOR", "1.0")))
+    low_energy_threshold_factor: float = field(default_factory=lambda: float(os.getenv("WAKE_LOW_ENERGY_THRESHOLD_FACTOR", "0.8")))
+    background_noise_sensitivity: bool = field(
+        default_factory=lambda: os.getenv("WAKE_BACKGROUND_NOISE_SENSITIVITY", "0").lower() in {"1", "true", "yes"}
+    )
+    
+    # Health monitoring
+    stt_health_topic: str = field(default_factory=lambda: os.getenv("WAKE_STT_HEALTH_TOPIC", "system/health/stt"))
+    wait_for_stt_health: bool = field(
+        default_factory=lambda: os.getenv("WAKE_WAIT_FOR_STT_HEALTH", "1").lower() in {"1", "true", "yes"}
+    )
+    stt_health_timeout_sec: float = field(default_factory=lambda: float(os.getenv("WAKE_STT_HEALTH_TIMEOUT_SEC", "30")))
 
     @classmethod
     def from_env(cls, env: Optional[Mapping[str, str]] = None) -> "WakeActivationConfig":
@@ -75,6 +89,20 @@ class WakeActivationConfig:
             ).lower()
             in {"1", "true", "yes"},
             vad_threshold=float(_pop("WAKE_VAD_THRESHOLD", str(cls().vad_threshold))),
+            energy_boost_factor=float(_pop("WAKE_ENERGY_BOOST_FACTOR", str(cls().energy_boost_factor))),
+            low_energy_threshold_factor=float(_pop("WAKE_LOW_ENERGY_THRESHOLD_FACTOR", str(cls().low_energy_threshold_factor))),
+            background_noise_sensitivity=_pop(
+                "WAKE_BACKGROUND_NOISE_SENSITIVITY",
+                "1" if cls().background_noise_sensitivity else "0",
+            ).lower()
+            in {"1", "true", "yes"},
+            stt_health_topic=_pop("WAKE_STT_HEALTH_TOPIC", cls().stt_health_topic),
+            wait_for_stt_health=_pop(
+                "WAKE_WAIT_FOR_STT_HEALTH",
+                "1" if cls().wait_for_stt_health else "0",
+            ).lower()
+            in {"1", "true", "yes"},
+            stt_health_timeout_sec=float(_pop("WAKE_STT_HEALTH_TIMEOUT_SEC", str(cls().stt_health_timeout_sec))),
         )
         if data:
             unknown = ", ".join(sorted(data))

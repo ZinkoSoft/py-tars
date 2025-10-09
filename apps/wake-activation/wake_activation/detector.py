@@ -47,6 +47,7 @@ class DetectionResult:
     score: float
     energy: float
     ts: float
+    effective_threshold: Optional[float] = None
 
 
 @runtime_checkable
@@ -95,6 +96,9 @@ class WakeDetector:
         threshold: float,
         min_retrigger_sec: float,
         energy_window_ms: int,
+        energy_boost_factor: float = 1.0,
+        low_energy_threshold_factor: float = 0.8,
+        background_noise_sensitivity: bool = False,
     ) -> None:
         self._backend = backend
         self._threshold = threshold
@@ -110,6 +114,12 @@ class WakeDetector:
         self._energy_samples = 0
         self._energy_sum_sq = 0.0
         self._energy_window: Deque[tuple[int, float]] = deque()
+        
+        # Enhanced sensitivity settings
+        self._energy_boost_factor = max(0.1, energy_boost_factor)
+        self._low_energy_threshold_factor = max(0.1, min(1.0, low_energy_threshold_factor))
+        self._background_noise_sensitivity = background_noise_sensitivity
+        self._recent_energy_history: Deque[float] = deque(maxlen=50)  # Track energy for adaptive thresholds
 
     @property
     def frame_samples(self) -> int:
@@ -126,6 +136,7 @@ class WakeDetector:
         self._energy_samples = 0
         self._energy_sum_sq = 0.0
         self._energy_window.clear()
+        self._recent_energy_history.clear()
 
     def process_frame(self, frame: NDArray[np.float32], *, ts: float) -> Optional[DetectionResult]:
         """Process a normalized audio frame; return detection when threshold is met."""
@@ -148,14 +159,28 @@ class WakeDetector:
         if max_score is None:
             return None
 
-        if max_score < self._threshold:
+        # Adaptive threshold based on energy and environment
+        current_energy = self.current_energy
+        self._recent_energy_history.append(current_energy)
+        
+        # Calculate adaptive threshold
+        effective_threshold = self._calculate_adaptive_threshold(max_score, current_energy)
+
+        if max_score < effective_threshold:
             return None
 
         if self._last_trigger_ts is not None and ts - self._last_trigger_ts < self._min_retrigger_sec:
             return None
 
         self._last_trigger_ts = ts
-        return DetectionResult(score=max_score, energy=self.current_energy, ts=ts)
+        # Apply energy boost to reported energy for better UI feedback
+        reported_energy = current_energy * self._energy_boost_factor
+        return DetectionResult(
+            score=max_score, 
+            energy=reported_energy, 
+            ts=ts, 
+            effective_threshold=effective_threshold
+        )
 
     @property
     def current_energy(self) -> float:
@@ -179,6 +204,33 @@ class WakeDetector:
         int_frame = np.rint(clipped * _INT16_MAX).astype(np.int16)
         self._byte_buffer.extend(int_frame.tobytes())
 
+    def _calculate_adaptive_threshold(self, score: float, current_energy: float) -> float:
+        """Calculate adaptive threshold based on energy and environmental conditions."""
+        base_threshold = self._threshold
+        
+        if not self._background_noise_sensitivity:
+            return base_threshold
+            
+        # If we have enough energy history, adapt threshold
+        if len(self._recent_energy_history) < 10:
+            return base_threshold
+            
+        # Calculate recent average energy
+        recent_energies = list(self._recent_energy_history)
+        avg_energy = sum(recent_energies) / len(recent_energies)
+        
+        # For low energy environments, lower the threshold
+        if current_energy < avg_energy * 0.5:  # Current energy is much lower than average
+            adapted_threshold = base_threshold * self._low_energy_threshold_factor
+        else:
+            adapted_threshold = base_threshold
+            
+        # Additional boost for very confident scores in low energy
+        if score > 0.7 and current_energy < avg_energy * 0.3:
+            adapted_threshold *= 0.8  # Even more sensitive for high confidence in quiet environments
+            
+        return max(0.1, adapted_threshold)  # Never go below 0.1
+
 
 def create_wake_detector(
     model_path: Path,
@@ -188,6 +240,9 @@ def create_wake_detector(
     energy_window_ms: int,
     enable_speex_noise_suppression: bool,
     vad_threshold: float,
+    energy_boost_factor: float = 1.0,
+    low_energy_threshold_factor: float = 0.8,
+    background_noise_sensitivity: bool = False,
 ) -> WakeDetector:
     """Create a wake detector backed by openWakeWord."""
 
@@ -219,4 +274,7 @@ def create_wake_detector(
         threshold=threshold,
         min_retrigger_sec=min_retrigger_sec,
         energy_window_ms=energy_window_ms,
+        energy_boost_factor=energy_boost_factor,
+        low_energy_threshold_factor=low_energy_threshold_factor,
+        background_noise_sensitivity=background_noise_sensitivity,
     )
