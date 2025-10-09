@@ -5,9 +5,14 @@ from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Deque, Optional, Protocol, TYPE_CHECKING, runtime_checkable
+import logging
 
 import numpy as np
 from numpy.typing import NDArray
+
+from .npu_utils import check_npu_availability, log_npu_status
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "DetectorUnavailableError",
@@ -29,6 +34,11 @@ try:  # pragma: no cover - handled via optional dependency
     from openwakeword import Model as RuntimeOpenWakeWordModel
 except Exception:  # pragma: no cover - import failure path tested via unit tests
     RuntimeOpenWakeWordModel = None  # type: ignore[assignment]
+
+try:  # pragma: no cover - NPU support is optional
+    from rknnlite.api import RKNNLite
+except Exception:  # pragma: no cover - NPU not available
+    RKNNLite = None  # type: ignore[assignment]
 
 
 _FRAME_SAMPLES = 1280
@@ -84,6 +94,77 @@ class _OpenWakeWordBackend:
 
     def reset(self) -> None:
         self._model.reset()
+
+
+class _RKNNBackend:
+    """NPU-accelerated backend using RKNN Lite2 for RK3588."""
+
+    def __init__(self, model_path: str, core_mask: int = 0) -> None:
+        if RKNNLite is None:
+            raise DetectorUnavailableError("rknn-toolkit-lite2 is not installed. Install it to enable NPU acceleration.")
+        
+        self._rknn = RKNNLite()
+        self._model_path = model_path
+        self._core_mask = core_mask
+        self._is_initialized = False
+        
+        # Load and initialize the RKNN model
+        ret = self._rknn.load_rknn(model_path)
+        if ret != 0:
+            raise DetectorUnavailableError(f"Failed to load RKNN model from {model_path}")
+        
+        # Initialize runtime with specified NPU cores
+        ret = self._rknn.init_runtime(core_mask=core_mask)
+        if ret != 0:
+            self._rknn.release()
+            raise DetectorUnavailableError(f"Failed to initialize RKNN runtime with core mask {core_mask}")
+        
+        self._is_initialized = True
+
+    @property
+    def frame_samples(self) -> int:
+        return _FRAME_SAMPLES
+
+    @property
+    def sample_rate(self) -> int:
+        return _SAMPLE_RATE
+
+    def process(self, frame: NDArray[np.int16]) -> float:
+        if not self._is_initialized:
+            return 0.0
+        
+        # Convert int16 frame to float32 and normalize to [-1, 1] range
+        # This matches the expected input format for most RKNN wake word models
+        frame_float = frame.astype(np.float32) / _INT16_MAX
+        
+        # Ensure proper shape for RKNN inference (add batch dimension if needed)
+        if frame_float.ndim == 1:
+            frame_float = frame_float.reshape(1, -1)
+        
+        try:
+            # Run inference on NPU
+            outputs = self._rknn.inference(inputs=[frame_float])
+            if outputs and len(outputs) > 0:
+                # Assume single output with wake word probability
+                prediction = outputs[0]
+                if prediction.ndim > 0:
+                    return float(prediction.flatten()[0])
+                return float(prediction)
+            return 0.0
+        except Exception:
+            # Fallback gracefully on NPU inference errors
+            return 0.0
+
+    def reset(self) -> None:
+        # RKNN doesn't require explicit reset, but we could reinitialize if needed
+        pass
+
+    def __del__(self) -> None:
+        if hasattr(self, '_rknn') and self._is_initialized:
+            try:
+                self._rknn.release()
+            except Exception:
+                pass  # Ignore cleanup errors
 
 
 class WakeDetector:
@@ -243,8 +324,88 @@ def create_wake_detector(
     energy_boost_factor: float = 1.0,
     low_energy_threshold_factor: float = 0.8,
     background_noise_sensitivity: bool = False,
+    use_npu: bool = False,
+    npu_core_mask: int = 0,
 ) -> WakeDetector:
-    """Create a wake detector backed by openWakeWord."""
+    """Create a wake detector with optional NPU acceleration.
+    
+    Args:
+        model_path: Path to the wake word model (.tflite for CPU, .rknn for NPU)
+        threshold: Detection threshold (0.0-1.0)
+        min_retrigger_sec: Minimum time between detections
+        energy_window_ms: Energy window for adaptive thresholds
+        enable_speex_noise_suppression: Enable Speex noise suppression (CPU only)
+        vad_threshold: VAD threshold (CPU only)
+        energy_boost_factor: Energy boost for UI feedback
+        low_energy_threshold_factor: Threshold reduction in low energy
+        background_noise_sensitivity: Enable adaptive thresholds
+        use_npu: Use NPU acceleration if available
+        npu_core_mask: NPU core mask (0=auto, 1=core0, 2=core1, 4=core2, 7=all cores)
+    
+    Returns:
+        Configured WakeDetector instance
+    
+    Raises:
+        DetectorUnavailableError: If the requested backend is not available
+    """
+    if use_npu:
+        # Check NPU availability and log status
+        npu_available, status = check_npu_availability()
+        if not npu_available:
+            logger.warning("NPU requested but not available, falling back to CPU")
+            logger.debug(f"NPU status: {status}")
+            # Fall back to CPU with original model path if NPU model doesn't exist
+            fallback_path = model_path.with_suffix('.tflite') if model_path.suffix == '.rknn' else model_path
+            return create_cpu_wake_detector(
+                model_path=fallback_path,
+                threshold=threshold,
+                min_retrigger_sec=min_retrigger_sec,
+                energy_window_ms=energy_window_ms,
+                enable_speex_noise_suppression=enable_speex_noise_suppression,
+                vad_threshold=vad_threshold,
+                energy_boost_factor=energy_boost_factor,
+                low_energy_threshold_factor=low_energy_threshold_factor,
+                background_noise_sensitivity=background_noise_sensitivity,
+            )
+        else:
+            logger.info("NPU available, using NPU acceleration for wake detection")
+            return create_npu_wake_detector(
+                model_path=model_path,
+                threshold=threshold,
+                min_retrigger_sec=min_retrigger_sec,
+                energy_window_ms=energy_window_ms,
+                energy_boost_factor=energy_boost_factor,
+                low_energy_threshold_factor=low_energy_threshold_factor,
+                background_noise_sensitivity=background_noise_sensitivity,
+                npu_core_mask=npu_core_mask,
+            )
+    else:
+        return create_cpu_wake_detector(
+            model_path=model_path,
+            threshold=threshold,
+            min_retrigger_sec=min_retrigger_sec,
+            energy_window_ms=energy_window_ms,
+            enable_speex_noise_suppression=enable_speex_noise_suppression,
+            vad_threshold=vad_threshold,
+            energy_boost_factor=energy_boost_factor,
+            low_energy_threshold_factor=low_energy_threshold_factor,
+            background_noise_sensitivity=background_noise_sensitivity,
+        )
+
+
+def create_cpu_wake_detector(
+    model_path: Path,
+    *,
+    threshold: float,
+    min_retrigger_sec: float,
+    energy_window_ms: int,
+    enable_speex_noise_suppression: bool,
+    vad_threshold: float,
+    energy_boost_factor: float = 1.0,
+    low_energy_threshold_factor: float = 0.8,
+    background_noise_sensitivity: bool = False,
+) -> WakeDetector:
+    """Create a CPU-based wake detector using openWakeWord."""
 
     if RuntimeOpenWakeWordModel is None:
         raise DetectorUnavailableError(
@@ -269,6 +430,53 @@ def create_wake_detector(
     label = next(iter(model.models.keys()))
 
     backend = _OpenWakeWordBackend(model, label)
+    return WakeDetector(
+        backend,
+        threshold=threshold,
+        min_retrigger_sec=min_retrigger_sec,
+        energy_window_ms=energy_window_ms,
+        energy_boost_factor=energy_boost_factor,
+        low_energy_threshold_factor=low_energy_threshold_factor,
+        background_noise_sensitivity=background_noise_sensitivity,
+    )
+
+
+def create_npu_wake_detector(
+    model_path: Path,
+    *,
+    threshold: float,
+    min_retrigger_sec: float,
+    energy_window_ms: int,
+    energy_boost_factor: float = 1.0,
+    low_energy_threshold_factor: float = 0.8,
+    background_noise_sensitivity: bool = False,
+    npu_core_mask: int = 0,
+) -> WakeDetector:
+    """Create an NPU-accelerated wake detector using RKNN.
+    
+    Args:
+        model_path: Path to .rknn model file
+        threshold: Detection threshold
+        min_retrigger_sec: Minimum time between detections  
+        energy_window_ms: Energy window for adaptive thresholds
+        energy_boost_factor: Energy boost for UI feedback
+        low_energy_threshold_factor: Threshold reduction in low energy
+        background_noise_sensitivity: Enable adaptive thresholds
+        npu_core_mask: NPU core selection (0=auto, 1-7=specific cores)
+    
+    Returns:
+        WakeDetector using NPU backend
+        
+    Raises:
+        DetectorUnavailableError: If NPU is not available or model loading fails
+    """
+    if not model_path.exists():
+        raise DetectorUnavailableError(f"RKNN model not found at {model_path}")
+    
+    if model_path.suffix.lower() != ".rknn":
+        raise DetectorUnavailableError(f"Expected .rknn model, got {model_path.suffix}")
+
+    backend = _RKNNBackend(str(model_path), npu_core_mask)
     return WakeDetector(
         backend,
         threshold=threshold,

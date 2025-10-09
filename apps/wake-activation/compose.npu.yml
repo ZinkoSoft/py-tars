@@ -1,0 +1,134 @@
+version: '3.8'
+
+services:
+  wake-activation-npu:
+    build:
+      context: .
+      dockerfile: Dockerfile.npu
+    image: tars-wake-activation-npu:latest
+    container_name: tars-wake-activation-npu
+    
+    # NPU and device access (matching working SenseVoice configuration)
+    privileged: true
+    devices:
+      - "/dev/rknpu:/dev/rknpu"
+      - "/dev/dri:/dev/dri"
+      - "/dev/mali0:/dev/mali0"
+    
+    # Volume mounts for model caching and NPU runtime (matching working configuration)
+    volumes:
+      # Critical NPU device mounts
+      - "/dev/dri/renderD129:/dev/dri/renderD129"
+      - "/proc/device-tree/compatible:/proc/device-tree/compatible:ro"
+      
+      # NPU runtime library (host-specific)
+      - "/usr/lib/librknnrt.so:/usr/lib/librknnrt.so:ro"
+      
+      # Model directories
+      - "../../models:/models:ro"
+      
+      # Audio device access for wake detection
+      - "/dev/snd:/dev/snd:rw"
+      
+      # Audio fanout socket (shared with STT worker)
+      - "/tmp/tars:/tmp/tars:rw"
+      
+      # Configuration
+      - "./.env:/app/.env:ro"
+      
+    # Environment variables
+    environment:
+      # Core RKNN configuration
+      - PYTHONUNBUFFERED=1
+      - RKNN_LOG_LEVEL=3
+      - LOG_LEVEL=INFO
+      - container=docker
+
+      # NPU configuration for wake activation
+      - WAKE_USE_NPU=1
+      - WAKE_RKNN_MODEL_PATH=/models/openwakeword/hey_tars.rknn
+      - WAKE_NPU_CORE_MASK=0  # Auto-select cores
+      
+      # Wake activation settings
+      - WAKE_DETECTION_THRESHOLD=0.55
+      - WAKE_MIN_RETRIGGER_SEC=1.0
+      - WAKE_INTERRUPT_WINDOW_SEC=2.5
+      - WAKE_IDLE_TIMEOUT_SEC=3.0
+      - WAKE_DETECTION_WINDOW_MS=750
+      - WAKE_ENERGY_BOOST_FACTOR=1.2
+      - WAKE_LOW_ENERGY_THRESHOLD_FACTOR=0.8
+      - WAKE_BACKGROUND_NOISE_SENSITIVITY=1
+      
+      # Audio configuration  
+      - WAKE_AUDIO_FANOUT=/tmp/tars/audio-fanout.sock
+      
+      # MQTT configuration
+      - MQTT_URL=mqtt://tars:pass@mosquitto:1883
+      
+      # Health monitoring
+      - WAKE_HEALTH_TOPIC=system/health/wake
+      - WAKE_HEALTH_INTERVAL_SEC=15
+      
+    # Network configuration (using host mode for MQTT connectivity)
+    network_mode: host
+    
+    # Default command - run wake activation service
+    command: ["python", "-m", "wake_activation"]
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "from wake_activation.npu_utils import check_npu_availability; exit(0 if check_npu_availability()[0] else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # Optional: CPU fallback service for testing
+  wake-activation-cpu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tars-wake-activation-cpu:latest
+    container_name: tars-wake-activation-cpu
+    profiles: ["cpu-fallback"]  # Only start when explicitly requested
+    
+    volumes:
+      - "../../models:/models:ro"
+      - "/dev/snd:/dev/snd:rw"
+      - "/tmp/tars:/tmp/tars:rw"
+      - "./.env:/app/.env:ro"
+      
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+      - WAKE_USE_NPU=0
+      - WAKE_MODEL_PATH=/models/openwakeword/hey_tars.tflite
+      - MQTT_URL=mqtt://tars:pass@mosquitto:1883
+      
+    network_mode: host
+    command: ["python", "-m", "wake_activation"]
+    restart: unless-stopped
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"

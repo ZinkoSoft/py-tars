@@ -52,6 +52,17 @@ class WakeActivationConfig:
         default_factory=lambda: os.getenv("WAKE_WAIT_FOR_STT_HEALTH", "1").lower() in {"1", "true", "yes"}
     )
     stt_health_timeout_sec: float = field(default_factory=lambda: float(os.getenv("WAKE_STT_HEALTH_TIMEOUT_SEC", "30")))
+    
+    # NPU acceleration settings
+    use_npu: bool = field(
+        default_factory=lambda: os.getenv("WAKE_USE_NPU", "0").lower() in {"1", "true", "yes"}
+    )
+    rknn_model_path: Path = field(
+        default_factory=lambda: Path(os.getenv("WAKE_RKNN_MODEL_PATH", "/models/openwakeword/hey_tars.rknn"))
+    )
+    npu_core_mask: int = field(
+        default_factory=lambda: int(os.getenv("WAKE_NPU_CORE_MASK", "0"))
+    )
 
     @classmethod
     def from_env(cls, env: Optional[Mapping[str, str]] = None) -> "WakeActivationConfig":
@@ -103,6 +114,9 @@ class WakeActivationConfig:
             ).lower()
             in {"1", "true", "yes"},
             stt_health_timeout_sec=float(_pop("WAKE_STT_HEALTH_TIMEOUT_SEC", str(cls().stt_health_timeout_sec))),
+            use_npu=_pop("WAKE_USE_NPU", "1" if cls().use_npu else "0").lower() in {"1", "true", "yes"},
+            rknn_model_path=Path(_pop("WAKE_RKNN_MODEL_PATH", str(cls().rknn_model_path))),
+            npu_core_mask=int(_pop("WAKE_NPU_CORE_MASK", str(cls().npu_core_mask))),
         )
         if data:
             unknown = ", ".join(sorted(data))

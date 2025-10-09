@@ -182,6 +182,10 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       WAKE_AUDIO_FANOUT: ${WAKE_AUDIO_FANOUT:-/tmp/tars/audio-fanout.sock}
       WAKE_MODEL_PATH: ${WAKE_MODEL_PATH:-/models/openwakeword/hey_tars.tflite}
+      # NPU acceleration settings (RK3588 devices)
+      WAKE_USE_NPU: ${WAKE_USE_NPU:-0}
+      WAKE_RKNN_MODEL_PATH: ${WAKE_RKNN_MODEL_PATH:-/models/openwakeword/hey_tars.rknn}
+      WAKE_NPU_CORE_MASK: ${WAKE_NPU_CORE_MASK:-0}
       # Wake sensitivity configuration
       WAKE_DETECTION_THRESHOLD: ${WAKE_DETECTION_THRESHOLD:-0.35}
       WAKE_MIN_RETRIGGER_SEC: ${WAKE_MIN_RETRIGGER_SEC:-0.8}

@@ -4,11 +4,31 @@ import asyncio
 import logging
 import re
 import time
-from asyncio import TaskGroup
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Callable, Optional, Tuple
 from urllib.parse import urlparse
+
+# Handle TaskGroup compatibility for Python 3.10
+try:
+    from asyncio import TaskGroup
+except ImportError:
+    # Fallback for Python < 3.11
+    class TaskGroup:
+        def __init__(self):
+            self._tasks = []
+            
+        def create_task(self, coro):
+            task = asyncio.create_task(coro)
+            self._tasks.append(task)
+            return task
+            
+        async def __aenter__(self):
+            return self
+            
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            if self._tasks:
+                await asyncio.gather(*self._tasks, return_exceptions=True)
 
 import asyncio_mqtt as mqtt
 import orjson
@@ -368,7 +388,7 @@ class WakeActivationService:
 
     def _default_detector_factory(self, config: WakeActivationConfig) -> WakeDetector:
         return create_wake_detector(
-            config.wake_model_path,
+            config.rknn_model_path if config.use_npu else config.wake_model_path,
             threshold=config.wake_detection_threshold,
             min_retrigger_sec=config.min_retrigger_sec,
             energy_window_ms=config.detection_window_ms,
@@ -377,6 +397,8 @@ class WakeActivationService:
             energy_boost_factor=config.energy_boost_factor,
             low_energy_threshold_factor=config.low_energy_threshold_factor,
             background_noise_sensitivity=config.background_noise_sensitivity,
+            use_npu=config.use_npu,
+            npu_core_mask=config.npu_core_mask,
         )
 
     def _default_audio_client_factory(self, config: WakeActivationConfig, frame_samples: int) -> AudioFanoutClient:
