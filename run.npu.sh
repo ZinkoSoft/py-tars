@@ -1,0 +1,1 @@
+docker compose -f ops/compose.yml -f ops/compose.npu.yml up --build -d
