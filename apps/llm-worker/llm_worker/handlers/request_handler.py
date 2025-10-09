@@ -137,6 +137,12 @@ class RequestHandler:
         use_rag = rag_enabled if request.use_rag is None else bool(request.use_rag)
         rag_k = request.rag_k if (request.rag_k is not None and request.rag_k > 0) else self.config.get("RAG_TOP_K", 5)
         
+        # Enhanced RAG parameters
+        rag_max_tokens = self.config.get("RAG_MAX_TOKENS", 2000)
+        rag_include_context = self.config.get("RAG_INCLUDE_CONTEXT", True)
+        rag_context_window = self.config.get("RAG_CONTEXT_WINDOW", 1)
+        rag_strategy = self.config.get("RAG_STRATEGY", "hybrid")
+        
         # LLM parameters
         params = request.params or {}
         model = params.get("model", self.config.get("LLM_MODEL", "gpt-4o-mini"))
@@ -166,6 +172,10 @@ class RequestHandler:
             "want_stream": want_stream,
             "use_rag": use_rag,
             "rag_k": rag_k,
+            "rag_max_tokens": rag_max_tokens,
+            "rag_include_context": rag_include_context,
+            "rag_context_window": rag_context_window,
+            "rag_strategy": rag_strategy,
             "system": system,
             "model": model,
             "max_tokens": max_tokens,
@@ -197,17 +207,36 @@ class RequestHandler:
         client: mqtt.Client,
         params: Dict[str, Any]
     ) -> Tuple[str, list[dict]]:
-        """Prepare prompt with optional RAG context and conversation history."""
+        """Prepare prompt with enhanced RAG context and conversation history."""
         text = params["text"]
         context = ""
+        rag_metadata = {}
         
-        # RAG query if enabled
+        # Enhanced RAG query if enabled
         if params["use_rag"]:
-            context = await self.rag_handler.query(
+            # Use enhanced RAG with context expansion and token awareness
+            rag_context = await self.rag_handler.query(
                 client,
                 text,
-                params["rag_k"],
-                params["correlation_id"]
+                top_k=params["rag_k"],
+                correlation_id=params["correlation_id"],
+                max_tokens=params.get("rag_max_tokens"),  # Optional token budget
+                include_context=params.get("rag_include_context", True),  # Include surrounding context
+                context_window=params.get("rag_context_window", 1),
+                retrieval_strategy=params.get("rag_strategy", "hybrid")
+            )
+            context = rag_context.content
+            rag_metadata = {
+                "token_count": rag_context.token_count,
+                "truncated": rag_context.truncated,
+                "strategy": rag_context.strategy_used
+            }
+            
+            logger.info(
+                "RAG context retrieved: %d tokens, truncated=%s, strategy=%s",
+                rag_context.token_count,
+                rag_context.truncated,
+                rag_context.strategy_used
             )
         
         # Format prompt with context
@@ -215,6 +244,9 @@ class RequestHandler:
         if context:
             rag_template = self.config.get("RAG_PROMPT_TEMPLATE", "Context:\n{context}\n\nUser: {user}")
             prompt = rag_template.format(context=context, user=text)
+        
+        # Store RAG metadata for logging
+        params["rag_metadata"] = rag_metadata
         
         # Build messages list
         messages = []
@@ -231,9 +263,156 @@ class RequestHandler:
         
         return prompt, messages
     
+    def _estimate_tokens(self, text: str) -> int:
+        """Rough token estimation (can be improved with tiktoken later)."""
+        return int(len(text.split()) * 1.3)
+    
+    async def _build_context_aware_prompt(
+        self,
+        client: mqtt.Client,
+        params: Dict[str, Any],
+        available_tokens: int
+    ) -> Tuple[str, list[dict]]:
+        """Build prompt with dynamic token management (community pattern).
+        
+        Implements hierarchical content prioritization:
+        1. Base prompt structure (system, user message) - reserved
+        2. RAG context - high priority 
+        3. Conversation history - medium priority
+        4. Additional context - low priority
+        
+        Args:
+            client: MQTT client
+            params: Request parameters
+            available_tokens: Total token budget for the prompt
+            
+        Returns:
+            Tuple of (formatted_prompt, messages_list)
+        """
+        text = params["text"]
+        
+        # Reserve tokens for base prompt structure (system prompt, user message, assistant prefix)
+        base_tokens = 300  # Conservative estimate
+        system_prompt = params.get("system", "")
+        if system_prompt:
+            base_tokens += self._estimate_tokens(system_prompt)
+        
+        base_tokens += self._estimate_tokens(text)
+        
+        if available_tokens <= base_tokens:
+            logger.warning(
+                "Available tokens (%d) insufficient for base prompt (%d), proceeding with minimal prompt",
+                available_tokens, base_tokens
+            )
+            return text, [{"role": "user", "content": text}]
+        
+        memory_budget = available_tokens - base_tokens
+        logger.info(
+            "Dynamic prompt building: %d total tokens, %d base, %d available for context",
+            available_tokens, base_tokens, memory_budget
+        )
+        
+        # Get RAG context with token budget (highest priority)
+        context = ""
+        context_tokens = 0
+        rag_metadata = {}
+        
+        if params["use_rag"] and memory_budget > 100:  # Minimum viable RAG budget
+            rag_budget = min(memory_budget // 2, params.get("rag_max_tokens", 2000))  # Up to half the budget
+            
+            rag_context = await self.rag_handler.query(
+                client,
+                text,
+                top_k=params["rag_k"],
+                correlation_id=params["correlation_id"],
+                max_tokens=rag_budget,
+                include_context=params.get("rag_include_context", True),
+                context_window=params.get("rag_context_window", 1),
+                retrieval_strategy=params.get("rag_strategy", "hybrid")
+            )
+            
+            context = rag_context.content
+            context_tokens = rag_context.token_count
+            rag_metadata = {
+                "token_count": rag_context.token_count,
+                "truncated": rag_context.truncated,
+                "strategy": rag_context.strategy_used
+            }
+            
+            logger.info(
+                "RAG context: %d tokens (budget: %d), truncated=%s",
+                context_tokens, rag_budget, rag_context.truncated
+            )
+        
+        # Add conversation history if space allows (medium priority)
+        messages = []
+        remaining_budget = memory_budget - context_tokens
+        
+        if params.get("conversation_history") and remaining_budget > 50:
+            history_tokens = 0
+            
+            # Add history in reverse order (most recent first) until budget exhausted
+            for msg in reversed(params["conversation_history"]):
+                msg_tokens = self._estimate_tokens(msg.content)
+                if history_tokens + msg_tokens > remaining_budget:
+                    break
+                    
+                messages.insert(0, {
+                    "role": msg.role,
+                    "content": msg.content
+                })
+                history_tokens += msg_tokens
+            
+            logger.info(
+                "Conversation history: %d messages, %d tokens (budget: %d)",
+                len(messages), history_tokens, remaining_budget
+            )
+        
+        # Build final prompt with hierarchical structure
+        if context:
+            rag_template = self.config.get("RAG_PROMPT_TEMPLATE", "Context:\n{context}\n\nUser: {user}")
+            prompt = rag_template.format(context=context, user=text)
+        else:
+            prompt = text
+        
+        # Add final user message
+        messages.append({
+            "role": "user", 
+            "content": prompt
+        })
+        
+        # Store metadata for logging
+        params["rag_metadata"] = rag_metadata
+        params["prompt_metadata"] = {
+            "total_budget": available_tokens,
+            "base_tokens": base_tokens,
+            "context_tokens": context_tokens,
+            "history_messages": len(messages) - 1,  # Exclude final user message
+            "final_tokens": sum(self._estimate_tokens(m["content"]) for m in messages)
+        }
+        
+        return prompt, messages
+
     async def _handle_streaming_request(self, client: mqtt.Client, params: Dict[str, Any]) -> None:
-        """Handle streaming LLM request with optional TTS forwarding."""
-        prompt, messages = await self._prepare_prompt_with_rag(client, params)
+        """Handle streaming LLM request with optional TTS forwarding and dynamic prompts."""
+        # Choose prompt building strategy
+        if self.config.get("RAG_DYNAMIC_PROMPTS", True):
+            # Use token-aware dynamic prompt building
+            context_size = self.config.get("LLM_CTX_WINDOW", 8192)
+            # Reserve space for max_tokens response
+            available_tokens = context_size - params["max_tokens"] - 100  # Small buffer
+            prompt, messages = await self._build_context_aware_prompt(client, params, available_tokens)
+            
+            # Log prompt metadata
+            if "prompt_metadata" in params:
+                meta = params["prompt_metadata"]
+                logger.info(
+                    "Dynamic prompt: %d/%d tokens used, %d history messages",
+                    meta["final_tokens"], meta["total_budget"], meta["history_messages"]
+                )
+        else:
+            # Use standard prompt building
+            prompt, messages = await self._prepare_prompt_with_rag(client, params)
         
         seq = 0
         full_chunks: list[str] = []
@@ -311,8 +490,25 @@ class RequestHandler:
         await self._publish_response(client, params, final_text)
     
     async def _handle_non_streaming_request(self, client: mqtt.Client, params: Dict[str, Any]) -> None:
-        """Handle non-streaming LLM request with optional tool calling."""
-        prompt, messages = await self._prepare_prompt_with_rag(client, params)
+        """Handle non-streaming LLM request with optional tool calling and dynamic prompts."""
+        # Choose prompt building strategy
+        if self.config.get("RAG_DYNAMIC_PROMPTS", True):
+            # Use token-aware dynamic prompt building
+            context_size = self.config.get("LLM_CTX_WINDOW", 8192)
+            # Reserve space for max_tokens response
+            available_tokens = context_size - params["max_tokens"] - 100  # Small buffer
+            prompt, messages = await self._build_context_aware_prompt(client, params, available_tokens)
+            
+            # Log prompt metadata
+            if "prompt_metadata" in params:
+                meta = params["prompt_metadata"]
+                logger.info(
+                    "Dynamic prompt: %d/%d tokens used, %d history messages",
+                    meta["final_tokens"], meta["total_budget"], meta["history_messages"]
+                )
+        else:
+            # Use standard prompt building
+            prompt, messages = await self._prepare_prompt_with_rag(client, params)
         
         # Generate response
         result = await self.provider.generate_chat(

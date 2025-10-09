@@ -23,11 +23,18 @@ class BaseMemoryMessage(BaseModel):
 class MemoryQuery(BaseMemoryMessage):
     text: str
     top_k: int = Field(default=5, ge=1, le=50)
+    max_tokens: int | None = Field(default=None, ge=1, le=10000)
+    include_context: bool = Field(default=False)
+    context_window: int = Field(default=1, ge=0, le=5)
+    retrieval_strategy: str = Field(default="hybrid")  # "hybrid", "recent", "similarity"
 
 
 class MemoryResult(BaseModel):
     document: dict[str, Any] | str
     score: float | None = None
+    timestamp: str | None = None
+    context_type: str = Field(default="target")  # "target", "previous", "next"
+    token_count: int | None = None
 
     model_config = {"extra": "forbid"}
 
@@ -36,6 +43,9 @@ class MemoryResults(BaseMemoryMessage):
     query: str
     k: int
     results: list[MemoryResult] = Field(default_factory=list)
+    total_tokens: int | None = None
+    strategy_used: str = Field(default="hybrid")
+    truncated: bool = Field(default=False)
 
 
 class CharacterGetRequest(BaseMemoryMessage):

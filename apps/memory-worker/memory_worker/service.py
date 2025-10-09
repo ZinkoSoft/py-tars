@@ -257,23 +257,275 @@ class MemoryService:
             retain=True,
         )
 
+    def _extract_text_from_doc(self, doc: Any) -> str:
+        """Extract text content from a document for token counting."""
+        if isinstance(doc, dict):
+            # Prefer specific fields if present
+            text_parts = []
+            if "user_input" in doc:
+                text_parts.append(str(doc["user_input"]))
+            if "bot_response" in doc:
+                text_parts.append(str(doc["bot_response"]))
+            if "text" in doc:
+                text_parts.append(str(doc["text"]))
+            if text_parts:
+                return " ".join(text_parts)
+            # Fallback to all values
+            return " ".join(str(v) for v in doc.values() if v)
+        return str(doc)
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Rough token estimation (can be improved with tiktoken later)."""
+        return int(len(text.split()) * 1.3)
+
+    async def _query_with_token_limit(
+        self, 
+        query: str, 
+        max_tokens: int, 
+        top_k: int = 5
+    ) -> list[MemoryResult]:
+        """Token-aware memory retrieval."""
+        accumulated_results = []
+        accumulated_tokens = 0
+        
+        # Get base results from hybrid retrieval (fetch more to allow filtering)
+        base_results = await self.db.query_async(query, top_k=top_k * 2)
+        
+        for doc, score in base_results:
+            text = self._extract_text_from_doc(doc)
+            doc_tokens = self._estimate_tokens(text)
+            
+            if accumulated_tokens + doc_tokens > max_tokens and accumulated_results:
+                break
+                
+            # Include timestamp if available
+            timestamp = None
+            if isinstance(doc, dict) and "timestamp" in doc:
+                timestamp = str(doc["timestamp"])
+                
+            accumulated_results.append(MemoryResult(
+                document=doc if isinstance(doc, dict) else {"text": str(doc)},
+                score=float(score),
+                timestamp=timestamp,
+                context_type="target",
+                token_count=doc_tokens
+            ))
+            accumulated_tokens += doc_tokens
+        
+        return accumulated_results[:top_k]
+
+    async def _get_context_window(
+        self, 
+        target_indices: list[int], 
+        window_size: int = 1
+    ) -> list[MemoryResult]:
+        """Get surrounding context for target documents."""
+        if not target_indices or window_size <= 0:
+            return []
+            
+        context_results = []
+        all_docs = self.db.documents
+        
+        for idx in target_indices:
+            # Add previous context
+            for i in range(max(0, idx - window_size), idx):
+                if i < len(all_docs):
+                    doc = all_docs[i]
+                    text = self._extract_text_from_doc(doc)
+                    timestamp = None
+                    if isinstance(doc, dict) and "timestamp" in doc:
+                        timestamp = str(doc["timestamp"])
+                        
+                    context_results.append(MemoryResult(
+                        document=doc if isinstance(doc, dict) else {"text": str(doc)},
+                        score=0.0,
+                        timestamp=timestamp,
+                        context_type="previous",
+                        token_count=self._estimate_tokens(text)
+                    ))
+            
+            # Add next context  
+            for i in range(idx + 1, min(len(all_docs), idx + window_size + 1)):
+                doc = all_docs[i]
+                text = self._extract_text_from_doc(doc)
+                timestamp = None
+                if isinstance(doc, dict) and "timestamp" in doc:
+                    timestamp = str(doc["timestamp"])
+                    
+                context_results.append(MemoryResult(
+                    document=doc if isinstance(doc, dict) else {"text": str(doc)},
+                    score=0.0,
+                    timestamp=timestamp,
+                    context_type="next", 
+                    token_count=self._estimate_tokens(text)
+                ))
+        
+        return context_results
+
+    async def _query_recent_memories(
+        self, 
+        max_tokens: int, 
+        max_entries: int = 20
+    ) -> list[MemoryResult]:
+        """Get recent memories within token budget."""
+        if not self.db.documents:
+            return []
+            
+        recent_docs = self.db.documents[-max_entries:]
+        accumulated_results = []
+        accumulated_tokens = 0
+        
+        for doc in reversed(recent_docs):  # Most recent first
+            text = self._extract_text_from_doc(doc)
+            doc_tokens = self._estimate_tokens(text)
+            
+            if accumulated_tokens + doc_tokens > max_tokens and accumulated_results:
+                break
+                
+            timestamp = None
+            if isinstance(doc, dict) and "timestamp" in doc:
+                timestamp = str(doc["timestamp"])
+                
+            accumulated_results.append(MemoryResult(
+                document=doc if isinstance(doc, dict) else {"text": str(doc)},
+                score=1.0,  # Recent = high relevance
+                timestamp=timestamp,
+                context_type="target",
+                token_count=doc_tokens
+            ))
+            accumulated_tokens += doc_tokens
+        
+        return list(reversed(accumulated_results))  # Restore chronological order
+
     async def _handle_memory_query(
         self,
         client: mqtt.Client,
         query: MemoryQuery,
         correlate: str | None,
     ) -> None:
-        top_k = query.top_k or TOP_K
-        # Use async query to avoid blocking event loop during embedding
-        results = await self.db.query_async(query.text, top_k=top_k)
-        hits = [
-            MemoryResult(
-                document=doc if isinstance(doc, dict) else {"text": str(doc)},
-                score=float(score),
-            )
-            for doc, score in results
-        ]
-        payload = MemoryResults(query=query.text, k=top_k, results=hits)
+        """Enhanced memory query handler with token awareness and context expansion."""
+        logger.info(
+            "Memory query: strategy=%s, max_tokens=%s, include_context=%s, top_k=%d",
+            query.retrieval_strategy,
+            query.max_tokens,
+            query.include_context,
+            query.top_k
+        )
+        
+        hits = []
+        total_tokens = 0
+        strategy_used = query.retrieval_strategy
+        truncated = False
+        
+        # Route to appropriate retrieval strategy
+        if query.retrieval_strategy == "recent":
+            if query.max_tokens:
+                hits = await self._query_recent_memories(query.max_tokens, query.top_k * 2)
+            else:
+                # Fallback to standard recent retrieval
+                recent_docs = self.db.documents[-query.top_k:]
+                hits = [
+                    MemoryResult(
+                        document=doc if isinstance(doc, dict) else {"text": str(doc)},
+                        score=1.0,
+                        timestamp=str(doc.get("timestamp")) if isinstance(doc, dict) and "timestamp" in doc else None,
+                        context_type="target",
+                        token_count=self._estimate_tokens(self._extract_text_from_doc(doc))
+                    )
+                    for doc in reversed(recent_docs)
+                ]
+                
+        elif query.retrieval_strategy == "similarity":
+            # Pure vector similarity without token limits
+            results = await self.db.query_async(query.text, top_k=query.top_k)
+            hits = [
+                MemoryResult(
+                    document=doc if isinstance(doc, dict) else {"text": str(doc)},
+                    score=float(score),
+                    timestamp=str(doc.get("timestamp")) if isinstance(doc, dict) and "timestamp" in doc else None,
+                    context_type="target",
+                    token_count=self._estimate_tokens(self._extract_text_from_doc(doc))
+                )
+                for doc, score in results
+            ]
+            
+        else:  # "hybrid" - default
+            if query.max_tokens:
+                hits = await self._query_with_token_limit(query.text, query.max_tokens, query.top_k)
+            else:
+                # Standard hybrid retrieval
+                results = await self.db.query_async(query.text, top_k=query.top_k)
+                hits = [
+                    MemoryResult(
+                        document=doc if isinstance(doc, dict) else {"text": str(doc)},
+                        score=float(score),
+                        timestamp=str(doc.get("timestamp")) if isinstance(doc, dict) and "timestamp" in doc else None,
+                        context_type="target",
+                        token_count=self._estimate_tokens(self._extract_text_from_doc(doc))
+                    )
+                    for doc, score in results
+                ]
+        
+        # Add context expansion if requested
+        if query.include_context and query.context_window > 0 and hits:
+            # Find indices of target documents in the database
+            target_indices = []
+            for hit in hits:
+                if hit.context_type == "target":
+                    try:
+                        idx = self.db.documents.index(hit.document)
+                        target_indices.append(idx)
+                    except (ValueError, AttributeError):
+                        pass  # Document not found in original list
+            
+            if target_indices:
+                context_hits = await self._get_context_window(target_indices, query.context_window)
+                
+                # Apply token limit to context if specified
+                if query.max_tokens:
+                    current_tokens = sum(hit.token_count or 0 for hit in hits)
+                    remaining_tokens = query.max_tokens - current_tokens
+                    
+                    if remaining_tokens > 0:
+                        filtered_context = []
+                        context_tokens = 0
+                        for context_hit in context_hits:
+                            hit_tokens = context_hit.token_count or 0
+                            if context_tokens + hit_tokens <= remaining_tokens:
+                                filtered_context.append(context_hit)
+                                context_tokens += hit_tokens
+                            else:
+                                truncated = True
+                                break
+                        context_hits = filtered_context
+                
+                # Merge context with target results (context first, then targets)
+                hits = context_hits + hits
+        
+        # Calculate total tokens
+        total_tokens = sum(hit.token_count or 0 for hit in hits)
+        
+        # Check if we had to truncate
+        if query.max_tokens and total_tokens >= query.max_tokens:
+            truncated = True
+        
+        payload = MemoryResults(
+            query=query.text, 
+            k=len([h for h in hits if h.context_type == "target"]), 
+            results=hits,
+            total_tokens=total_tokens,
+            strategy_used=strategy_used,
+            truncated=truncated
+        )
+        
+        logger.info(
+            "Memory results: %d total (%d targets), %d tokens, truncated=%s",
+            len(hits),
+            len([h for h in hits if h.context_type == "target"]),
+            total_tokens,
+            truncated
+        )
+        
         await self.mqtt_client.publish_event(
             client,
             event_type=EVENT_TYPE_MEMORY_RESULTS,
