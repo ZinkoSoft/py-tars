@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -33,6 +34,7 @@ class AudioFanoutPublisher:
         self._clients: set[asyncio.StreamWriter] = set()
         self._closing = False
         self._residual = bytearray()
+        self._healthcheck_counter = 0  # Track healthcheck connections
 
     async def start(self) -> None:
         if self._server is not None:
@@ -95,9 +97,18 @@ class AudioFanoutPublisher:
 
     async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         peer = self._describe_peer(writer)
-        _LOG.info("Audio fan-out client connected: %s", peer)
+        connect_time = time.time()
+        
+        # Only log every 10th connection to reduce healthcheck noise
+        self._healthcheck_counter += 1
+        if self._healthcheck_counter % 10 == 1:  # Log 1st, 11th, 21st, etc.
+            _LOG.info("Audio fan-out client connected: %s", peer)
+        else:
+            _LOG.debug("Audio fan-out client connected: %s (connection #%d)", peer, self._healthcheck_counter)
+        
         self._clients.add(writer)
         try:
+            # Keep connection open and read data until client disconnects
             await reader.read()
         except Exception:  # pragma: no cover - best effort
             pass
@@ -106,7 +117,16 @@ class AudioFanoutPublisher:
             writer.close()
             with contextlib.suppress(Exception):
                 await writer.wait_closed()
-            _LOG.info("Audio fan-out client disconnected: %s", peer)
+            
+            # Log disconnect with duration info, reduced frequency for short connections
+            connection_duration = time.time() - connect_time
+            if connection_duration < 0.5:  # Less than 500ms = probably healthcheck
+                _LOG.debug("Audio fan-out client disconnected: %s (duration: %.3fs)", peer, connection_duration)
+            else:
+                _LOG.info("Audio fan-out client disconnected: %s (duration: %.3fs)", peer, connection_duration)
+            connection_duration = time.time() - connect_time
+            if connection_duration >= 0.2:  # 200ms+ = probably real connection
+                _LOG.debug("Audio fan-out client disconnected: %s (duration: %.3fs)", peer, connection_duration)
 
     async def _broadcast_loop(self) -> None:
         while True:
