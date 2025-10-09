@@ -30,7 +30,8 @@ class RAGHandler:
     
     async def query(
         self, 
-        client: mqtt.Client, 
+        mqtt_client,  # MQTTClient wrapper
+        client: mqtt.Client,  # Raw MQTT client
         prompt: str, 
         top_k: int, 
         correlation_id: str,
@@ -58,24 +59,37 @@ class RAGHandler:
         self._pending_queries[correlation_id] = future
         
         try:
-            payload = {
-                "text": prompt, 
-                "top_k": top_k,
-                "max_tokens": max_tokens,
-                "include_context": include_context,
-                "context_window": context_window,
-                "retrieval_strategy": retrieval_strategy,
-                "id": correlation_id
-            }
+            # Create MemoryQuery payload
+            from tars.contracts.v1 import EVENT_TYPE_MEMORY_QUERY
+            from tars.contracts.v1.memory import MemoryQuery
             
-            await client.publish(self.memory_query_topic, json.dumps(payload))
+            query = MemoryQuery(
+                text=prompt,
+                top_k=top_k,
+                max_tokens=max_tokens,
+                include_context=include_context,
+                context_window=context_window,
+                retrieval_strategy=retrieval_strategy
+            )
+            
+            # Publish using envelope with correlation ID
+            await mqtt_client.publish_event(
+                client,
+                event_type=EVENT_TYPE_MEMORY_QUERY,
+                topic=self.memory_query_topic,
+                payload=query,
+                correlate=correlation_id,
+                qos=1,
+                retain=False
+            )
             logger.debug(
                 "Published enhanced RAG query: correlation_id=%s, strategy=%s, max_tokens=%s, context=%s",
                 correlation_id, retrieval_strategy, max_tokens, include_context
             )
             
-            # Wait with timeout
-            context = await asyncio.wait_for(future, timeout=5.0)
+            # Wait with timeout (10s for embedding + BM25 + context expansion)
+            # Now that message loop is non-blocking, memory/results can be processed immediately
+            context = await asyncio.wait_for(future, timeout=10.0)
             return context
             
         except asyncio.TimeoutError:
@@ -90,7 +104,8 @@ class RAGHandler:
     
     async def query_with_token_budget(
         self, 
-        client: mqtt.Client, 
+        mqtt_client,  # MQTTClient wrapper
+        client: mqtt.Client,  # Raw MQTT client
         prompt: str, 
         max_tokens: int,
         correlation_id: str,
@@ -103,7 +118,7 @@ class RAGHandler:
             Tuple of (context_string, token_count)
         """
         context = await self.query(
-            client, prompt, top_k, correlation_id, 
+            mqtt_client, client, prompt, top_k, correlation_id, 
             max_tokens=max_tokens, include_context=include_context
         )
         return context.content, context.token_count

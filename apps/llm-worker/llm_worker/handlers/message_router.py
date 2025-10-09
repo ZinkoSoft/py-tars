@@ -58,6 +58,9 @@ class MessageRouter:
         """
         topic = str(getattr(message, "topic", ""))
         
+        # Debug: log all received topics
+        logger.debug("Received message on topic: %s", topic)
+        
         # Character updates
         if topic == character_current_topic:
             await self._handle_character_current(message)
@@ -96,9 +99,23 @@ class MessageRouter:
         
         # Memory/RAG results
         if topic == memory_results_topic:
+            logger.info("MEMORY RESULTS MESSAGE RECEIVED: topic=%s, payload_size=%d", topic, len(message.payload))
             try:
-                data = json.loads(message.payload)
+                # Parse envelope to extract data and correlation ID
+                envelope = Envelope.model_validate_json(message.payload)
+                data = envelope.data if isinstance(envelope.data, dict) else {}
+                # Add correlation ID to data for RAG handler
+                data["correlate"] = envelope.id
+                logger.debug("Memory results received: envelope_id=%s, data_keys=%s", envelope.id, list(data.keys()))
                 self.rag_handler.handle_results(data)
+            except ValidationError:
+                # Fallback to direct JSON parsing for backward compatibility
+                try:
+                    data = json.loads(message.payload)
+                    logger.info("MEMORY RESULTS FALLBACK PARSING: data_keys=%s", list(data.keys()) if isinstance(data, dict) else "not_dict")
+                    self.rag_handler.handle_results(data)
+                except Exception as e:
+                    logger.warning("Failed to parse memory/results payload: %s", e)
             except Exception as e:
                 logger.warning("Failed to handle memory/results: %s", e)
             return

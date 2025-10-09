@@ -180,18 +180,22 @@ class LLMService:
                 await asyncio.sleep(0.5)
                 logger.info("Starting message processing loop")
                 
-                # Process messages via router
+                # Process messages via router - spawn as background tasks for concurrency
+                # This allows memory/results to be processed while LLM requests are in-flight
                 async for m in self.mqtt_client.message_stream(client):
                     logger.debug("Message received: topic=%s payload_size=%d", m.topic, len(m.payload))
-                    await self.router.route_message(
-                        client,
-                        m,
-                        character_current_topic=TOPIC_CHARACTER_CURRENT,
-                        character_result_topic=TOPIC_CHARACTER_RESULT,
-                        tools_registry_topic=TOPIC_TOOLS_REGISTRY,
-                        tools_result_topic=TOPIC_TOOL_CALL_RESULT,
-                        memory_results_topic=TOPIC_MEMORY_RESULTS,
-                        llm_request_topic=TOPIC_LLM_REQUEST,
+                    # Spawn message handling as background task to avoid blocking the message loop
+                    asyncio.create_task(
+                        self.router.route_message(
+                            client,
+                            m,
+                            character_current_topic=TOPIC_CHARACTER_CURRENT,
+                            character_result_topic=TOPIC_CHARACTER_RESULT,
+                            tools_registry_topic=TOPIC_TOOLS_REGISTRY,
+                            tools_result_topic=TOPIC_TOOL_CALL_RESULT,
+                            memory_results_topic=TOPIC_MEMORY_RESULTS,
+                            llm_request_topic=TOPIC_LLM_REQUEST,
+                        )
                     )
         except Exception as e:
             logger.info("MQTT disconnected or error: %s; shutting down gracefully", e)

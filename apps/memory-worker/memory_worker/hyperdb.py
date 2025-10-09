@@ -38,7 +38,7 @@ def cosine_similarity(vectors: np.ndarray, q: np.ndarray) -> np.ndarray:
 class HyperConfig:
     rag_strategy: str = "hybrid"  # naive | hybrid
     top_k: int = 5
-    rerank_model: str | None = "ms-marco-MiniLM-L-12-v2"
+    rerank_model: str | None = None  # Disabled by default (adds ~1.5s overhead). Set to "ms-marco-MiniLM-L-12-v2" to enable
     rerank_cache: str | None = "/data/flashrank_cache"
 
 

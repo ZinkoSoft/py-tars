@@ -97,8 +97,8 @@ class MQTTClient:
         
         # Optional RAG subscription
         if rag_enabled and memory_results_topic:
-            await client.subscribe(memory_results_topic)
-            logger.info("Subscribed to %s for RAG queries", memory_results_topic)
+            await client.subscribe(memory_results_topic, qos=1)
+            logger.info("Subscribed to %s for RAG queries (QoS 1)", memory_results_topic)
         
         # Optional tool calling subscriptions
         if tool_calling_enabled:

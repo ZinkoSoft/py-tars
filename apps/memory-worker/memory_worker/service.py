@@ -78,6 +78,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("memory-worker")
 
+# Suppress verbose third-party library logging
+logging.getLogger("bm25s").setLevel(logging.WARNING)
+
 
 class STEmbedder:
     """SentenceTransformer embedding wrapper with async support.
@@ -129,7 +132,11 @@ class MemoryService:
         os.makedirs(MEMORY_DIR, exist_ok=True)
         self.database_path = os.path.join(MEMORY_DIR, MEMORY_FILE)
         self.embedder = STEmbedder(EMBED_MODEL)
-        self.db = HyperDB(embedding_fn=self.embedder, cfg=HyperConfig(rag_strategy=RAG_STRATEGY, top_k=TOP_K))
+        rerank_model = os.getenv("RERANK_MODEL", None)  # None = disabled (faster), "ms-marco-MiniLM-L-12-v2" = enabled (slower but better)
+        self.db = HyperDB(
+            embedding_fn=self.embedder,
+            cfg=HyperConfig(rag_strategy=RAG_STRATEGY, top_k=TOP_K, rerank_model=rerank_model)
+        )
         self._load_or_initialize_db()
         self.character = self._load_character()
         self.mqtt_client = MemoryMQTTClient(MQTT_URL, source_name=SOURCE_NAME)
@@ -647,7 +654,7 @@ class MemoryService:
             self.db.save(self.database_path)
         except Exception:
             logger.debug("Failed to persist memory db after ingest", exc_info=True)
-        logger.info("Indexed new doc into memory store from %s", topic)
+        logger.debug("Indexed doc from %s (total: %d)", topic, len(self.db.documents))
 
     def _coerce_transcript(self, data: dict[str, Any]) -> dict[str, Any] | None:
         try:

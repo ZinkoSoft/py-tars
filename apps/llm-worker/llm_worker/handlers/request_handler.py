@@ -215,8 +215,10 @@ class RequestHandler:
         # Enhanced RAG query if enabled
         if params["use_rag"]:
             # Use enhanced RAG with context expansion and token awareness
+            # Enhanced RAG query with context expansion and token awareness
             rag_context = await self.rag_handler.query(
-                client,
+                self.mqtt_client,  # MQTT wrapper for proper envelope publishing
+                client,  # Raw MQTT client
                 text,
                 top_k=params["rag_k"],
                 correlation_id=params["correlation_id"],
@@ -321,7 +323,8 @@ class RequestHandler:
             rag_budget = min(memory_budget // 2, params.get("rag_max_tokens", 2000))  # Up to half the budget
             
             rag_context = await self.rag_handler.query(
-                client,
+                self.mqtt_client,  # MQTT wrapper
+                client,  # Raw MQTT client
                 text,
                 top_k=params["rag_k"],
                 correlation_id=params["correlation_id"],
