@@ -20,7 +20,7 @@ def mock_handlers():
     character_handler.get_name = MagicMock(return_value="TARS")
     
     tool_handler = MagicMock()
-    tool_handler.load_tools = AsyncMock()
+    tool_handler.load_tools_from_registry = AsyncMock()
     
     rag_handler = MagicMock()
     rag_handler.handle_results = MagicMock()
@@ -73,6 +73,7 @@ async def test_route_character_current(router, mock_client, mock_handlers):
         character_current_topic="system/character/current",
         character_result_topic="character/result",
         tools_registry_topic="tools/registry",
+        tools_result_topic="tools/result",
         memory_results_topic="memory/results",
         llm_request_topic="llm/request",
     )
@@ -93,6 +94,7 @@ async def test_route_character_result_full_snapshot(router, mock_client, mock_ha
         character_current_topic="system/character/current",
         character_result_topic="character/result",
         tools_registry_topic="tools/registry",
+        tools_result_topic="tools/result",
         memory_results_topic="memory/results",
         llm_request_topic="llm/request",
     )
@@ -112,6 +114,7 @@ async def test_route_character_result_section_update(router, mock_client, mock_h
         character_current_topic="system/character/current",
         character_result_topic="character/result",
         tools_registry_topic="tools/registry",
+        tools_result_topic="tools/result",
         memory_results_topic="memory/results",
         llm_request_topic="llm/request",
     )
@@ -131,6 +134,7 @@ async def test_route_character_result_partial_update(router, mock_client, mock_h
         character_current_topic="system/character/current",
         character_result_topic="character/result",
         tools_registry_topic="tools/registry",
+        tools_result_topic="tools/result",
         memory_results_topic="memory/results",
         llm_request_topic="llm/request",
     )
@@ -150,11 +154,12 @@ async def test_route_tools_registry(router, mock_client, mock_handlers):
         character_current_topic="system/character/current",
         character_result_topic="character/result",
         tools_registry_topic="tools/registry",
+        tools_result_topic="tools/result",
         memory_results_topic="memory/results",
         llm_request_topic="llm/request",
     )
     
-    mock_handlers["tool"].load_tools.assert_called_once()
+    mock_handlers["tool"].load_tools_from_registry.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -169,6 +174,7 @@ async def test_route_memory_results(router, mock_client, mock_handlers):
         character_current_topic="system/character/current",
         character_result_topic="character/result",
         tools_registry_topic="tools/registry",
+        tools_result_topic="tools/result",
         memory_results_topic="memory/results",
         llm_request_topic="llm/request",
     )
@@ -189,6 +195,7 @@ async def test_route_llm_request(router, mock_client, mock_handlers):
         character_current_topic="system/character/current",
         character_result_topic="character/result",
         tools_registry_topic="tools/registry",
+        tools_result_topic="tools/result",
         memory_results_topic="memory/results",
         llm_request_topic="llm/request",
     )
@@ -207,6 +214,7 @@ async def test_route_unknown_topic(router, mock_client, mock_handlers):
         character_current_topic="system/character/current",
         character_result_topic="character/result",
         tools_registry_topic="tools/registry",
+        tools_result_topic="tools/result",
         memory_results_topic="memory/results",
         llm_request_topic="llm/request",
     )
@@ -230,6 +238,7 @@ async def test_handle_character_current_invalid_json(router, mock_client, mock_h
         character_current_topic="system/character/current",
         character_result_topic="character/result",
         tools_registry_topic="tools/registry",
+        tools_result_topic="tools/result",
         memory_results_topic="memory/results",
         llm_request_topic="llm/request",
     )
@@ -249,6 +258,7 @@ async def test_handle_character_result_invalid_envelope(router, mock_client, moc
         character_current_topic="system/character/current",
         character_result_topic="character/result",
         tools_registry_topic="tools/registry",
+        tools_result_topic="tools/result",
         memory_results_topic="memory/results",
         llm_request_topic="llm/request",
     )

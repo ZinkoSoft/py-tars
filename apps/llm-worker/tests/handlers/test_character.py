@@ -102,13 +102,17 @@ def test_build_system_prompt_with_systemprompt(character_mgr):
     
     result = character_mgr.build_system_prompt()
     assert "You are TARS, a helpful robot." in result
-    assert "You are TARS. Traits:" in result
+    assert "Personality Metrics:" in result
     assert "humor: 90%" in result
     assert "honesty: 100%" in result
 
 
 def test_build_system_prompt_with_systemprompt_and_description(character_mgr):
-    """Test system prompt with systemprompt, traits, and description."""
+    """Test system prompt with systemprompt, traits, and description.
+    
+    Note: When systemprompt is present, it takes precedence over description.
+    Description is only used as a fallback when systemprompt is absent.
+    """
     character_mgr.character = {
         "name": "TARS",
         "systemprompt": "Custom system prompt.",
@@ -118,8 +122,8 @@ def test_build_system_prompt_with_systemprompt_and_description(character_mgr):
     
     result = character_mgr.build_system_prompt()
     assert "Custom system prompt." in result
-    assert "You are TARS. Traits:" in result
-    assert "A tactical robot." in result
+    assert "Personality Metrics:" in result
+    # Description is not included when systemprompt is present
 
 
 def test_build_system_prompt_traits_only(character_mgr):
@@ -131,7 +135,7 @@ def test_build_system_prompt_traits_only(character_mgr):
     
     result = character_mgr.build_system_prompt()
     assert result is not None
-    assert "You are TARS. Traits:" in result
+    assert "Personality Metrics:" in result
     assert "humor: 90%" in result
     assert "honesty: 100%" in result
 
@@ -145,7 +149,7 @@ def test_build_system_prompt_traits_and_description(character_mgr):
     }
     
     result = character_mgr.build_system_prompt()
-    assert "You are TARS. Traits:" in result
+    assert "Personality Metrics:" in result
     assert "humor: 90%" in result
     assert "Tactical Assistant Robot System" in result
 
@@ -189,4 +193,4 @@ def test_build_system_prompt_default_name(character_mgr):
     character_mgr.character = {"traits": {"humor": "90%"}}
     
     result = character_mgr.build_system_prompt()
-    assert "You are Assistant. Traits:" in result
+    assert "Personality Metrics:" in result

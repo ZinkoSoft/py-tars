@@ -57,7 +57,7 @@ async def test_load_tools_from_registry(tool_executor, mock_mcp_client):
     assert tool_executor.tools[0]["name"] == "get_weather"
     assert tool_executor._initialized is True
     mock_mcp_client.initialize_from_registry.assert_called_once_with(registry_payload)
-    mock_mcp_client.connect_to_server.assert_called_once()
+    # Note: Servers connect on-demand, not during initialization
 
 
 @pytest.mark.asyncio
