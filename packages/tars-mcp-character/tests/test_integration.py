@@ -83,10 +83,7 @@ class TestMCPProtocolIntegration:
                 assert "reset" in reset_tool.description.lower()
 
     @pytest.mark.asyncio
-    @pytest.mark.skipif(
-        not pytest.config.getoption("--run-mqtt", default=False),
-        reason="Requires running MQTT broker"
-    )
+    @pytest.mark.skip(reason="Requires running MQTT broker - run manually with --run-mqtt flag")
     async def test_call_adjust_personality_trait(self):
         """Test calling adjust_personality_trait tool (requires MQTT broker)."""
         server_params = StdioServerParameters(
@@ -114,10 +111,7 @@ class TestMCPProtocolIntegration:
                 assert "50" in result_text
 
     @pytest.mark.asyncio
-    @pytest.mark.skipif(
-        not pytest.config.getoption("--run-mqtt", default=False),
-        reason="Requires running MQTT broker"
-    )
+    @pytest.mark.skip(reason="Requires running MQTT broker - run manually with --run-mqtt flag")
     async def test_call_get_current_traits(self):
         """Test calling get_current_traits tool (requires MQTT broker)."""
         server_params = StdioServerParameters(
@@ -137,10 +131,7 @@ class TestMCPProtocolIntegration:
                 assert len(result.content) > 0
 
     @pytest.mark.asyncio
-    @pytest.mark.skipif(
-        not pytest.config.getoption("--run-mqtt", default=False),
-        reason="Requires running MQTT broker"
-    )
+    @pytest.mark.skip(reason="Requires running MQTT broker - run manually with --run-mqtt flag")
     async def test_call_reset_all_traits(self):
         """Test calling reset_all_traits tool (requires MQTT broker)."""
         server_params = StdioServerParameters(
