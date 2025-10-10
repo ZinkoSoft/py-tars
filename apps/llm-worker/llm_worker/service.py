@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any, Dict
 
 from .mqtt_client import MQTTClient
@@ -25,6 +26,7 @@ from .config import (
     RAG_CONTEXT_WINDOW,
     RAG_STRATEGY,
     RAG_DYNAMIC_PROMPTS,
+    RAG_CACHE_TTL,
     TOPIC_LLM_REQUEST,
     TOPIC_LLM_RESPONSE,
     TOPIC_LLM_STREAM,
@@ -88,7 +90,7 @@ class LLMService:
         # Handlers for different responsibilities
         self.character_mgr = CharacterManager()
         self.tool_executor = ToolExecutor()
-        self.rag_handler = RAGHandler(TOPIC_MEMORY_QUERY)
+        self.rag_handler = RAGHandler(TOPIC_MEMORY_QUERY, cache_ttl=RAG_CACHE_TTL)
         
         # Build config dict for request handler
         self.config = self._build_config()
@@ -178,6 +180,14 @@ class LLMService:
                 # CRITICAL: Small delay to allow retained messages to arrive before starting message loop
                 # This ensures tool registry and character state are received before processing requests
                 await asyncio.sleep(0.5)
+                
+                # Warm up memory service if RAG is enabled (Priority 3)
+                # This eliminates cold start penalty on first real query
+                if RAG_ENABLED:
+                    asyncio.create_task(self._warmup_memory(client))
+                    # Start periodic metrics logging (Priority 4)
+                    asyncio.create_task(self._periodic_metrics_logging())
+                
                 logger.info("Starting message processing loop")
                 
                 # Process messages via router - spawn as background tasks for concurrency
@@ -199,6 +209,55 @@ class LLMService:
                     )
         except Exception as e:
             logger.info("MQTT disconnected or error: %s; shutting down gracefully", e)
+    
+    async def _warmup_memory(self, client: Any) -> None:
+        """Warm up memory service to eliminate cold start penalty (Priority 3).
+        
+        Sends a dummy query to pre-load embedder and ensure fast first real query.
+        Runs in background without blocking startup.
+        """
+        try:
+            # Wait a bit longer for memory service to be ready
+            await asyncio.sleep(1.0)
+            
+            import uuid
+            warmup_id = f"warmup-{uuid.uuid4().hex[:8]}"
+            
+            logger.info("Starting memory service warm-up...")
+            start_time = time.time()
+            
+            # Send a simple warm-up query (won't cache due to unique correlation ID)
+            await self.rag_handler.query(
+                mqtt_client=self.mqtt_client,
+                client=client,
+                prompt="system initialization",
+                top_k=1,
+                correlation_id=warmup_id,
+                use_cache=False  # Don't cache warmup queries
+            )
+            
+            elapsed = time.time() - start_time
+            logger.info("Memory service warmed up successfully: %.3fs", elapsed)
+            
+        except asyncio.TimeoutError:
+            logger.warning("Memory warm-up timeout (service may not be ready yet)")
+        except Exception as e:
+            logger.warning("Memory warm-up failed (non-critical): %s", e)
+    
+    async def _periodic_metrics_logging(self) -> None:
+        """Periodically log RAG metrics for observability (Priority 4).
+        
+        Runs in background and logs metrics every 5 minutes.
+        """
+        try:
+            while True:
+                await asyncio.sleep(300)  # Log every 5 minutes
+                self.rag_handler.log_metrics()
+        except asyncio.CancelledError:
+            logger.debug("Metrics logging task cancelled")
+            raise
+        except Exception as e:
+            logger.warning("Metrics logging error: %s", e)
 
 
 def main() -> int:

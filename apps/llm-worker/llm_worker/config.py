@@ -73,6 +73,7 @@ RAG_INCLUDE_CONTEXT = env_bool("RAG_INCLUDE_CONTEXT", True)  # Include surroundi
 RAG_CONTEXT_WINDOW = env_int("RAG_CONTEXT_WINDOW", 1)  # Number of prev/next entries
 RAG_STRATEGY = env_str("RAG_STRATEGY", "hybrid")  # "hybrid", "recent", "similarity"
 RAG_DYNAMIC_PROMPTS = env_bool("RAG_DYNAMIC_PROMPTS", True)  # Enable token-aware prompt building
+RAG_CACHE_TTL = env_int("RAG_CACHE_TTL", 300)  # Cache TTL in seconds (default 5 minutes)
 
 # Topics
 TOPIC_LLM_REQUEST = env_str("TOPIC_LLM_REQUEST", "llm/request")
