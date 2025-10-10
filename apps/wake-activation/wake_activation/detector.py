@@ -137,9 +137,12 @@ class _RKNNBackend:
         # This matches the expected input format for most RKNN wake word models
         frame_float = frame.astype(np.float32) / _INT16_MAX
         
-        # Ensure proper shape for RKNN inference (add batch dimension if needed)
+        # Ensure proper shape for RKNN inference: [batch, channels, samples]
+        # Most audio models expect [1, 1, num_samples] for mono audio
         if frame_float.ndim == 1:
-            frame_float = frame_float.reshape(1, -1)
+            frame_float = frame_float.reshape(1, 1, -1)  # Add batch and channel dims
+        elif frame_float.ndim == 2:
+            frame_float = frame_float.reshape(1, frame_float.shape[0], frame_float.shape[1])  # Add batch dim
         
         try:
             # Run inference on NPU

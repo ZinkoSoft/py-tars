@@ -360,6 +360,8 @@ services:
     build:
       context: ..
       dockerfile: docker/specialized/memory-worker.Dockerfile
+      args:
+        NPU_EMBEDDER_ENABLED: ${NPU_EMBEDDER_ENABLED:-0}
     image: tars/memory:dev
     container_name: tars-memory
     env_file: ../.env
@@ -375,11 +377,21 @@ services:
       EMBED_MODEL: ${EMBED_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
       RAG_STRATEGY: ${RAG_STRATEGY:-hybrid}
       MEMORY_TOP_K: ${MEMORY_TOP_K:-5}
+      # NPU embedder settings (when NPU_EMBEDDER_ENABLED=1)
+      NPU_EMBEDDER_ENABLED: ${NPU_EMBEDDER_ENABLED:-0}
+      RKNN_EMBEDDER_PATH: ${RKNN_EMBEDDER_PATH:-/data/model_cache/embedder/all-MiniLM-L6-v2.rknn}
+      NPU_CORE_MASK: ${NPU_CORE_MASK:-0}
+      NPU_FALLBACK_CPU: ${NPU_FALLBACK_CPU:-1}
       PYTHONPATH: /workspace/apps/memory-worker
     volumes:
       - ../data/memory:/data
+      - ../data/model_cache:/data/model_cache
       - ../apps/voice/characters:/config/characters:ro
       - ..:/workspace:ro
+      - /proc/device-tree/compatible:/proc/device-tree/compatible:ro
+      - /lib/librknnrt.so:/usr/lib/aarch64-linux-gnu/librknnrt.so:ro
+    devices:
+      - /dev/dri/renderD129:/dev/dri/renderD129
     depends_on:
       mqtt:
         condition: service_started

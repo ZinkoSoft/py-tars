@@ -131,7 +131,11 @@ class MemoryService:
         self._register_topics()
         os.makedirs(MEMORY_DIR, exist_ok=True)
         self.database_path = os.path.join(MEMORY_DIR, MEMORY_FILE)
-        self.embedder = STEmbedder(EMBED_MODEL)
+        
+        # Create embedder with automatic NPU/CPU detection
+        from .embedder_factory import create_embedder
+        self.embedder = create_embedder(EMBED_MODEL)
+        
         rerank_model = os.getenv("RERANK_MODEL", None)  # None = disabled (faster), "ms-marco-MiniLM-L-12-v2" = enabled (slower but better)
         self.db = HyperDB(
             embedding_fn=self.embedder,

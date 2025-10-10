@@ -93,26 +93,41 @@ def check_npu_availability() -> Tuple[bool, str]:
     
     # Check permissions
     if device_available:
-        user_groups = os.getgroups()
-        render_gid = None
-        video_gid = None
-        
-        try:
-            import grp
-            render_gid = grp.getgrnam("render").gr_gid
-            video_gid = grp.getgrnam("video").gr_gid
-        except KeyError:
-            pass
-        
-        if render_gid and render_gid in user_groups:
-            status_messages.append("✅ User is in render group")
-            perms_ok = True
-        elif video_gid and video_gid in user_groups:
-            status_messages.append("✅ User is in video group")
+        # Root user always has access
+        if os.getuid() == 0:
+            status_messages.append("✅ Running as root (full device access)")
             perms_ok = True
         else:
-            status_messages.append("❌ User not in render/video groups - run: sudo usermod -aG render,video $USER")
-            perms_ok = False
+            user_groups = os.getgroups()
+            render_gid = None
+            video_gid = None
+            
+            try:
+                import grp
+                # Try to get render/video group IDs by name
+                try:
+                    render_gid = grp.getgrnam("render").gr_gid
+                except KeyError:
+                    # Render group doesn't exist by name, check for common render GID (992)
+                    if 992 in user_groups:
+                        render_gid = 992
+                
+                try:
+                    video_gid = grp.getgrnam("video").gr_gid
+                except KeyError:
+                    pass
+            except Exception:
+                pass
+            
+            if render_gid and render_gid in user_groups:
+                status_messages.append(f"✅ User is in render group (GID {render_gid})")
+                perms_ok = True
+            elif video_gid and video_gid in user_groups:
+                status_messages.append(f"✅ User is in video group (GID {video_gid})")
+                perms_ok = True
+            else:
+                status_messages.append("❌ User not in render/video groups - run: sudo usermod -aG render,video $USER")
+                perms_ok = False
     else:
         perms_ok = False
     

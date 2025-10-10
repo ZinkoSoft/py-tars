@@ -15,19 +15,27 @@ name: tars-stack
 services:
   # Override the default wake-activation service for NPU acceleration
   wake-activation:
-    # Use the same image but with NPU-specific configuration
+    # Use NPU-enabled Dockerfile
+    build:
+      context: ..
+      dockerfile: apps/wake-activation/Dockerfile.npu
+    image: tars/wake-activation:npu
     container_name: tars-wake-activation-npu
+    user: "0:0"  # Run as root to access audio fan-out socket
     privileged: true  # Required for NPU device access
+    group_add:
+      - "992"  # render group for NPU access
     devices:
       - "/dev/rknpu:/dev/rknpu"
       - "/dev/dri:/dev/dri" 
       - "/dev/mali0:/dev/mali0"
     environment:
-      # Override to enable NPU
-      WAKE_USE_NPU: 1
-      WAKE_RKNN_MODEL_PATH: ${WAKE_RKNN_MODEL_PATH:-/models/openwakeword/hey_tars.rknn}
-      WAKE_NPU_CORE_MASK: ${WAKE_NPU_CORE_MASK:-0}
-      RKNN_LOG_LEVEL: ${RKNN_LOG_LEVEL:-3}
+      # Disable NPU for wake detection (requires mel preprocessing, not worth complexity)
+      # CPU wake detection is fast enough (<5ms per frame)
+      WAKE_USE_NPU: 0
+      # WAKE_RKNN_MODEL_PATH: ${WAKE_RKNN_MODEL_PATH:-/models/openwakeword/hey_tars.rknn}
+      # WAKE_NPU_CORE_MASK: ${WAKE_NPU_CORE_MASK:-0}
+      # RKNN_LOG_LEVEL: ${RKNN_LOG_LEVEL:-3}
       # Keep all other environment variables from base service
       MQTT_URL: mqtt://mqtt:1883
       MQTT_HOST: mqtt
@@ -64,3 +72,47 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+
+  # Override the memory service for NPU-accelerated embeddings
+  memory:
+    build:
+      args:
+        NPU_EMBEDDER_ENABLED: 1
+    container_name: tars-memory-npu
+    privileged: true  # Required for NPU device access
+    group_add:
+      - "992"  # render group for NPU access
+    devices:
+      - "/dev/rknpu:/dev/rknpu"
+      - "/dev/dri:/dev/dri"
+      - "/dev/mali0:/dev/mali0"
+    environment:
+      # Override to enable NPU
+      NPU_EMBEDDER_ENABLED: 1
+      RKNN_EMBEDDER_PATH: ${RKNN_EMBEDDER_PATH:-/data/model_cache/embedder/all-MiniLM-L6-v2.rknn}
+      NPU_CORE_MASK: ${NPU_CORE_MASK:-0}
+      NPU_FALLBACK_CPU: ${NPU_FALLBACK_CPU:-1}
+      # Keep all other environment variables from base service
+      MQTT_URL: mqtt://mqtt:1883
+      MQTT_HOST: mqtt
+      MQTT_PORT: "1883"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      MEMORY_DIR: /data
+      MEMORY_FILE: memory.pickle.gz
+      CHARACTER_NAME: ${CHARACTER_NAME:-TARS}
+      CHARACTER_DIR: /config/characters
+      EMBED_MODEL: ${EMBED_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      RAG_STRATEGY: ${RAG_STRATEGY:-hybrid}
+      MEMORY_TOP_K: ${MEMORY_TOP_K:-5}
+      PYTHONPATH: /workspace/apps/memory-worker
+    # Add NPU-specific volume mounts
+    volumes:
+      # Base volumes from original service
+      - ../data/memory:/data
+      - ../data/model_cache:/data/model_cache
+      - ../apps/voice/characters:/config/characters:ro
+      - ..:/workspace:ro
+      # NPU-specific mounts
+      - "/dev/dri/renderD129:/dev/dri/renderD129"
+      - "/proc/device-tree/compatible:/proc/device-tree/compatible:ro"
+      - "/usr/lib/librknnrt.so:/usr/lib/librknnrt.so:ro"

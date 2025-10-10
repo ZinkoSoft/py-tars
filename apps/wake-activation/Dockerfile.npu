@@ -69,14 +69,12 @@ RUN pip install --no-cache-dir --break-system-packages \
     rknn-toolkit-lite2==2.3.2
 
 # Create directories
-RUN mkdir -p /app/wake_activation /app/scripts /app/tests /tmp/tars
+RUN mkdir -p /app/wake_activation /app/scripts /tmp/tars
 
-# Copy wake activation module
-COPY wake_activation/ /app/wake_activation/
-COPY scripts/ /app/scripts/
-COPY tests/ /app/tests/
-COPY pyproject.toml /app/
-COPY README.md /app/
+# Copy wake activation module (from build context root)
+COPY apps/wake-activation/wake_activation/ /app/wake_activation/
+COPY apps/wake-activation/pyproject.toml /app/
+COPY apps/wake-activation/README.md /app/
 
 # Create entrypoint script with NPU device listing for debugging
 RUN cat > /app/entrypoint.sh << 'EOF'
@@ -124,7 +122,7 @@ except Exception as e:
 EOF
 
 # Make scripts executable
-RUN chmod +x /app/entrypoint.sh /app/healthcheck.sh /app/scripts/*.py
+RUN chmod +x /app/entrypoint.sh /app/healthcheck.sh
 
 # Create non-root user for security (matching SenseVoice pattern)
 RUN groupadd -f render && \
