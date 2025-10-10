@@ -51,23 +51,16 @@ install_requirements() {
     fi
   done
 
-  local requirements=(
-    "apps/stt-worker/requirements.txt"
-    "apps/tts-worker/requirements.txt"
-    "apps/llm-worker/requirements.txt"
-    "apps/memory-worker/requirements.txt"
-    "apps/ui/requirements.txt"
-    "apps/ui-web/requirements.txt"
-    "server/stt-ws/requirements.txt"    
-  )
+  # Install tars-mcp-character package (for MCP tests)
+  if [[ -f "${REPO_ROOT}/packages/tars-mcp-character/pyproject.toml" ]]; then
+    info "Installing tars-mcp-character package (editable)"
+    pip install -e "${REPO_ROOT}/packages/tars-mcp-character"
+  fi
 
-  for rel_path in "${requirements[@]}"; do
-    local abs_path="${REPO_ROOT}/${rel_path}"
-    if [[ -f "${abs_path}" ]]; then
-      info "Installing dependencies from ${rel_path}"
-      pip install --upgrade -r "${abs_path}"
-    fi
-  done
+  # NOTE: We intentionally do NOT install requirements.txt files here.
+  # requirements.txt files are Docker-specific lockfiles with pinned versions
+  # that can conflict when installed into a shared test venv.
+  # Tests should use the dependency ranges defined in pyproject.toml files.
 
   info "Ensuring pytest tooling is available"
   pip install --upgrade pytest pytest-asyncio
