@@ -272,8 +272,39 @@ else
 fi
 
 # ============================================
+# Step 3.5: Check for existing configuration
+# ============================================
+echo ""
+SKIP_CONFIG_GENERATION=false
+if [[ -f "$CONFIG_FILE" ]]; then
+    info "Existing movement_config.json found"
+    read -p "Keep existing config? [Y/n]: " KEEP_CONFIG
+    KEEP_CONFIG="${KEEP_CONFIG:-Y}"
+    
+    if [[ "$KEEP_CONFIG" =~ ^[Yy]$ ]]; then
+        success "✓ Using existing: $CONFIG_FILE"
+        SKIP_CONFIG_GENERATION=true
+        
+        # Skip WiFi and MQTT client ID configuration
+        echo ""
+        info "Skipping WiFi and MQTT configuration (using existing config)"
+        
+        # Set MQTT_CLIENT_ID from existing config or default
+        MQTT_CLIENT_ID="tars-esp32"
+        WIFI_SSID=""
+        
+        # Jump to flashing section
+        echo ""
+        info "Ready to flash ESP32 with existing configuration"
+    else
+        info "Will generate new configuration"
+    fi
+fi
+
+# ============================================
 # Step 4: WiFi Configuration
 # ============================================
+if [[ "$SKIP_CONFIG_GENERATION" == "false" ]]; then
 echo ""
 info "ESP32 Wi-Fi Configuration"
 echo ""
@@ -371,15 +402,17 @@ fi
 echo ""
 read -p "Enter MQTT Client ID [tars-esp32]: " MQTT_CLIENT_ID
 MQTT_CLIENT_ID="${MQTT_CLIENT_ID:-tars-esp32}"
+fi  # End of SKIP_CONFIG_GENERATION check for WiFi config
 
 # ============================================
 # Step 5: Generate configuration files
 # ============================================
-echo ""
-info "Generating configuration files..."
-
-# Generate movement_config.json
-# Handle empty WiFi credentials (will trigger ESP32 setup portal)
+if [[ "$SKIP_CONFIG_GENERATION" == "false" ]]; then
+    echo ""
+    info "Generating configuration files..."
+    
+    # Generate movement_config.json
+    # Handle empty WiFi credentials (will trigger ESP32 setup portal)
 if [[ -z "$WIFI_SSID" ]]; then
     cat > "$CONFIG_FILE" << EOF
 {
@@ -617,7 +650,10 @@ else
 EOF
 fi
 
-success "✓ Created: $CONFIG_FILE"
+    success "✓ Created: $CONFIG_FILE"
+else
+    success "✓ Using existing: $CONFIG_FILE"
+fi  # End of SKIP_CONFIG_GENERATION check for config generation
 
 # Generate main.py that auto-starts tars_controller.py
 cat > "$MAIN_FILE" << 'EOF'
@@ -927,31 +963,25 @@ upload_file() {
 
 # Function to upload a directory recursively with retry
 upload_directory() {
-    local dir="$1"
-    local dest="${2:-:$(basename "$dir")}"
-    local name=$(basename "$dir")
-    local retries=3
-    
-    if [[ ! -d "$dir" ]]; then
-        warn "Directory not found: $dir (skipping)"
-        return 0
-    fi
-    
-    for i in $(seq 1 $retries); do
-        info "Uploading directory $name/ (attempt $i/$retries)..."
-        if $MPREMOTE_CMD connect "$ESP_PORT" fs cp -r "$dir/" "$dest/" 2>&1; then
-            success "✓ Directory $name/ uploaded"
-            return 0
-        else
-            if [[ $i -lt $retries ]]; then
-                warn "Upload failed, retrying in 3 seconds..."
-                sleep 3
-            fi
-        fi
-    done
-    
-    error "Failed to upload directory $name/ after $retries attempts"
-    return 1
+  local dir="$1"
+  local dest="${2:-:$(basename "$dir")}"
+
+  [[ -d "$dir" ]] || { warn "Directory not found: $dir (skipping)"; return 0; }
+
+  info "Uploading directory $(basename "$dir")/ (recursive)..."
+  $MPREMOTE_CMD connect "$ESP_PORT" fs mkdir "$dest" >/dev/null 2>&1 || true
+
+  if $MPREMOTE_CMD connect "$ESP_PORT" fs cp -r "$dir/." "$dest" >/dev/null; then
+    success "✓ Directory $(basename "$dir")/ uploaded"
+    return 0
+  fi
+
+  warn "Upload failed; retrying in 2s..."
+  sleep 2
+  $MPREMOTE_CMD connect "$ESP_PORT" fs cp -r "$dir/." "$dest" >/dev/null \
+    && { success "✓ Directory $(basename "$dir")/ uploaded (retry)"; return 0; }
+
+  error "Failed to upload directory $(basename "$dir")/"
 }
 
 # Upload modular library (required for tars_controller)

@@ -54,6 +54,7 @@ from lib.led_status import LEDStatus
 # Phase 3 modules (NEW - just created!)
 from lib.wifi_manager import WiFiManager, SetupHTTPServer
 from lib.mqtt_client import MQTTClientWrapper
+from lib.mqtt_monitor import MQTTMonitor
 
 # Phase 4-5 modules (Movement sequences - TARS Integration)
 from movements import (
@@ -96,6 +97,7 @@ class TARSController:
         # Network components (Phase 3)
         self._mqtt_wrapper = None
         self._http_server = None
+        self._mqtt_monitor = None
         
         # Movement components (Phase 4-5)
         self.servo_config = None
@@ -134,10 +136,13 @@ class TARSController:
         # 3. Connect to WiFi (Phase 3: uses WiFiManager)
         self._connect_wifi()
         
-        # 4. Connect to MQTT (Phase 3: uses MQTTClientWrapper)
+        # 4. Start MQTT monitor web interface (before MQTT connection)
+        self._start_mqtt_monitor()
+        
+        # 5. Connect to MQTT (Phase 3: uses MQTTClientWrapper)
         self._connect_mqtt()
         
-        # 5. Start HTTP server for ongoing portal access
+        # 6. Start HTTP server for ongoing portal access
         self._start_http_server()
         
         print("=" * 50)
@@ -285,17 +290,22 @@ class TARSController:
                 except Exception:
                     pass
         
-        # Create MQTT wrapper with callbacks
+        # Create MQTT wrapper with callbacks and monitor
         self._mqtt_wrapper = MQTTClientWrapper(
             self.config,
             on_message,
-            on_publish
+            on_publish,
+            monitor=self._mqtt_monitor
         )
         
         # Connect to broker
         try:
             self._mqtt_wrapper.connect()
             print("✓ MQTT connected and subscribed to movement/frame")
+            
+            # Update monitor connection status
+            if self._mqtt_monitor:
+                self._mqtt_monitor.set_connected(True)
             
             # Subscribe to additional movement topics
             self._mqtt_wrapper.subscribe("movement/test", qos=1)
@@ -306,6 +316,33 @@ class TARSController:
             self._update_movement_handler_mqtt()
         except Exception as e:
             print(f"✗ MQTT connection failed: {e}")
+    
+    def _start_mqtt_monitor(self):
+        """
+        Start MQTT monitor web interface.
+        
+        Provides a real-time web interface showing MQTT message traffic.
+        Accessible at http://<esp32-ip>:8080/
+        """
+        print("\n--- MQTT Monitor (Web Interface) ---")
+        
+        if MQTTMonitor is None:
+            print("✗ MQTTMonitor not available")
+            return
+        
+        try:
+            monitor_port = self.config.get("mqtt_monitor", {}).get("port", 8080)
+            max_messages = self.config.get("mqtt_monitor", {}).get("max_messages", 50)
+            self._mqtt_monitor = MQTTMonitor(port=monitor_port, max_messages=max_messages)
+            
+            # Get IP for display
+            if self._station and self._station.isconnected():
+                ip = self._station.ifconfig()[0]
+                print(f"✓ MQTT Monitor: http://{ip}:{monitor_port}/")
+            else:
+                print(f"✓ MQTT Monitor started on port {monitor_port}")
+        except Exception as e:
+            print(f"✗ MQTT Monitor failed: {e}")
     
     def _start_http_server(self):
         """
@@ -323,7 +360,7 @@ class TARSController:
         try:
             # Note: SetupHTTPServer constructor signature may differ
             # This is a placeholder - adjust based on actual implementation
-            self._http_server = SetupHTTPServer()
+            self._http_server = SetupHTTPServer(self, 80)
             print("✓ HTTP server started")
         except Exception as e:
             print(f"✗ HTTP server failed: {e}")
@@ -340,6 +377,10 @@ class TARSController:
         try:
             topic_str = topic.decode('utf-8') if isinstance(topic, bytes) else topic
             payload_str = payload.decode('utf-8') if isinstance(payload, bytes) else payload
+            
+            # Log to MQTT monitor
+            if self._mqtt_monitor:
+                self._mqtt_monitor.log_incoming(topic, payload)
             
             print(f"MQTT received: {topic_str}")
             
@@ -567,6 +608,13 @@ class TARSController:
                     except Exception as http_exc:
                         print(f"HTTP error: {http_exc}")
                 
+                # Poll MQTT monitor (non-blocking)
+                if self._mqtt_monitor:
+                    try:
+                        self._mqtt_monitor.poll()
+                    except Exception as monitor_exc:
+                        print(f"MQTT Monitor error: {monitor_exc}")
+                
                 # Check frame timeout (logs once, no health spam)
                 self._check_frame_timeout()
                 
@@ -595,6 +643,13 @@ class TARSController:
         if self._mqtt_wrapper:
             self._mqtt_wrapper.publish_state("shutdown", {})
             self._mqtt_wrapper.disconnect()
+        
+        # Close MQTT monitor
+        if self._mqtt_monitor:
+            try:
+                self._mqtt_monitor.close()
+            except Exception:
+                pass
         
         # Close HTTP server
         if self._http_server:

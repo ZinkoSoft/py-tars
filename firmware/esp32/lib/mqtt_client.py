@@ -47,10 +47,11 @@ class MQTTClientWrapper:
         on_publish_callback: Optional callback when a message is published (for LED blink, etc.)
     """
     
-    def __init__(self, config, on_message_callback=None, on_publish_callback=None):
+    def __init__(self, config, on_message_callback=None, on_publish_callback=None, monitor=None):
         self.config = config
         self._on_message_callback = on_message_callback
         self._on_publish_callback = on_publish_callback
+        self._monitor = monitor  # Optional MQTTMonitor instance
         self._client = None
         
     def connect(self):
@@ -278,6 +279,10 @@ class MQTTClientWrapper:
             return
             
         try:
+            # Log to monitor before publishing
+            if self._monitor:
+                self._monitor.log_outgoing(topic, message)
+            
             self._client.publish(topic, message, qos=qos, retain=retain)
             print('Published ->', topic)
             

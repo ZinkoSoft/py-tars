@@ -178,6 +178,38 @@ vim tars_controller.py
 mosquitto_pub -h localhost -t 'movement/test' -m '{"command":"wave","speed":0.8}' -q 1
 ```
 
+### 🔌 MQTT Monitor - Real-Time Message Debugging
+
+The ESP32 includes a built-in **MQTT monitor web interface** for debugging message traffic.
+
+**Access**: `http://<esp32-ip>:8080/` (default port 8080)
+
+**Features**:
+- 📥 View incoming MQTT messages (commands, frames)
+- 📤 View outgoing MQTT messages (status, health)
+- 📊 Message statistics and connection status
+- 🔄 Auto-refresh every 5 seconds
+- 🎨 GitHub-dark themed interface
+
+**Quick Start**:
+```bash
+# Find your ESP32 IP from the serial console or router DHCP list
+# Open browser to: http://192.168.1.100:8080/
+
+# Send a test command and watch it appear in real-time:
+mosquitto_pub -h <broker-ip> -u tars -P pass \
+  -t movement/test \
+  -m '{"command":"wave","speed":0.5}'
+```
+
+**Use Cases**:
+- Debug why commands aren't working
+- Verify message payloads and topics
+- Monitor connection status and uptime
+- See command execution lifecycle (queued → executing → completed)
+
+**See**: [MQTT_MONITOR.md](MQTT_MONITOR.md) for full documentation
+
 ### LED Status Indicators 🚦
 
 The ESP32 uses an onboard RGB LED (GPIO 48) to indicate system status:
