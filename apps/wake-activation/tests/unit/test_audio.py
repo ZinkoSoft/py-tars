@@ -47,6 +47,8 @@ async def test_audio_client_streams_frames(tmp_path: Path) -> None:
 
     assert len(collected) == len(int_frames)
     for output, expected in zip(collected, int_frames, strict=True):
-        np.testing.assert_allclose(output, expected.astype(np.float32) / 32768.0, rtol=1e-6, atol=1e-6)
+        np.testing.assert_allclose(
+            output, expected.astype(np.float32) / 32768.0, rtol=1e-6, atol=1e-6
+        )
         assert output.dtype == np.float32
         assert output.shape == (samples_per_chunk,)

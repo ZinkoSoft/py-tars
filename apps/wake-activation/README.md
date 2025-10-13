@@ -240,14 +240,84 @@ Environment variables (defaults in parentheses):
 | `WAKE_MIC_TOPIC` (`wake/mic`) | MQTT topic for microphone control commands. |
 | `WAKE_TTS_TOPIC` (`tts/control`) | MQTT topic for TTS pause/resume commands. |
 
+## Development
+
+### Setup Development Environment
+
+```bash
+# Install with dev dependencies
+pip install -e ".[dev,openwakeword]"
+
+# Copy example environment
+cp .env.example .env
+```
+
+### Available Make Targets
+
+| Target | Description |
+|--------|-------------|
+| `make fmt` | Format code with ruff and black |
+| `make lint` | Lint with ruff and type-check with mypy |
+| `make test` | Run tests with coverage |
+| `make check` | Run all checks (CI gate) |
+| `make build` | Build Python package |
+| `make clean` | Remove build artifacts |
+| `make install` | Install in editable mode |
+| `make install-dev` | Install with dev dependencies |
+
+### Code Quality
+
+```bash
+# Format code
+make fmt
+
+# Lint and type-check
+make lint
+
+# Run all checks (fmt + lint + test)
+make check
+```
+
+### Project Structure
+
+```
+wake-activation/
+├── src/
+│   └── wake_activation/    # Source code
+│       ├── __init__.py
+│       ├── __main__.py     # CLI entry point
+│       ├── config.py       # Configuration parsing
+│       ├── service.py      # Core business logic
+│       ├── detector.py     # Wake word detection
+│       ├── audio.py        # Audio processing
+│       └── models.py       # Data models
+├── tests/
+│   ├── conftest.py         # Shared fixtures
+│   ├── unit/               # Unit tests
+│   ├── integration/        # Integration tests
+│   └── contract/           # MQTT contract tests
+├── Makefile                # Build automation
+├── pyproject.toml          # Package configuration
+└── README.md               # This file
+```
+
 ## Testing
 
 ```bash
-pytest tests
+# Run all tests
+make test
+
+# Run specific test categories
+pytest -m unit
+pytest -m integration
+pytest -m contract
+
+# Run with coverage
+pytest --cov=wake_activation --cov-report=html
 ```
 
 > **Note:** The wake detector relies on the OpenWakeWord extra; make sure you install with
-> `pip install -e ".[openwakeword]"` before running either locally or in Docker. The package pins
+> `pip install -e ".[dev,openwakeword]"` before running either locally or in Docker. The package pins
 > `numpy<2.0` because the bundled `tflite-runtime` wheels are not yet compatible with NumPy 2.x, and
 > the Docker image pre-fetches the OpenWakeWord feature resources (melspectrogram + VAD) at build time.
 

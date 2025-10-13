@@ -39,7 +39,8 @@ def _build_detector(scores: list[float], **kwargs: float) -> WakeDetector:
 
 
 def _load_regression_sequences() -> dict[str, dict[str, list[float]]]:
-    data_path = Path(__file__).with_name("data") / "wake_regression_sequences.json"
+    # Data is in tests/data directory (parent of unit/)
+    data_path = Path(__file__).parent.parent / "data" / "wake_regression_sequences.json"
     with data_path.open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
     return payload
@@ -102,19 +103,23 @@ def test_create_wake_detector_missing_model(tmp_path: Path) -> None:
         ("background_noise", False),
     ],
 )
-def test_regression_sequences_trigger_expected_detection(scenario: str, expected_detection: bool) -> None:
+def test_regression_sequences_trigger_expected_detection(
+    scenario: str, expected_detection: bool
+) -> None:
     sequences = _load_regression_sequences()
     sample = sequences[scenario]
 
     threshold = 0.6
-    detector = _build_detector(sample["scores"], threshold=threshold, min_retrigger_sec=0.4, energy_window_ms=1000)
+    detector = _build_detector(
+        sample["scores"], threshold=threshold, min_retrigger_sec=0.4, energy_window_ms=1000
+    )
 
     expected_first_trigger = next((score for score in sample["scores"] if score >= threshold), None)
 
     detection = None
     timestamp = 0.0
     triggered_index: int | None = None
-    for idx, (amplitude, _) in enumerate(zip(sample["amplitudes"], sample["scores"])):
+    for idx, (amplitude, _) in enumerate(zip(sample["amplitudes"], sample["scores"], strict=False)):
         frame = np.full(detector.frame_samples, float(amplitude), dtype=np.float32)
         detection = detector.process_frame(frame, ts=timestamp)
         timestamp += 0.25

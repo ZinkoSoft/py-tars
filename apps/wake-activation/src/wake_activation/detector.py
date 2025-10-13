@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+import logging
 import math
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Deque, Optional, Protocol, TYPE_CHECKING, runtime_checkable
-import logging
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import numpy as np
 from numpy.typing import NDArray
 
-from .npu_utils import check_npu_availability, log_npu_status
+from .npu_utils import check_npu_availability
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ OpenWakeWordModel = Any
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
     try:
-        from openwakeword.model import Model as OpenWakeWordModel
+        pass
     except Exception:  # pragma: no cover - optional dependency not installed during type checking
         pass
 
@@ -57,7 +57,7 @@ class DetectionResult:
     score: float
     energy: float
     ts: float
-    effective_threshold: Optional[float] = None
+    effective_threshold: float | None = None
 
 
 @runtime_checkable
@@ -101,24 +101,28 @@ class _RKNNBackend:
 
     def __init__(self, model_path: str, core_mask: int = 0) -> None:
         if RKNNLite is None:
-            raise DetectorUnavailableError("rknn-toolkit-lite2 is not installed. Install it to enable NPU acceleration.")
-        
+            raise DetectorUnavailableError(
+                "rknn-toolkit-lite2 is not installed. Install it to enable NPU acceleration."
+            )
+
         self._rknn = RKNNLite()
         self._model_path = model_path
         self._core_mask = core_mask
         self._is_initialized = False
-        
+
         # Load and initialize the RKNN model
         ret = self._rknn.load_rknn(model_path)
         if ret != 0:
             raise DetectorUnavailableError(f"Failed to load RKNN model from {model_path}")
-        
+
         # Initialize runtime with specified NPU cores
         ret = self._rknn.init_runtime(core_mask=core_mask)
         if ret != 0:
             self._rknn.release()
-            raise DetectorUnavailableError(f"Failed to initialize RKNN runtime with core mask {core_mask}")
-        
+            raise DetectorUnavailableError(
+                f"Failed to initialize RKNN runtime with core mask {core_mask}"
+            )
+
         self._is_initialized = True
 
     @property
@@ -132,18 +136,20 @@ class _RKNNBackend:
     def process(self, frame: NDArray[np.int16]) -> float:
         if not self._is_initialized:
             return 0.0
-        
+
         # Convert int16 frame to float32 and normalize to [-1, 1] range
         # This matches the expected input format for most RKNN wake word models
         frame_float = frame.astype(np.float32) / _INT16_MAX
-        
+
         # Ensure proper shape for RKNN inference: [batch, channels, samples]
         # Most audio models expect [1, 1, num_samples] for mono audio
         if frame_float.ndim == 1:
             frame_float = frame_float.reshape(1, 1, -1)  # Add batch and channel dims
         elif frame_float.ndim == 2:
-            frame_float = frame_float.reshape(1, frame_float.shape[0], frame_float.shape[1])  # Add batch dim
-        
+            frame_float = frame_float.reshape(
+                1, frame_float.shape[0], frame_float.shape[1]
+            )  # Add batch dim
+
         try:
             # Run inference on NPU
             outputs = self._rknn.inference(inputs=[frame_float])
@@ -163,7 +169,7 @@ class _RKNNBackend:
         pass
 
     def __del__(self) -> None:
-        if hasattr(self, '_rknn') and self._is_initialized:
+        if hasattr(self, "_rknn") and self._is_initialized:
             try:
                 self._rknn.release()
             except Exception:
@@ -193,17 +199,19 @@ class WakeDetector:
         )
         self._byte_buffer = bytearray()
         self._frame_bytes = backend.frame_samples * 2
-        self._last_trigger_ts: Optional[float] = None
+        self._last_trigger_ts: float | None = None
 
         self._energy_samples = 0
         self._energy_sum_sq = 0.0
-        self._energy_window: Deque[tuple[int, float]] = deque()
-        
+        self._energy_window: deque[tuple[int, float]] = deque()
+
         # Enhanced sensitivity settings
         self._energy_boost_factor = max(0.1, energy_boost_factor)
         self._low_energy_threshold_factor = max(0.1, min(1.0, low_energy_threshold_factor))
         self._background_noise_sensitivity = background_noise_sensitivity
-        self._recent_energy_history: Deque[float] = deque(maxlen=50)  # Track energy for adaptive thresholds
+        self._recent_energy_history: deque[float] = deque(
+            maxlen=50
+        )  # Track energy for adaptive thresholds
 
     @property
     def frame_samples(self) -> int:
@@ -222,7 +230,7 @@ class WakeDetector:
         self._energy_window.clear()
         self._recent_energy_history.clear()
 
-    def process_frame(self, frame: NDArray[np.float32], *, ts: float) -> Optional[DetectionResult]:
+    def process_frame(self, frame: NDArray[np.float32], *, ts: float) -> DetectionResult | None:
         """Process a normalized audio frame; return detection when threshold is met."""
 
         if frame.ndim != 1:
@@ -231,7 +239,7 @@ class WakeDetector:
         self._accumulate_energy(frame)
         self._enqueue_frame(frame)
 
-        max_score: Optional[float] = None
+        max_score: float | None = None
         while len(self._byte_buffer) >= self._frame_bytes:
             chunk_bytes = self._byte_buffer[: self._frame_bytes]
             del self._byte_buffer[: self._frame_bytes]
@@ -246,24 +254,24 @@ class WakeDetector:
         # Adaptive threshold based on energy and environment
         current_energy = self.current_energy
         self._recent_energy_history.append(current_energy)
-        
+
         # Calculate adaptive threshold
         effective_threshold = self._calculate_adaptive_threshold(max_score, current_energy)
 
         if max_score < effective_threshold:
             return None
 
-        if self._last_trigger_ts is not None and ts - self._last_trigger_ts < self._min_retrigger_sec:
+        if (
+            self._last_trigger_ts is not None
+            and ts - self._last_trigger_ts < self._min_retrigger_sec
+        ):
             return None
 
         self._last_trigger_ts = ts
         # Apply energy boost to reported energy for better UI feedback
         reported_energy = current_energy * self._energy_boost_factor
         return DetectionResult(
-            score=max_score, 
-            energy=reported_energy, 
-            ts=ts, 
-            effective_threshold=effective_threshold
+            score=max_score, energy=reported_energy, ts=ts, effective_threshold=effective_threshold
         )
 
     @property
@@ -291,28 +299,30 @@ class WakeDetector:
     def _calculate_adaptive_threshold(self, score: float, current_energy: float) -> float:
         """Calculate adaptive threshold based on energy and environmental conditions."""
         base_threshold = self._threshold
-        
+
         if not self._background_noise_sensitivity:
             return base_threshold
-            
+
         # If we have enough energy history, adapt threshold
         if len(self._recent_energy_history) < 10:
             return base_threshold
-            
+
         # Calculate recent average energy
         recent_energies = list(self._recent_energy_history)
         avg_energy = sum(recent_energies) / len(recent_energies)
-        
+
         # For low energy environments, lower the threshold
         if current_energy < avg_energy * 0.5:  # Current energy is much lower than average
             adapted_threshold = base_threshold * self._low_energy_threshold_factor
         else:
             adapted_threshold = base_threshold
-            
+
         # Additional boost for very confident scores in low energy
         if score > 0.7 and current_energy < avg_energy * 0.3:
-            adapted_threshold *= 0.8  # Even more sensitive for high confidence in quiet environments
-            
+            adapted_threshold *= (
+                0.8  # Even more sensitive for high confidence in quiet environments
+            )
+
         return max(0.1, adapted_threshold)  # Never go below 0.1
 
 
@@ -331,7 +341,7 @@ def create_wake_detector(
     npu_core_mask: int = 0,
 ) -> WakeDetector:
     """Create a wake detector with optional NPU acceleration.
-    
+
     Args:
         model_path: Path to the wake word model (.tflite for CPU, .rknn for NPU)
         threshold: Detection threshold (0.0-1.0)
@@ -344,10 +354,10 @@ def create_wake_detector(
         background_noise_sensitivity: Enable adaptive thresholds
         use_npu: Use NPU acceleration if available
         npu_core_mask: NPU core mask (0=auto, 1=core0, 2=core1, 4=core2, 7=all cores)
-    
+
     Returns:
         Configured WakeDetector instance
-    
+
     Raises:
         DetectorUnavailableError: If the requested backend is not available
     """
@@ -358,7 +368,9 @@ def create_wake_detector(
             logger.warning("NPU requested but not available, falling back to CPU")
             logger.debug(f"NPU status: {status}")
             # Fall back to CPU with original model path if NPU model doesn't exist
-            fallback_path = model_path.with_suffix('.tflite') if model_path.suffix == '.rknn' else model_path
+            fallback_path = (
+                model_path.with_suffix(".tflite") if model_path.suffix == ".rknn" else model_path
+            )
             return create_cpu_wake_detector(
                 model_path=fallback_path,
                 threshold=threshold,
@@ -456,26 +468,26 @@ def create_npu_wake_detector(
     npu_core_mask: int = 0,
 ) -> WakeDetector:
     """Create an NPU-accelerated wake detector using RKNN.
-    
+
     Args:
         model_path: Path to .rknn model file
         threshold: Detection threshold
-        min_retrigger_sec: Minimum time between detections  
+        min_retrigger_sec: Minimum time between detections
         energy_window_ms: Energy window for adaptive thresholds
         energy_boost_factor: Energy boost for UI feedback
         low_energy_threshold_factor: Threshold reduction in low energy
         background_noise_sensitivity: Enable adaptive thresholds
         npu_core_mask: NPU core selection (0=auto, 1-7=specific cores)
-    
+
     Returns:
         WakeDetector using NPU backend
-        
+
     Raises:
         DetectorUnavailableError: If NPU is not available or model loading fails
     """
     if not model_path.exists():
         raise DetectorUnavailableError(f"RKNN model not found at {model_path}")
-    
+
     if model_path.suffix.lower() != ".rknn":
         raise DetectorUnavailableError(f"Expected .rknn model, got {model_path.suffix}")
 

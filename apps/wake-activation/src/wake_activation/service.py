@@ -4,38 +4,41 @@ import asyncio
 import logging
 import re
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Callable, Optional, Tuple
 from urllib.parse import urlparse
 
 # Handle TaskGroup compatibility for Python 3.10
 try:
     from asyncio import TaskGroup
 except ImportError:
+    from typing import Any
+
     # Fallback for Python < 3.11
-    class TaskGroup:
-        def __init__(self):
-            self._tasks = []
-            
-        def create_task(self, coro):
+    class TaskGroup:  # type: ignore[no-redef]
+        def __init__(self) -> None:
+            self._tasks: list[asyncio.Task[Any]] = []
+
+        def create_task(self, coro: Any) -> asyncio.Task[Any]:
             task = asyncio.create_task(coro)
             self._tasks.append(task)
             return task
-            
-        async def __aenter__(self):
+
+        async def __aenter__(self) -> Any:
             return self
-            
-        async def __aexit__(self, exc_type, exc_val, exc_tb):
+
+        async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
             if self._tasks:
                 await asyncio.gather(*self._tasks, return_exceptions=True)
+
 
 import asyncio_mqtt as mqtt
 import orjson
 
-from .config import WakeActivationConfig
-from .detector import DetectorUnavailableError, DetectionResult, WakeDetector, create_wake_detector
 from .audio import AudioFanoutClient
+from .config import WakeActivationConfig
+from .detector import DetectionResult, DetectorUnavailableError, WakeDetector, create_wake_detector
 from .models import (
     HealthPayload,
     MicAction,
@@ -45,7 +48,6 @@ from .models import (
     WakeEvent,
     WakeEventType,
 )
-
 
 CANCEL_PHRASES = {
     "cancel",
@@ -68,7 +70,7 @@ def _normalize_phrase(text: str) -> str:
 
 @dataclass(slots=True)
 class InterruptContext:
-    tts_id: Optional[str]
+    tts_id: str | None
     started_at: float
     deadline: float
 
@@ -85,37 +87,43 @@ class WakeActivationService:
         self,
         config: WakeActivationConfig,
         *,
-        detector_factory: Optional[Callable[[WakeActivationConfig], WakeDetector]] = None,
-        audio_client_factory: Optional[Callable[[WakeActivationConfig, int], AudioFanoutClient]] = None,
+        detector_factory: Callable[[WakeActivationConfig], WakeDetector] | None = None,
+        audio_client_factory: (
+            Callable[[WakeActivationConfig, int], AudioFanoutClient] | None
+        ) = None,
     ) -> None:
         self.cfg = config
         self.log = logging.getLogger("wake-activation")
-        self.health_task: Optional[asyncio.Task[None]] = None
+        self.health_task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
         self._detector_factory = detector_factory or self._default_detector_factory
         self._audio_client_factory = audio_client_factory or self._default_audio_client_factory
-        self._idle_timeout_task: Optional[asyncio.Task[None]] = None
+        self._idle_timeout_task: asyncio.Task[None] | None = None
         self._session_counter = 0
         self._tts_state = "idle"
-        self._tts_utt_id: Optional[str] = None
-        self._interrupt_task: Optional[asyncio.Task[None]] = None
-        self._active_interrupt: Optional[InterruptContext] = None
+        self._tts_utt_id: str | None = None
+        self._interrupt_task: asyncio.Task[None] | None = None
+        self._active_interrupt: InterruptContext | None = None
 
     async def run(self) -> None:
         """Run the wake activation event loop until cancelled."""
 
         # Convert string log level to logging constant
         log_level = getattr(logging, self.cfg.log_level.upper(), logging.INFO)
-        logging.basicConfig(level=log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+        logging.basicConfig(
+            level=log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+        )
 
         host, port, username, password = self._parse_mqtt_url(self.cfg.mqtt_url)
         self.log.info("Connecting to MQTT broker %s:%s", host, port)
 
-        async with mqtt.Client(hostname=host, port=port, username=username, password=password) as client:
+        async with mqtt.Client(
+            hostname=host, port=port, username=username, password=password
+        ) as client:
             # Wait for STT health before starting if enabled
             if self.cfg.wait_for_stt_health:
                 await self._wait_for_stt_health(client)
-            
+
             await self._publish_health(client)
             async with TaskGroup() as tg:
                 tg.create_task(self._health_loop(client))
@@ -140,7 +148,7 @@ class WakeActivationService:
                 await self._publish_health(client)
                 try:
                     await asyncio.wait_for(self._stop_event.wait(), timeout=interval)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     continue
         except Exception:  # pragma: no cover - log and propagate
             self.log.exception("Health loop terminated unexpectedly")
@@ -229,7 +237,7 @@ class WakeActivationService:
         await client.publish(self.cfg.tts_control_topic, orjson.dumps(command.model_dump()), qos=1)
         self.log.info("Published TTS control: %s", command.model_dump())
 
-    def _parse_mqtt_url(self, url: str) -> Tuple[str, int, Optional[str], Optional[str]]:
+    def _parse_mqtt_url(self, url: str) -> tuple[str, int, str | None, str | None]:
         parsed = urlparse(url)
         host = parsed.hostname or "127.0.0.1"
         port = parsed.port or 1883
@@ -291,7 +299,9 @@ class WakeActivationService:
         )
         await self.publish_wake_event(client, event)
         ttl_ms = self._idle_timeout_ms()
-        await self.send_mic_command(client, MicCommand(action=MicAction.UNMUTE, reason="wake", ttl_ms=ttl_ms))
+        await self.send_mic_command(
+            client, MicCommand(action=MicAction.UNMUTE, reason="wake", ttl_ms=ttl_ms)
+        )
         pause = TtsControl(action=TtsAction.PAUSE, reason="wake_interrupt", id=tts_id)
         await self.send_tts_command(client, pause)
         self._tts_state = "paused"
@@ -385,7 +395,9 @@ class WakeActivationService:
         self._tts_utt_id = None
 
     async def _publish_error_event(self, client: mqtt.Client, cause: str) -> None:
-        event = WakeEvent(type=WakeEventType.ERROR, confidence=None, energy=None, cause=cause, ts=time.monotonic())
+        event = WakeEvent(
+            type=WakeEventType.ERROR, confidence=None, energy=None, cause=cause, ts=time.monotonic()
+        )
         await self.publish_wake_event(client, event)
 
     def _default_detector_factory(self, config: WakeActivationConfig) -> WakeDetector:
@@ -403,10 +415,12 @@ class WakeActivationService:
             npu_core_mask=config.npu_core_mask,
         )
 
-    def _default_audio_client_factory(self, config: WakeActivationConfig, frame_samples: int) -> AudioFanoutClient:
+    def _default_audio_client_factory(
+        self, config: WakeActivationConfig, frame_samples: int
+    ) -> AudioFanoutClient:
         return AudioFanoutClient(config.audio_fanout_path, samples_per_chunk=frame_samples)
 
-    def _idle_timeout_ms(self) -> Optional[int]:
+    def _idle_timeout_ms(self) -> int | None:
         if self.cfg.idle_timeout_sec <= 0:
             return None
         return int(self.cfg.idle_timeout_sec * 1000)
@@ -499,7 +513,9 @@ class WakeActivationService:
                 tts_id=context.tts_id,
             )
             await self.publish_wake_event(client, event)
-            resume_cmd = TtsControl(action=TtsAction.RESUME, reason="wake_resume", id=context.tts_id)
+            resume_cmd = TtsControl(
+                action=TtsAction.RESUME, reason="wake_resume", id=context.tts_id
+            )
             await self.send_tts_command(client, resume_cmd)
             self._tts_state = "speaking"
             self._active_interrupt = None
@@ -522,37 +538,43 @@ class WakeActivationService:
     async def _wait_for_stt_health(self, client: mqtt.Client) -> None:
         """Wait for STT service to report healthy status before starting audio processing."""
         self.log.info("Waiting for STT service health on topic '%s'...", self.cfg.stt_health_topic)
-        
+
         timeout_task = asyncio.create_task(asyncio.sleep(self.cfg.stt_health_timeout_sec))
         health_received = False
-        
+
         try:
             async with client.filtered_messages(self.cfg.stt_health_topic) as messages:
                 await client.subscribe(self.cfg.stt_health_topic)
-                
+
                 async for msg in messages:
                     if timeout_task.done():
                         break
-                        
+
                     try:
                         payload = orjson.loads(msg.payload)
                         # Check both direct format and nested data format
                         health_data = payload.get("data", payload)
                         if health_data.get("ok") is True:
-                            self.log.info("✅ STT service is healthy, proceeding with wake activation startup")
+                            self.log.info(
+                                "✅ STT service is healthy, proceeding with wake activation startup"
+                            )
                             health_received = True
                             break
                         else:
-                            error = health_data.get("err") or health_data.get("event") or "unknown error"
+                            error = (
+                                health_data.get("err")
+                                or health_data.get("event")
+                                or "unknown error"
+                            )
                             self.log.warning("STT service reports unhealthy: %s", error)
                     except Exception as exc:
                         self.log.debug("Invalid STT health payload: %s (%s)", msg.payload, exc)
-                        
+
                     # Check if timeout occurred
                     if timeout_task.done():
                         break
-                        
-        except asyncio.TimeoutError:
+
+        except TimeoutError:
             pass
         finally:
             if not timeout_task.done():
@@ -561,12 +583,12 @@ class WakeActivationService:
                     await timeout_task
                 except asyncio.CancelledError:
                     pass
-                    
+
         if not health_received:
             self.log.warning(
                 "⚠️  STT health not received within %.1fs, starting anyway (audio fanout may be unstable)",
-                self.cfg.stt_health_timeout_sec
+                self.cfg.stt_health_timeout_sec,
             )
-        
+
         # Small additional delay to let STT fully stabilize
         await asyncio.sleep(2.0)

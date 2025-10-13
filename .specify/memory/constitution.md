@@ -151,6 +151,21 @@ Breaking changes require:
 
 ## Development Workflow & Quality Gates
 
+### Python Environment
+
+All development MUST use the project's virtual environment located at `/home/james/git/py-tars/.venv/bin`. When running Python commands or installing packages, always:
+
+1. **Activate the venv**: `source /home/james/git/py-tars/.venv/bin/activate`
+2. **Or use direct paths**: `/home/james/git/py-tars/.venv/bin/python` or `/home/james/git/py-tars/.venv/bin/pip`
+
+This ensures:
+- Consistent dependency versions across all services
+- Isolation from system Python and other projects
+- Reproducible builds and test environments
+- Proper tooling versions (ruff, black, mypy, pytest)
+
+**Never** install packages globally or use system Python for development work.
+
 ### Pre-Commit Requirements
 
 Before every commit, developers MUST:

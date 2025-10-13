@@ -2,7 +2,7 @@
 
 from .config import WakeActivationConfig
 from .detector import DetectorUnavailableError, WakeDetector, create_wake_detector
-from .models import WakeEvent, MicCommand, TtsControl
+from .models import MicCommand, TtsControl, WakeEvent
 from .service import WakeActivationService
 
 __all__ = [
