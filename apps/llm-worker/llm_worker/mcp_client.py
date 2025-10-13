@@ -190,6 +190,7 @@ class MCPToolClient:
         # Use python -m instead of console script for better stdio handling
         command_map = {
             "tars-character": ("python", ["-m", "tars_mcp_character"]),
+            "tars-movement": ("python", ["-m", "tars_mcp_movement"]),
         }
         
         command_info = command_map.get(server_name)
