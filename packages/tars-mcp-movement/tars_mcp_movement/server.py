@@ -620,6 +620,206 @@ def monster_pose(speed: float = 0.7) -> dict[str, Any]:
 
 
 @app.tool()
+def big_shrug(speed: float = 0.7) -> dict[str, Any]:
+    """"I don't know" gesture - arms sweep out with forearms down.
+    
+    Use this to express uncertainty, confusion, or "I don't know". TARS sweeps
+    both arms outward with forearms angled down in a classic shrug motion.
+    
+    Args:
+        speed: Shrug speed (0.1-1.0). Default 0.7 (smooth).
+    
+    Returns:
+        dict with mqtt_publish directive for llm-worker
+    
+    Example:
+        User: "What's the meaning of life?"
+        TARS: "I have no idea! *shrugs*"
+        TARS calls: big_shrug(speed=0.7)
+    """
+    if not 0.1 <= speed <= 1.0:
+        return {
+            "success": False,
+            "error": f"Speed must be between 0.1-1.0, got {speed}",
+        }
+    
+    return {
+        "success": True,
+        "message": f"Performing big shrug at speed {speed}",
+        "mqtt_publish": {
+            "topic": TOPIC_MOVEMENT_TEST,
+            "event_type": "movement.command",
+            "data": {
+                "command": "big_shrug",
+                "speed": speed,
+                "request_id": str(uuid.uuid4()),
+            },
+            "source": "mcp-movement",
+        },
+    }
+
+
+@app.tool()
+def thinking_pose(speed: float = 0.6) -> dict[str, Any]:
+    """Contemplative stance - arm supporting chin, thoughtful posture.
+    
+    Use this when processing a question, considering options, or being thoughtful.
+    TARS stands tall with one arm forward supporting chin position.
+    
+    Args:
+        speed: Pose speed (0.1-1.0). Default 0.6 (deliberate).
+    
+    Returns:
+        dict with mqtt_publish directive for llm-worker
+    
+    Example:
+        User: "What do you think about that?"
+        TARS: "Hmm, let me think... *thinking pose*"
+        TARS calls: thinking_pose(speed=0.6)
+    """
+    if not 0.1 <= speed <= 1.0:
+        return {
+            "success": False,
+            "error": f"Speed must be between 0.1-1.0, got {speed}",
+        }
+    
+    return {
+        "success": True,
+        "message": f"Striking thinking pose at speed {speed}",
+        "mqtt_publish": {
+            "topic": TOPIC_MOVEMENT_TEST,
+            "event_type": "movement.command",
+            "data": {
+                "command": "thinking_pose",
+                "speed": speed,
+                "request_id": str(uuid.uuid4()),
+            },
+            "source": "mcp-movement",
+        },
+    }
+
+
+@app.tool()
+def excited_bounce(speed: float = 1.0) -> dict[str, Any]:
+    """High-energy celebration - rapid bouncing with arm swings.
+    
+    Use this to show excitement, enthusiasm, or joy. TARS bounces up and down
+    rapidly while swinging arms and moving hands energetically.
+    
+    Args:
+        speed: Bounce speed (0.1-1.0). Default 1.0 (fast/energetic).
+    
+    Returns:
+        dict with mqtt_publish directive for llm-worker
+    
+    Example:
+        User: "I got the job!"
+        TARS: "That's amazing! *bounces excitedly*"
+        TARS calls: excited_bounce(speed=1.0)
+    """
+    if not 0.1 <= speed <= 1.0:
+        return {
+            "success": False,
+            "error": f"Speed must be between 0.1-1.0, got {speed}",
+        }
+    
+    return {
+        "success": True,
+        "message": f"Bouncing excitedly at speed {speed}",
+        "mqtt_publish": {
+            "topic": TOPIC_MOVEMENT_TEST,
+            "event_type": "movement.command",
+            "data": {
+                "command": "excited_bounce",
+                "speed": speed,
+                "request_id": str(uuid.uuid4()),
+            },
+            "source": "mcp-movement",
+        },
+    }
+
+
+@app.tool()
+def reach_forward(speed: float = 0.7) -> dict[str, Any]:
+    """Extend arms forward to grab or receive something.
+    
+    Use this when reaching for objects, offering to receive something, or
+    making grabbing motions. TARS extends both arms forward then closes hands.
+    
+    Args:
+        speed: Reach speed (0.1-1.0). Default 0.7 (controlled).
+    
+    Returns:
+        dict with mqtt_publish directive for llm-worker
+    
+    Example:
+        User: "Can you grab that?"
+        TARS: "Sure, let me reach for it *extends arms*"
+        TARS calls: reach_forward(speed=0.7)
+    """
+    if not 0.1 <= speed <= 1.0:
+        return {
+            "success": False,
+            "error": f"Speed must be between 0.1-1.0, got {speed}",
+        }
+    
+    return {
+        "success": True,
+        "message": f"Reaching forward at speed {speed}",
+        "mqtt_publish": {
+            "topic": TOPIC_MOVEMENT_TEST,
+            "event_type": "movement.command",
+            "data": {
+                "command": "reach_forward",
+                "speed": speed,
+                "request_id": str(uuid.uuid4()),
+            },
+            "source": "mcp-movement",
+        },
+    }
+
+
+@app.tool()
+def wide_stance(speed: float = 0.6) -> dict[str, Any]:
+    """Stable defensive position - low wide base, arms out.
+    
+    Use this to show strength, confidence, defensiveness, or stability. TARS
+    lowers into a wide leg stance with arms spread out to the sides.
+    
+    Args:
+        speed: Stance speed (0.1-1.0). Default 0.6 (powerful/slow).
+    
+    Returns:
+        dict with mqtt_publish directive for llm-worker
+    
+    Example:
+        User: "Show me you're ready"
+        TARS: "I'm ready for anything! *takes wide stance*"
+        TARS calls: wide_stance(speed=0.6)
+    """
+    if not 0.1 <= speed <= 1.0:
+        return {
+            "success": False,
+            "error": f"Speed must be between 0.1-1.0, got {speed}",
+        }
+    
+    return {
+        "success": True,
+        "message": f"Taking wide stance at speed {speed}",
+        "mqtt_publish": {
+            "topic": TOPIC_MOVEMENT_TEST,
+            "event_type": "movement.command",
+            "data": {
+                "command": "wide_stance",
+                "speed": speed,
+                "request_id": str(uuid.uuid4()),
+            },
+            "source": "mcp-movement",
+        },
+    }
+
+
+@app.tool()
 def reset_position(speed: float = 0.8) -> dict[str, Any]:
     """Return to neutral position - reset all servos.
     

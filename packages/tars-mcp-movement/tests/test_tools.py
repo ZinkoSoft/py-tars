@@ -170,6 +170,80 @@ class TestActionTools:
         assert "error" in result
 
 
+class TestNewExpressiveTools:
+    """Test new expressive movement tools (Phase 2 expansion)."""
+    
+    def test_big_shrug_valid(self, mock_env):
+        """Test big_shrug gesture."""
+        result = server.big_shrug(speed=0.7)
+        
+        assert result["success"] is True
+        assert result["mqtt_publish"]["data"]["command"] == "big_shrug"
+        assert result["mqtt_publish"]["data"]["speed"] == 0.7
+        assert "request_id" in result["mqtt_publish"]["data"]
+    
+    def test_thinking_pose_valid(self, mock_env):
+        """Test thinking_pose gesture."""
+        result = server.thinking_pose(speed=0.6)
+        
+        assert result["success"] is True
+        assert result["mqtt_publish"]["data"]["command"] == "thinking_pose"
+        assert result["mqtt_publish"]["data"]["speed"] == 0.6
+        assert result["mqtt_publish"]["topic"] == "movement/test"
+    
+    def test_excited_bounce_valid(self, mock_env):
+        """Test excited_bounce action."""
+        result = server.excited_bounce(speed=1.0)
+        
+        assert result["success"] is True
+        assert result["mqtt_publish"]["data"]["command"] == "excited_bounce"
+        assert result["mqtt_publish"]["data"]["speed"] == 1.0
+        assert result["mqtt_publish"]["event_type"] == "movement.command"
+    
+    def test_reach_forward_valid(self, mock_env):
+        """Test reach_forward action."""
+        result = server.reach_forward(speed=0.7)
+        
+        assert result["success"] is True
+        assert result["mqtt_publish"]["data"]["command"] == "reach_forward"
+        assert result["mqtt_publish"]["data"]["speed"] == 0.7
+        assert result["mqtt_publish"]["source"] == "mcp-movement"
+    
+    def test_wide_stance_valid(self, mock_env):
+        """Test wide_stance action."""
+        result = server.wide_stance(speed=0.6)
+        
+        assert result["success"] is True
+        assert result["mqtt_publish"]["data"]["command"] == "wide_stance"
+        assert result["mqtt_publish"]["data"]["speed"] == 0.6
+    
+    def test_new_tool_invalid_speed_low(self, mock_env):
+        """Test new tools reject speeds that are too low."""
+        result = server.big_shrug(speed=0.05)
+        
+        assert result["success"] is False
+        assert "error" in result
+        assert "0.1-1.0" in result["error"]
+    
+    def test_new_tool_invalid_speed_high(self, mock_env):
+        """Test new tools reject speeds that are too high."""
+        result = server.excited_bounce(speed=1.5)
+        
+        assert result["success"] is False
+        assert "error" in result
+        assert "0.1-1.0" in result["error"]
+    
+    def test_new_tools_request_id_uniqueness(self, mock_env):
+        """Test that new tools generate unique request IDs."""
+        result1 = server.thinking_pose(speed=0.6)
+        result2 = server.thinking_pose(speed=0.6)
+        
+        req_id1 = result1["mqtt_publish"]["data"]["request_id"]
+        req_id2 = result2["mqtt_publish"]["data"]["request_id"]
+        
+        assert req_id1 != req_id2
+
+
 class TestReturnStructure:
     """Test return value structure and contracts."""
     
