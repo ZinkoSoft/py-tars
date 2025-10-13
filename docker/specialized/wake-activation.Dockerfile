@@ -36,6 +36,6 @@ RUN python -c "import openwakeword.utils as u; u.download_models(model_names=['_
 # Source code will be provided via volume mount at /workspace/apps/wake-activation
 # This enables live code updates without container rebuild
 
-ENV PYTHONPATH=/workspace/apps/wake-activation
+ENV PYTHONPATH=/workspace/apps/wake-activation/src
 
 CMD ["python", "-m", "wake_activation"]

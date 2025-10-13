@@ -206,7 +206,7 @@ services:
       WAKE_STT_HEALTH_TIMEOUT_SEC: ${WAKE_STT_HEALTH_TIMEOUT_SEC:-30}
       # NPU-specific environment
       RKNN_LOG_LEVEL: ${RKNN_LOG_LEVEL:-3}
-      PYTHONPATH: /workspace/apps/wake-activation
+      PYTHONPATH: /workspace/apps/wake-activation/src
     entrypoint: ["/bin/sh", "-c"]
     command: ["echo 'Wake activation: Waiting for STT service to stabilize...'; sleep 3; echo 'Wake activation: Starting wake word detection'; exec python -m wake_activation"]
     depends_on:
