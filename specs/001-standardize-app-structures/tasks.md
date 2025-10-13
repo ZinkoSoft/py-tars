@@ -125,22 +125,22 @@ Tasks are organized by app migration. Each app migration is treated as an indepe
 
 ### Implementation for ui-web
 
-- [ ] T054 [P] [ui-web] Analyze current structure and document in `/apps/ui-web/structure-before.txt`
-- [ ] T055 [P] [ui-web] Create `/apps/ui-web/src/ui_web/` directory structure
-- [ ] T056 [P] [ui-web] Move source files to `/apps/ui-web/src/ui_web/`
-- [ ] T057 [P] [ui-web] Create `/apps/ui-web/src/ui_web/__main__.py` entry point
-- [ ] T058 [P] [ui-web] Create `/apps/ui-web/tests/` structure
-- [ ] T059 [P] [ui-web] Create `/apps/ui-web/tests/conftest.py`
-- [ ] T060 [P] [ui-web] Create `/apps/ui-web/pyproject.toml`
-- [ ] T061 [P] [ui-web] Create `/apps/ui-web/Makefile` with `PACKAGE_NAME := ui_web`
-- [ ] T062 [P] [ui-web] Create `/apps/ui-web/README.md`
-- [ ] T063 [P] [ui-web] Create `/apps/ui-web/.env.example`
-- [ ] T064 [P] [ui-web] Test installation and `make check`
-- [ ] T065 [P] [ui-web] Update Dockerfile if needed
-- [ ] T066 [P] [ui-web] Test Docker build
-- [ ] T067 [P] [ui-web] Document changes in `/apps/ui-web/structure-after.txt`
+- [X] T054 [P] [ui-web] Analyze current structure and document in `/apps/ui-web/structure-before.txt`
+- [X] T055 [P] [ui-web] Create `/apps/ui-web/src/ui_web/` directory structure
+- [X] T056 [P] [ui-web] Move source files to `/apps/ui-web/src/ui_web/`
+- [X] T057 [P] [ui-web] Create `/apps/ui-web/src/ui_web/__main__.py` entry point
+- [X] T058 [P] [ui-web] Create `/apps/ui-web/tests/` structure
+- [X] T059 [P] [ui-web] Create `/apps/ui-web/tests/conftest.py`
+- [X] T060 [P] [ui-web] Create `/apps/ui-web/pyproject.toml`
+- [X] T061 [P] [ui-web] Create `/apps/ui-web/Makefile` with `PACKAGE_NAME := ui_web`
+- [X] T062 [P] [ui-web] Create `/apps/ui-web/README.md`
+- [X] T063 [P] [ui-web] Create `/apps/ui-web/.env.example`
+- [X] T064 [P] [ui-web] Test installation and `make check`
+- [X] T065 [P] [ui-web] Update Dockerfile if needed
+- [X] T066 [P] [ui-web] Test Docker build
+- [X] T067 [P] [ui-web] Document changes in `/apps/ui-web/structure-after.txt`
 
-**Checkpoint**: Both UI services standardized and validated
+**Checkpoint**: Both UI services standardized and validated ✅
 
 ---
 
