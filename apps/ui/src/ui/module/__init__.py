@@ -5,7 +5,7 @@ from .spectrum import SpectrumBars
 
 __all__ = [
     "Box",
+    "SpectrumBars",
     "get_layout_dimensions",
     "load_layout_config",
-    "SpectrumBars",
 ]

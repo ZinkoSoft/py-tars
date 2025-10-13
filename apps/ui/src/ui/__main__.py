@@ -1,51 +1,89 @@
-import os
-# NEW (add near the top)
-import ctypes
-import numpy as np
-os.environ.setdefault("PYOPENGL_PLATFORM", "egl")  # belt + suspenders
 """Pygame-based UI for TARS: displays spectrum, partials/finals, and TTS text."""
+
+import ctypes
 import logging
+import os
 import queue
 import time
 from pathlib import Path
 from typing import Any
-
-import pygame
-from pygame.locals import DOUBLEBUF, OPENGL
-from pydantic import ValidationError
-from OpenGL.GL import (
-    glClear, glClearColor, glEnable, glBlendFunc, glViewport, 
-    GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT, GL_BLEND,
-    GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_FLOAT, 
-    GL_TEXTURE_MIN_FILTER, GL_TEXTURE_MAG_FILTER
-)
-
-from OpenGL.GL import (
-    GL_VERTEX_SHADER, GL_FRAGMENT_SHADER, GL_COMPILE_STATUS, GL_LINK_STATUS,
-    glCreateShader, glShaderSource, glCompileShader, glGetShaderiv, glGetShaderInfoLog,
-    glCreateProgram, glAttachShader, glLinkProgram, glGetProgramiv, glGetProgramInfoLog,
-    glDeleteShader, glUseProgram, glGetUniformLocation, glUniform2f,
-    glEnableVertexAttribArray, glVertexAttribPointer, glDrawArrays,
-    glGenBuffers, glBindBuffer, glBufferData, GL_ARRAY_BUFFER, GL_STATIC_DRAW,
-    glActiveTexture, glBindTexture, glTexParameteri, glTexImage2D, glTexSubImage2D,
-    glGenTextures, glPixelStorei, GL_UNPACK_ALIGNMENT, GL_TEXTURE0, GL_TEXTURE_2D,
-    GL_LINEAR, GL_RGBA, GL_UNSIGNED_BYTE, GL_TRIANGLE_STRIP
-)
-
-
 from urllib.parse import urlparse
-from config import load_config
-from fft_ws_client import FFTWebsocketClient
-from mqtt_bridge import MqttBridge
-from module.layout import Box, get_layout_dimensions, load_layout_config
-from module.spectrum import SpectrumBars, SineWaveVisualizer
-from module.tars_idle import TarsIdle
+
+# Set OpenGL platform before importing pygame/OpenGL
+os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
+
+import numpy as np
+import pygame
+from OpenGL.GL import (
+    GL_ARRAY_BUFFER,
+    GL_BLEND,
+    GL_COLOR_BUFFER_BIT,
+    GL_COMPILE_STATUS,
+    GL_DEPTH_BUFFER_BIT,
+    GL_FLOAT,
+    GL_FRAGMENT_SHADER,
+    GL_LINEAR,
+    GL_LINK_STATUS,
+    GL_ONE_MINUS_SRC_ALPHA,
+    GL_RGBA,
+    GL_SRC_ALPHA,
+    GL_STATIC_DRAW,
+    GL_TEXTURE0,
+    GL_TEXTURE_2D,
+    GL_TEXTURE_MAG_FILTER,
+    GL_TEXTURE_MIN_FILTER,
+    GL_TRIANGLE_STRIP,
+    GL_UNPACK_ALIGNMENT,
+    GL_UNSIGNED_BYTE,
+    GL_VERTEX_SHADER,
+    glActiveTexture,
+    glAttachShader,
+    glBindBuffer,
+    glBindTexture,
+    glBlendFunc,
+    glBufferData,
+    glClear,
+    glClearColor,
+    glCompileShader,
+    glCreateProgram,
+    glCreateShader,
+    glDeleteShader,
+    glDrawArrays,
+    glEnable,
+    glEnableVertexAttribArray,
+    glGenBuffers,
+    glGenTextures,
+    glGetProgramInfoLog,
+    glGetProgramiv,
+    glGetShaderInfoLog,
+    glGetShaderiv,
+    glGetUniformLocation,
+    glLinkProgram,
+    glPixelStorei,
+    glShaderSource,
+    glTexImage2D,
+    glTexParameteri,
+    glTexSubImage2D,
+    glUniform2f,
+    glUseProgram,
+    glVertexAttribPointer,
+    glViewport,
+)
+from pydantic import ValidationError
+from pygame.locals import DOUBLEBUF, OPENGL
 
 # Import typed contracts
 from tars.contracts.envelope import Envelope
-from tars.contracts.v1.stt import FinalTranscript, PartialTranscript
 from tars.contracts.v1.llm import LLMResponse
+from tars.contracts.v1.stt import FinalTranscript, PartialTranscript
 from tars.contracts.v1.tts import TtsStatus
+
+from ui.config import load_config
+from ui.fft_ws_client import FFTWebsocketClient
+from ui.module.layout import Box, get_layout_dimensions, load_layout_config
+from ui.module.spectrum import SineWaveVisualizer, SpectrumBars
+from ui.module.tars_idle import TarsIdle
+from ui.mqtt_bridge import MqttBridge
 
 CFG = load_config()
 
@@ -111,6 +149,7 @@ void main() {
 }
 """
 
+
 def _compile_shader(src, kind):
     sh = glCreateShader(kind)
     glShaderSource(sh, src)
@@ -120,16 +159,21 @@ def _compile_shader(src, kind):
         raise RuntimeError(glGetShaderInfoLog(sh).decode())
     return sh
 
+
 def _make_program():
     vs = _compile_shader(VERT_SRC, GL_VERTEX_SHADER)
     fs = _compile_shader(FRAG_SRC, GL_FRAGMENT_SHADER)
     prog = glCreateProgram()
-    glAttachShader(prog, vs); glAttachShader(prog, fs); glLinkProgram(prog)
+    glAttachShader(prog, vs)
+    glAttachShader(prog, fs)
+    glLinkProgram(prog)
     ok = glGetProgramiv(prog, GL_LINK_STATUS)
     if not ok:
         raise RuntimeError(glGetProgramInfoLog(prog).decode())
-    glDeleteShader(vs); glDeleteShader(fs)
+    glDeleteShader(vs)
+    glDeleteShader(fs)
     return prog
+
 
 def _as_bool(value: Any) -> bool:
     if isinstance(value, bool):
@@ -151,7 +195,7 @@ except (TypeError, ValueError):
 
 print("========== TARS UI STARTING ==========")
 print(f"MQTT Topics: final={FINAL_TOPIC}, llm={LLM_RESPONSE_TOPIC}, tts={TTS_TOPIC}")
-logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(name)s:%(message)s')
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger("tars.ui")
 print("========== LOGGING CONFIGURED ==========")
 
@@ -160,6 +204,7 @@ host = u.hostname or "127.0.0.1"
 port = u.port or 1883
 username = u.username
 password = u.password
+
 
 class UI:
     def __init__(self):
@@ -170,7 +215,9 @@ class UI:
             flags |= pygame.FULLSCREEN
 
         # Request a GLES3 context (works with Panfrost on RK3588)
-        pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_ES)
+        pygame.display.gl_set_attribute(
+            pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_ES
+        )
         pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
         pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 0)
 
@@ -209,7 +256,17 @@ class UI:
         layout_cfg = CFG.get("layout", {}) or {}
         layout_file = str(layout_cfg.get("file", "layout.json"))
         rotation = int(layout_cfg.get("rotation", 0) or 0)
-        layout_data = load_layout_config(Path(__file__).resolve().parent, layout_file)
+        # Search for layout file: cwd first, then app root (../../ from src/ui/)
+        layout_search_paths = [
+            Path.cwd(),  # Current working directory (Docker: /app)
+            Path(__file__).resolve().parent.parent.parent,  # App root (development)
+        ]
+        layout_base_dir = layout_search_paths[0]
+        for search_path in layout_search_paths:
+            if (search_path / layout_file).exists():
+                layout_base_dir = search_path
+                break
+        layout_data = load_layout_config(layout_base_dir, layout_file)
         boxes = get_layout_dimensions(layout_data, self.width, self.height, rotation)
         if not boxes:
             logger.info("No layout boxes defined; using full-width spectrum fallback")
@@ -260,17 +317,32 @@ class UI:
         self.prog = _make_program()
         glUseProgram(self.prog)
         self.u_rotation = glGetUniformLocation(self.prog, "u_rotation_deg")
-        self.u_flip_v   = glGetUniformLocation(self.prog, "u_flip_v")
+        self.u_flip_v = glGetUniformLocation(self.prog, "u_flip_v")
         self.u_resolution = glGetUniformLocation(self.prog, "u_resolution")
         self.u_tex = glGetUniformLocation(self.prog, "u_tex")  # (sampler; defaults to unit 0)
 
         # Fullscreen quad as a TRIANGLE_STRIP: (x, y, u, v) in pixels + UVs
-        quad = np.array([
-            0,            0,             0, 0,
-            self.width,   0,             1, 0,
-            0,            self.height,    0, 1,
-            self.width,   self.height,    1, 1,
-        ], dtype=np.float32)
+        quad = np.array(
+            [
+                0,
+                0,
+                0,
+                0,
+                self.width,
+                0,
+                1,
+                0,
+                0,
+                self.height,
+                0,
+                1,
+                self.width,
+                self.height,
+                1,
+                1,
+            ],
+            dtype=np.float32,
+        )
 
         self.vbo = glGenBuffers(1)
         glBindBuffer(GL_ARRAY_BUFFER, self.vbo)
@@ -292,15 +364,18 @@ class UI:
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
         # allocate storage (no data yet)
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, self.width, self.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, None)
+        glTexImage2D(
+            GL_TEXTURE_2D, 0, GL_RGBA, self.width, self.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, None
+        )
 
     def _blit_surface_via_gles(self, surface: pygame.Surface):
         # NOTE: third arg is now False — do NOT pre-flip in CPU
         pixels = pygame.image.tostring(surface, "RGBA", False)
         glActiveTexture(GL_TEXTURE0)
         glBindTexture(GL_TEXTURE_2D, self.tex)
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, self.width, self.height,
-                    GL_RGBA, GL_UNSIGNED_BYTE, pixels)
+        glTexSubImage2D(
+            GL_TEXTURE_2D, 0, 0, 0, self.width, self.height, GL_RGBA, GL_UNSIGNED_BYTE, pixels
+        )
         glUseProgram(self.prog)
         glUniform2f(self.u_resolution, float(self.width), float(self.height))
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
@@ -332,7 +407,7 @@ class UI:
                 logger.error("Component %s render failed: %s", component.__class__.__name__, exc)
 
         spectrum_top = self.height
-        if self.spectrum_component is not None and hasattr(self.spectrum_component, 'box'):
+        if self.spectrum_component is not None and hasattr(self.spectrum_component, "box"):
             spectrum_top = min(spectrum_top, self.spectrum_component.box.y)
 
         margin = 20
@@ -372,7 +447,7 @@ class UI:
                     top_y + 30,
                     self.width - margin * 2,
                     (180, 255, 180),
-                    alpha
+                    alpha,
                 )
 
         if self.boot_message:
@@ -387,17 +462,19 @@ class UI:
         self._blit_surface_via_gles(self.offscreen_surface)
         pygame.display.flip()
 
-    def _render_wrapped_text(self, text: str, x: int, y: int, max_width: int, color: tuple, alpha: int):
+    def _render_wrapped_text(
+        self, text: str, x: int, y: int, max_width: int, color: tuple, alpha: int
+    ):
         """Render text with word wrapping and alpha transparency."""
         words = text.split()
         lines = []
         current_line = []
-        
+
         for word in words:
             current_line.append(word)
             test_line = " ".join(current_line)
             test_surface = self.font.render(test_line, True, color)
-            
+
             if test_surface.get_width() > max_width:
                 if len(current_line) > 1:
                     # Line too long, render previous line
@@ -408,16 +485,17 @@ class UI:
                     # Single word too long, render it anyway
                     lines.append(test_line)
                     current_line = []
-        
+
         if current_line:
             lines.append(" ".join(current_line))
-        
+
         # Render each line to offscreen surface
         line_height = self.font.get_linesize()
         for i, line in enumerate(lines):
             line_surface = self.font.render(line, True, color)
             line_surface.set_alpha(alpha)
             self.offscreen_surface.blit(line_surface, (x, y + i * line_height))
+
 
 def main():
     event_queue = queue.Queue(maxsize=256)
@@ -445,7 +523,9 @@ def main():
     logger.info("MQTT bridge started")
     fft_client: FFTWebsocketClient | None = None
     if use_ws:
-        fft_client = FFTWebsocketClient(FFT_WS_URL, AUDIO_EVENT, event_queue, retry_seconds=FFT_WS_RETRY)
+        fft_client = FFTWebsocketClient(
+            FFT_WS_URL, AUDIO_EVENT, event_queue, retry_seconds=FFT_WS_RETRY
+        )
         fft_client.start()
     ui = UI()
 
@@ -460,7 +540,7 @@ def main():
                 # Only log non-FFT messages to avoid spam
                 if topic != AUDIO_EVENT:
                     logger.info(f"RX topic={topic}")
-                
+
                 try:
                     if topic == PARTIAL_TOPIC:
                         # Parse envelope and extract PartialTranscript
@@ -468,7 +548,7 @@ def main():
                         partial = PartialTranscript.model_validate(envelope.data)
                         ui.last_partial = partial.text
                         logger.info(f"STT Partial: {ui.last_partial}")
-                    
+
                     elif topic == FINAL_TOPIC:
                         # Parse envelope and extract FinalTranscript
                         envelope = Envelope.model_validate(payload)
@@ -477,7 +557,7 @@ def main():
                         ui.last_final_time = time.monotonic()
                         ui.last_partial = ""
                         logger.info(f"STT Final: {ui.last_final}")
-                    
+
                     elif topic == LLM_RESPONSE_TOPIC:
                         # Parse envelope and extract LLMResponse
                         envelope = Envelope.model_validate(payload)
@@ -489,7 +569,7 @@ def main():
                             logger.info(f"Set LLM response to: {ui.last_llm_response}")
                         elif llm_response.error:
                             logger.error(f"LLM error: {llm_response.error}")
-                    
+
                     elif topic == TTS_TOPIC:
                         # Parse envelope and extract TtsStatus
                         envelope = Envelope.model_validate(payload)
@@ -501,7 +581,7 @@ def main():
                         elif tts_status.event == "speaking_end":
                             ui.tts_speaking = False
                             ui.tts_ended_time = time.monotonic()
-                    
+
                     elif topic == AUDIO_EVENT:
                         # FFT data is not wrapped in envelope
                         fft_vals = payload.get("fft") or []
@@ -513,7 +593,7 @@ def main():
                             else:
                                 # SpectrumBars updates internal state
                                 ui.spectrum_component.update(fft_vals)
-                
+
                 except ValidationError as e:
                     logger.error(f"Invalid payload for topic {topic}: {e}")
                 except Exception as e:

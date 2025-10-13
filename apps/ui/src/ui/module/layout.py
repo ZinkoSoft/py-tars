@@ -1,11 +1,13 @@
 """Layout helpers for positioning UI components."""
+
 from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any
 
 logger = logging.getLogger("tars.ui.layout")
 
@@ -28,7 +30,7 @@ class Box:
         return (self.x, self.y, self.width, self.height)
 
 
-def load_layout_config(base_dir: Path | str, config_file: str) -> Dict[str, Any]:
+def load_layout_config(base_dir: Path | str, config_file: str) -> dict[str, Any]:
     """Load the JSON layout configuration relative to *base_dir*.
 
     Args:
@@ -58,11 +60,11 @@ def load_layout_config(base_dir: Path | str, config_file: str) -> Dict[str, Any]
 
 
 def get_layout_dimensions(
-    layout_config: Dict[str, Any],
+    layout_config: dict[str, Any],
     screen_width: int,
     screen_height: int,
     rotation: int,
-) -> List[Box]:
+) -> list[Box]:
     """Calculate physical box dimensions for layout entries.
 
     The layout file stores normalized coordinates (0-1) for each orientation.
@@ -81,13 +83,13 @@ def get_layout_dimensions(
 
     rotation = rotation % 360
     is_landscape = rotation in (0, 180)
-    preferred_keys: List[str]
+    preferred_keys: list[str]
     if is_landscape:
         preferred_keys = ["landscape", "horizontal", "default"]
     else:
         preferred_keys = ["portrait", "vertical", "default"]
 
-    layout_entries: List[Dict[str, Any]] = []
+    layout_entries: list[dict[str, Any]] = []
     for key in preferred_keys:
         entries = layout_config.get(key)
         if isinstance(entries, list) and entries:
@@ -107,7 +109,7 @@ def get_layout_dimensions(
     else:
         logical_width, logical_height = screen_height, screen_width
 
-    boxes: List[Box] = []
+    boxes: list[Box] = []
     for entry in layout_entries:
         try:
             name = str(entry["name"])

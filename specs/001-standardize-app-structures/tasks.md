@@ -106,20 +106,22 @@ Tasks are organized by app migration. Each app migration is treated as an indepe
 
 ### Implementation for ui
 
-- [ ] T040 [ui] Analyze current structure and document in `/apps/ui/structure-before.txt`
-- [ ] T041 [ui] Create `/apps/ui/src/ui/` directory structure
-- [ ] T042 [ui] Move source files to `/apps/ui/src/ui/`
-- [ ] T043 [ui] Create `/apps/ui/src/ui/__main__.py` entry point
-- [ ] T044 [ui] Create `/apps/ui/tests/` structure (unit/integration/contract)
-- [ ] T045 [ui] Create `/apps/ui/tests/conftest.py`
-- [ ] T046 [ui] Create `/apps/ui/pyproject.toml` with UI-specific dependencies
-- [ ] T047 [ui] Create `/apps/ui/Makefile` with `PACKAGE_NAME := ui`
-- [ ] T048 [ui] Create `/apps/ui/README.md` with usage instructions
-- [ ] T049 [ui] Create `/apps/ui/.env.example`
-- [ ] T050 [ui] Test installation and `make check`
-- [ ] T051 [ui] Update Dockerfile if needed
-- [ ] T052 [ui] Test Docker build
-- [ ] T053 [ui] Document changes in `/apps/ui/structure-after.txt`
+- [X] T040 [ui] Analyze current structure and document in `/apps/ui/structure-before.txt`
+- [X] T041 [ui] Create `/apps/ui/src/ui/` directory structure
+- [X] T042 [ui] Move source files to `/apps/ui/src/ui/`
+- [X] T043 [ui] Create `/apps/ui/src/ui/__main__.py` entry point
+- [X] T044 [ui] Create `/apps/ui/tests/` structure (unit/integration/contract)
+- [X] T045 [ui] Create `/apps/ui/tests/conftest.py`
+- [X] T046 [ui] Create `/apps/ui/pyproject.toml` with UI-specific dependencies
+- [X] T047 [ui] Create `/apps/ui/Makefile` with `PACKAGE_NAME := ui`
+- [X] T048 [ui] Create `/apps/ui/README.md` with usage instructions
+- [X] T049 [ui] Create `/apps/ui/.env.example`
+- [X] T050 [ui] Test installation and `make check`
+- [X] T051 [ui] Update Dockerfile if needed
+- [X] T052 [ui] Test Docker build
+- [X] T053 [ui] Document changes in `/apps/ui/structure-after.txt`
+
+**Checkpoint**: ui fully standardized and validated ✅
 
 ### Implementation for ui-web
 

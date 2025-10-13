@@ -1,11 +1,12 @@
 """Spectrum visualization component."""
+
 from __future__ import annotations
 
 import math
 import time
 from collections import deque
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Iterable, Mapping
 
 import numpy as np
 import pygame
@@ -57,7 +58,9 @@ class SpectrumBars:
         fade = 1.0 - (inactivity - self.fade_threshold) / self.fade_duration
         return max(0.0, fade)
 
-    def render(self, surface: pygame.Surface, now: float, fonts: Mapping[str, pygame.font.Font]) -> None:
+    def render(
+        self, surface: pygame.Surface, now: float, fonts: Mapping[str, pygame.font.Font]
+    ) -> None:
         intensity = self._current_intensity(now)
         self.alpha = intensity
         if intensity <= 0.0:
@@ -91,7 +94,7 @@ class SpectrumBars:
 
 class SineWaveVisualizer:
     """Render a 3D perspective sine wave visualization based on FFT spectrum data."""
-    
+
     def __init__(
         self,
         box: Box,
@@ -106,7 +109,7 @@ class SineWaveVisualizer:
     ):
         """
         Initialize the sine wave visualizer.
-        
+
         Args:
             box: Layout box defining position and dimensions
             rotation: Display rotation (90, 270 will swap width/height)
@@ -138,10 +141,10 @@ class SineWaveVisualizer:
     def _current_intensity(self, now: float) -> float:
         """
         Calculate current fade intensity based on time since last update.
-        
+
         Args:
             now: Current monotonic time
-            
+
         Returns:
             Intensity value between 0.0 (fully faded) and 1.0 (fully visible)
         """
@@ -156,7 +159,7 @@ class SineWaveVisualizer:
     def update(self, spectrum: np.ndarray) -> None:
         """
         Update the sine wave visualization state with new spectrum data.
-        
+
         Args:
             spectrum: FFT spectrum data (numpy array of floats)
         """
@@ -166,7 +169,7 @@ class SineWaveVisualizer:
         # Use a threshold to filter out background noise
         max_val = np.max(spectrum) if spectrum.size > 0 else 0.0
         has_data = max_val > 0.1  # Increased threshold to better distinguish audio from noise
-        
+
         # Only update last_update timestamp when we have actual audio data
         if has_data:
             self.last_update = now
@@ -188,10 +191,12 @@ class SineWaveVisualizer:
 
             self.wave_history.appendleft(sinewave_points.copy())
 
-    def render(self, surface: pygame.Surface, now: float, fonts: Mapping[str, pygame.font.Font]) -> None:
+    def render(
+        self, surface: pygame.Surface, now: float, fonts: Mapping[str, pygame.font.Font]
+    ) -> None:
         """
         Render the sine wave visualization to the surface.
-        
+
         Args:
             surface: Surface to render to
             now: Current monotonic time
@@ -199,14 +204,14 @@ class SineWaveVisualizer:
         """
         # Calculate current fade intensity
         intensity = self._current_intensity(now)
-        
+
         # Skip rendering if fully faded out
         if intensity <= 0.0:
             return
 
         # Render all historical waves with perspective, fade, and intensity
         for i, wave in enumerate(reversed(self.wave_history)):
-            base_alpha = int(255 * (1 - self.decay ** i))
+            base_alpha = int(255 * (1 - self.decay**i))
             # Apply fade-out intensity to alpha
             alpha = int(base_alpha * intensity)
             color = (255, 255, 255, alpha)

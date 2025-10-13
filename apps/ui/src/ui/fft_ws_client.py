@@ -1,4 +1,5 @@
 """Synchronous websocket client streaming FFT frames into the UI queue."""
+
 from __future__ import annotations
 
 import logging
@@ -82,4 +83,3 @@ class FFTWebsocketClient:
             else:
                 if not self._stop.is_set():
                     time.sleep(self.retry_seconds)
-

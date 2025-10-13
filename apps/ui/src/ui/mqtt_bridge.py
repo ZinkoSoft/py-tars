@@ -1,10 +1,11 @@
 """MQTT bridge utilities for the pygame UI."""
+
 from __future__ import annotations
 
 import logging
 import queue
 import threading
-from typing import Mapping
+from collections.abc import Mapping
 
 import orjson
 import paho.mqtt.client as mqtt
@@ -41,7 +42,7 @@ class MqttBridge:
         self.client.on_message = self._on_message
         self._thread: threading.Thread | None = None
 
-    def _on_message(self, client, userdata, msg):  # pragma: no cover - MQTT callback
+    def _on_message(self, client, userdata, msg):  # MQTT callback signature required
         try:
             payload = orjson.loads(msg.payload)
         except Exception:
@@ -83,4 +84,3 @@ class MqttBridge:
             pass
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
-

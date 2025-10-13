@@ -2,9 +2,10 @@
 
 Prefers TOML via Python 3.11+ tomllib, supports env overrides. Behavior unchanged.
 """
-import os
+
 import copy
-from typing import Any, Dict
+import os
+from typing import Any
 
 # Python 3.11 has tomllib in stdlib
 try:
@@ -13,7 +14,7 @@ except Exception:  # pragma: no cover
     tomllib = None  # Fallback handled below
 
 
-DEFAULT_CONFIG: Dict[str, Any] = {
+DEFAULT_CONFIG: dict[str, Any] = {
     "mqtt": {
         "url": "mqtt://tars:pass@127.0.0.1:1883",
     },
@@ -44,7 +45,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 }
 
 
-def _deep_merge(dst: Dict[str, Any], src: Dict[str, Any]) -> Dict[str, Any]:
+def _deep_merge(dst: dict[str, Any], src: dict[str, Any]) -> dict[str, Any]:
     for k, v in src.items():
         if isinstance(v, dict) and isinstance(dst.get(k), dict):
             _deep_merge(dst[k], v)
@@ -53,22 +54,29 @@ def _deep_merge(dst: Dict[str, Any], src: Dict[str, Any]) -> Dict[str, Any]:
     return dst
 
 
-def _load_toml(path: str) -> Dict[str, Any]:
+def _load_toml(path: str) -> dict[str, Any]:
     if not path or not os.path.exists(path):
         return {}
     if tomllib is None:
-        raise RuntimeError("tomllib not available; running on Python < 3.11? Please upgrade or provide env-based config.")
+        raise RuntimeError(
+            "tomllib not available; running on Python < 3.11? Please upgrade or provide env-based config."
+        )
     with open(path, "rb") as f:
         return tomllib.load(f) or {}
 
 
-def load_config() -> Dict[str, Any]:
+def load_config() -> dict[str, Any]:
     cfg = copy.deepcopy(DEFAULT_CONFIG)
-    # Search order: UI_CONFIG env -> /config/ui.toml -> local ui.toml next to this file
+    # Search order:
+    # 1. UI_CONFIG env variable
+    # 2. /config/ui.toml (Docker mount)
+    # 3. ./ui.toml (current working directory)
+    # 4. ../../ui.toml (two levels up from src/ui/ - for development)
     candidates = [
         os.getenv("UI_CONFIG"),
         "/config/ui.toml",
-        os.path.join(os.path.dirname(__file__), "ui.toml"),
+        "ui.toml",  # Current working directory
+        os.path.join(os.path.dirname(__file__), "..", "..", "ui.toml"),  # App root
     ]
     for p in candidates:
         try:
