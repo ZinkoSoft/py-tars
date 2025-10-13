@@ -262,8 +262,8 @@ services:
       CAMERA_HTTP_HOST: 0.0.0.0
       CAMERA_HTTP_PORT: ${CAMERA_HTTP_PORT:-8080}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      PYTHONPATH: /workspace/apps/camera-service
-    command: ["python", "/workspace/apps/camera-service/main.py"]
+      PYTHONPATH: /workspace/apps/camera-service/src
+    command: ["python", "-m", "camera_service"]
     ports:
       - "${CAMERA_HTTP_PORT:-8080}:${CAMERA_HTTP_PORT:-8080}"
     volumes:

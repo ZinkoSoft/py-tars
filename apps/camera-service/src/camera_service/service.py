@@ -1,17 +1,16 @@
 """Camera service orchestration."""
+
 import asyncio
 import io
 import logging
 import time
-from typing import Optional
 
 from PIL import Image
 
-from capture import CameraCapture
-from config import ServiceConfig
-from mqtt_client import MQTTPublisher
-from streaming import StreamingServer
-
+from .capture import CameraCapture
+from .config import ServiceConfig
+from .mqtt_client import MQTTPublisher
+from .streaming import StreamingServer
 
 logger = logging.getLogger("camera.service")
 
@@ -23,11 +22,11 @@ class CameraService:
         self.cfg = config
         self.running = False
         self.frame_count = 0
-        
+
         # Components
-        self.camera: Optional[CameraCapture] = None
-        self.mqtt: Optional[MQTTPublisher] = None
-        self.http: Optional[StreamingServer] = None
+        self.camera: CameraCapture | None = None
+        self.mqtt: MQTTPublisher | None = None
+        self.http: StreamingServer | None = None
 
     async def start(self) -> None:
         """Initialize all components and start capture loop."""
@@ -165,7 +164,7 @@ class CameraService:
         """Encode RGB frame as JPEG bytes."""
         img = Image.fromarray(frame_rgb)
         buffer = io.BytesIO()
-        img.save(buffer, format='JPEG', quality=quality, optimize=True)
+        img.save(buffer, format="JPEG", quality=quality, optimize=True)
         return buffer.getvalue()
 
     async def _reconnect_camera(self) -> None:

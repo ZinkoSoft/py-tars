@@ -1,4 +1,5 @@
 """Camera service configuration from environment variables."""
+
 import os
 from dataclasses import dataclass
 
@@ -6,6 +7,7 @@ from dataclasses import dataclass
 @dataclass
 class CameraConfig:
     """Camera hardware and capture settings."""
+
     device_index: int
     width: int
     height: int
@@ -20,6 +22,7 @@ class CameraConfig:
 @dataclass
 class MQTTConfig:
     """MQTT connection settings."""
+
     url: str
     frame_topic: str
     health_topic: str
@@ -28,6 +31,7 @@ class MQTTConfig:
 @dataclass
 class HTTPConfig:
     """HTTP streaming server settings."""
+
     host: str
     port: int
 
@@ -35,6 +39,7 @@ class HTTPConfig:
 @dataclass
 class ServiceConfig:
     """Complete camera service configuration."""
+
     enabled: bool
     camera: CameraConfig
     mqtt: MQTTConfig

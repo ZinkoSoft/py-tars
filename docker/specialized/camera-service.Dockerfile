@@ -19,17 +19,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-WORKDIR /app
-COPY apps/camera-service/requirements.txt ./requirements.txt
-RUN pip install --upgrade pip && \
-    pip install -r requirements.txt
+# Set up workspace
+WORKDIR /workspace
 
-# Copy application source
-COPY apps/camera-service/ /app/
+# Copy application with src/ layout
+COPY apps/camera-service/ /workspace/apps/camera-service/
+
+# Install package in editable mode
+RUN pip install --upgrade pip && \
+    pip install -e /workspace/apps/camera-service
 
 # Set environment
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/workspace/apps/camera-service/src
 
-# Run the service
-CMD ["python", "/app/main.py"]
+# Run the service using module entrypoint
+CMD ["python", "-m", "camera_service"]

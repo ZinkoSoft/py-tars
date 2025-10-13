@@ -1,10 +1,9 @@
 """Camera capture and frame processing."""
+
 import logging
 import time
-from typing import Optional
 
 import cv2
-
 
 logger = logging.getLogger("camera.capture")
 
@@ -17,10 +16,10 @@ class CameraCapture:
         self.width = width
         self.height = height
         self.fps = fps
-        self.camera: Optional[cv2.VideoCapture] = None
-        self.backend: Optional[str] = None
+        self.camera: cv2.VideoCapture | None = None
+        self.backend: str | None = None
         self.consecutive_failures = 0
-        self.last_successful_frame_time: Optional[float] = None
+        self.last_successful_frame_time: float | None = None
 
     def open(self) -> None:
         """Open camera with V4L2 backend, fallback to default."""
@@ -47,7 +46,7 @@ class CameraCapture:
 
         except Exception as e:
             self._cleanup()
-            raise RuntimeError(f"Camera initialization failed: {e}")
+            raise RuntimeError(f"Camera initialization failed: {e}") from e
 
     def _configure_camera(self, backend: str) -> None:
         """Configure camera properties and verify settings."""
@@ -70,10 +69,10 @@ class CameraCapture:
             f"{actual_width}x{actual_height} @ {actual_fps}fps"
         )
 
-    def capture_frame(self, max_retries: int = 3) -> Optional[bytes]:
+    def capture_frame(self, max_retries: int = 3) -> bytes | None:
         """
         Capture a single frame and return as RGB numpy array.
-        
+
         Returns None on failure after retries.
         """
         if not self.camera:
@@ -87,10 +86,10 @@ class CameraCapture:
                     self.last_successful_frame_time = time.time()
                     # Convert BGR to RGB
                     return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                
+
                 logger.debug(f"Capture attempt {attempt + 1}/{max_retries} failed")
                 time.sleep(0.05)  # Brief pause before retry
-                
+
             except Exception as e:
                 logger.warning(f"Capture attempt {attempt + 1} exception: {e}")
                 time.sleep(0.05)

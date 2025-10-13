@@ -1,11 +1,10 @@
 """MJPEG HTTP streaming server."""
+
 import logging
 import threading
 import time
-from typing import Optional
 
 from flask import Flask, Response
-
 
 logger = logging.getLogger("camera.http")
 
@@ -17,29 +16,28 @@ class StreamingServer:
         self.host = host
         self.port = port
         self.fps = fps
-        self.latest_frame: Optional[bytes] = None
+        self.latest_frame: bytes | None = None
         self.frame_lock = threading.Lock()
         self.flask_app = self._create_app()
-        self.server_thread: Optional[threading.Thread] = None
+        self.server_thread: threading.Thread | None = None
 
     def _create_app(self) -> Flask:
         """Create Flask application with routes."""
         app = Flask(__name__)
 
-        @app.route('/stream')
+        @app.route("/stream")
         def stream():
             """MJPEG stream endpoint."""
             return Response(
-                self._generate_frames(),
-                mimetype='multipart/x-mixed-replace; boundary=frame'
+                self._generate_frames(), mimetype="multipart/x-mixed-replace; boundary=frame"
             )
 
-        @app.route('/snapshot')
+        @app.route("/snapshot")
         def snapshot():
             """Single frame snapshot endpoint."""
             with self.frame_lock:
                 if self.latest_frame:
-                    return Response(self.latest_frame, mimetype='image/jpeg')
+                    return Response(self.latest_frame, mimetype="image/jpeg")
                 return Response("No frame available", status=503)
 
         return app
@@ -50,9 +48,9 @@ class StreamingServer:
             with self.frame_lock:
                 if self.latest_frame:
                     yield (
-                        b'--frame\r\n'
-                        b'Content-Type: image/jpeg\r\n'
-                        b'\r\n' + self.latest_frame + b'\r\n'
+                        b"--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n"
+                        b"\r\n" + self.latest_frame + b"\r\n"
                     )
             time.sleep(1.0 / self.fps)  # Throttle to target FPS
 
@@ -63,10 +61,7 @@ class StreamingServer:
 
     def start(self) -> None:
         """Start HTTP server in background thread."""
-        self.server_thread = threading.Thread(
-            target=self._run_server,
-            daemon=True
-        )
+        self.server_thread = threading.Thread(target=self._run_server, daemon=True)
         self.server_thread.start()
         logger.info(f"HTTP streaming server started on {self.host}:{self.port}")
 
@@ -74,11 +69,7 @@ class StreamingServer:
         """Run Flask server (called in background thread)."""
         try:
             self.flask_app.run(
-                host=self.host,
-                port=self.port,
-                threaded=True,
-                debug=False,
-                use_reloader=False
+                host=self.host, port=self.port, threaded=True, debug=False, use_reloader=False
             )
         except Exception as e:
             logger.error(f"HTTP server error: {e}")

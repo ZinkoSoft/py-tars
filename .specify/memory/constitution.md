@@ -1,26 +1,28 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version Change: Initial → 1.0.0
-Rationale: First official constitution ratification for py-tars project
+Version Change: 1.0.0 → 1.1.0
+Rationale: Added Docker Build System documentation section
 
-Modified Principles: N/A (initial creation)
+Modified Principles: N/A
 Added Sections:
-  - Core Principles (7 principles defined)
-  - MQTT Contract Standards
-  - Development Workflow & Quality Gates
-  - Governance
+  - Docker Build System (new section between MQTT Contract Standards and Development Workflow)
+    - Dockerfile Architecture (app.Dockerfile vs specialized)
+    - Build System Guidelines (when to use which)
+    - Docker Compose Integration
+    - Complete mapping of all 13 specialized Dockerfiles with purposes
 
 Removed Sections: N/A
 
 Templates Requiring Updates:
-  ✅ .specify/templates/plan-template.md - Reviewed, aligns with constitution checks
-  ✅ .specify/templates/spec-template.md - Reviewed, aligns with testability requirements
-  ✅ .specify/templates/tasks-template.md - Reviewed, aligns with user story and test-first approach
-  ✅ README.md - Already contains comprehensive architecture and development guidance
-  ✅ .github/copilot-instructions.md - Serves as authoritative runtime development guidance
+  ✅ No template changes required - documentation addition only
 
-Follow-up TODOs: None - all placeholders filled
+Follow-up TODOs: 
+  - Update specialized Dockerfiles as services are migrated to src/ layout (per 001-standardize-app-structures)
+  - Consider consolidating services that no longer need specialized builds
+
+Previous Versions:
+  - 1.0.0 (2025-10-13): Initial constitution ratification
 -->
 
 # py-tars Constitution
@@ -149,6 +151,77 @@ Breaking changes require:
 3. Deprecation timeline for old topics
 4. Update to all affected services
 
+## Docker Build System
+
+### Dockerfile Architecture
+
+The project uses a two-tier Docker build system:
+
+#### 1. Shared Multi-Stage Dockerfile (`docker/app.Dockerfile`)
+
+The **default builder** for most services. This reusable multi-stage Dockerfile:
+- **Purpose**: Build any app in the monorepo with consistent patterns
+- **Build Args**:
+  - `PY_VERSION`: Python version (default 3.11)
+  - `APP_PATH`: Path to the app (e.g., `apps/router`)
+  - `CONTRACTS_PATH`: Path to contracts package (default `packages/tars-contracts`)
+  - `APP_MODULE`: Python module to run with `python -m` (e.g., `tars_router.app_main`)
+  - `APP_CMD`: Optional shell command (overrides APP_MODULE)
+- **Stages**:
+  - `base`: Sets up Python environment with tini and non-root user
+  - `builder`: Builds wheels for contracts + app packages
+  - `runtime`: Installs wheels and runs via `start-app.sh` entrypoint
+- **Used by**: Services that follow standard Python packaging (src/ layout, pyproject.toml)
+
+#### 2. Specialized Dockerfiles (`docker/specialized/*.Dockerfile`)
+
+Service-specific Dockerfiles for apps with unique dependencies:
+
+| Dockerfile | Service | Special Requirements |
+|------------|---------|---------------------|
+| `camera-service.Dockerfile` | Camera Service | libcamera, OpenCV system deps, V4L2 |
+| `stt-worker.Dockerfile` | STT Worker | Audio libraries, Whisper models |
+| `stt-ws.Dockerfile` | STT WebSocket Server | Faster-Whisper, WebSocket server |
+| `tts-worker.Dockerfile` | TTS Worker | Piper synthesis, PulseAudio, ONNX runtime |
+| `wake-activation.Dockerfile` | Wake Word Detection | OpenWakeWord, audio processing, optional NPU (rknnlite) |
+| `memory-worker.Dockerfile` | Memory/RAG Worker | SentenceTransformers, vector DB, embeddings |
+| `llm-worker.Dockerfile` | LLM Worker | OpenAI SDK, provider interfaces |
+| `router.Dockerfile` | Router | Minimal deps for rules engine |
+| `mcp-bridge.Dockerfile` | MCP Bridge | Model Context Protocol SDK |
+| `mcp-server.Dockerfile` | MCP Server | MCP server framework |
+| `ui.Dockerfile` | Terminal UI | TUI libraries (textual, rich) |
+| `ui-web.Dockerfile` | Web UI | Flask/FastAPI, web framework deps |
+
+### Build System Guidelines
+
+When creating or modifying services:
+
+1. **Use `app.Dockerfile` by default** if the service:
+   - Follows standard Python packaging (src/ layout, pyproject.toml)
+   - Has no special system dependencies beyond Python packages
+   - Can use pip-installable dependencies
+
+2. **Create specialized Dockerfile** when the service requires:
+   - System libraries not available via pip (libcamera, audio libs, NPU drivers)
+   - Hardware-specific compilation (ONNX with CPU extensions, rknnlite)
+   - Complex multi-stage builds with custom toolchains
+   - Non-Python runtimes or frameworks
+
+3. **Migration Path**: As services are standardized (see `specs/001-standardize-app-structures`):
+   - Update specialized Dockerfiles to use new src/ layout
+   - Change `COPY apps/<service>/ /app/` to `COPY apps/<service>/ /workspace/apps/<service>/`
+   - Update `CMD` to use entry point: `["python", "-m", "<package_name>"]`
+   - Consider migrating to `app.Dockerfile` if system deps can be removed
+
+### Docker Compose Integration
+
+Service definitions in `ops/compose.yml` and `ops/compose.npu.yml` specify:
+- Which Dockerfile to use (`build.dockerfile`)
+- Build args for `app.Dockerfile` services
+- Volume mounts (source code, models, configs)
+- Environment variables
+- Network mode (`host` for services needing direct hardware access)
+
 ## Development Workflow & Quality Gates
 
 ### Python Environment
@@ -236,4 +309,4 @@ For detailed implementation patterns, runtime conventions, and service-specific 
 - Error handling conventions
 - Performance guidelines
 
-**Version**: 1.0.0 | **Ratified**: 2025-10-13 | **Last Amended**: 2025-10-13
+**Version**: 1.1.0 | **Ratified**: 2025-10-13 | **Last Amended**: 2025-10-13
