@@ -40,8 +40,10 @@ Status updates: movement/status
 - `point(speed=0.7)` - Pointing gesture
 - `pose(speed=0.6)` - Strike a pose
 - `celebrate(speed=0.8)` - Victory celebration
-- `balance(speed=0.6)` - Balancing animation
 - `swing_legs(speed=0.6)` - Pendulum leg motion
+- `pezz_dispenser(speed=0.5)` - Candy dispenser motion (10s hold)
+- `mic_drop(speed=0.8)` - Dramatic mic drop gesture
+- `monster_pose(speed=0.7)` - Defensive/threatening pose
 
 ## MQTT Contract
 
@@ -117,7 +119,7 @@ Based on ESP32 firmware (`firmware/esp32/movements/sequences.py`):
 - `wave` - Wave with right arm
 - `laugh` - Bouncing motion
 - `swing_legs` - Pendulum leg motion
-- `pezz` - Candy dispenser motion (10s hold)
+- `pezz_dispenser` / `pezz` - Candy dispenser motion (10s hold)
 - `now` - Pointing gesture
 - `balance` - Balancing animation
 - `mic_drop` - Dramatic mic drop

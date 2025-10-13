@@ -7,8 +7,9 @@ The `tars-mcp-movement` package has been successfully created and installed in y
 **Status**:
 - ✅ Package created at `packages/tars-mcp-movement/`
 - ✅ Installed in venv with dev dependencies
-- ✅ All 22 tests passing
+- ✅ All 25 tests passing (5 movement + 11 action tools)
 - ✅ MCP server runs successfully
+- ✅ Complete ESP32 firmware coverage (all 15 sequences)
 - ✅ Ready for Docker integration
 
 ## What You Can Do Now
@@ -99,7 +100,7 @@ mosquitto_pub -h localhost -t 'llm/request' -m '{
 - `turn_right(speed=0.8)` - Rotate right
 - `stop_movement()` - Emergency stop
 
-### Actions (8 tools)
+### Actions (11 tools)
 - `wave(speed=0.7)` - Wave gesture
 - `laugh(speed=0.9)` - Bouncing motion
 - `bow(speed=0.5)` - Bow forward
@@ -107,6 +108,9 @@ mosquitto_pub -h localhost -t 'llm/request' -m '{
 - `pose(speed=0.6)` - Strike a pose
 - `celebrate(speed=0.8)` - Victory motion
 - `swing_legs(speed=0.6)` - Playful leg swing
+- `pezz_dispenser(speed=0.5)` - Candy dispenser (10s hold)
+- `mic_drop(speed=0.8)` - Dramatic mic drop
+- `monster_pose(speed=0.7)` - Threatening pose
 - `reset_position(speed=0.8)` - Return to neutral
 
 ## File Structure

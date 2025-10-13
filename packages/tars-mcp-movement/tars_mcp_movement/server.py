@@ -500,6 +500,126 @@ def swing_legs(speed: float = 0.6) -> dict[str, Any]:
 
 
 @app.tool()
+def pezz_dispenser(speed: float = 0.5) -> dict[str, Any]:
+    """Dispense candy motion - tilt head back and hold for 10 seconds.
+    
+    Use this for the Pez candy dispenser motion. TARS tilts back dramatically
+    and holds the position for 10 seconds (classic Pez dispenser motion).
+    
+    Args:
+        speed: Tilt speed (0.1-1.0). Default 0.5 (deliberate).
+    
+    Returns:
+        dict with mqtt_publish directive for llm-worker
+    
+    Example:
+        User: "Do the Pez dispenser thing"
+        TARS: "Here comes the candy! *tilts back*"
+        TARS calls: pezz_dispenser(speed=0.5)
+    """
+    if not 0.1 <= speed <= 1.0:
+        return {
+            "success": False,
+            "error": f"Speed must be between 0.1-1.0, got {speed}",
+        }
+    
+    return {
+        "success": True,
+        "message": f"Executing Pez dispenser motion at speed {speed} (10s hold)",
+        "mqtt_publish": {
+            "topic": TOPIC_MOVEMENT_TEST,
+            "event_type": "movement.command",
+            "data": {
+                "command": "pezz_dispenser",
+                "speed": speed,
+                "request_id": str(uuid.uuid4()),
+            },
+            "source": "mcp-movement",
+        },
+    }
+
+
+@app.tool()
+def mic_drop(speed: float = 0.8) -> dict[str, Any]:
+    """Dramatic mic drop gesture - raise arm then drop hand quickly.
+    
+    Use this after delivering a zinger, making a great point, or finishing
+    a performance. TARS raises arm then drops hand in dramatic fashion.
+    
+    Args:
+        speed: Movement speed (0.1-1.0). Default 0.8.
+    
+    Returns:
+        dict with mqtt_publish directive for llm-worker
+    
+    Example:
+        User: "What's 2+2?"
+        TARS: "Four. *mic drop*"
+        TARS calls: mic_drop(speed=0.8)
+    """
+    if not 0.1 <= speed <= 1.0:
+        return {
+            "success": False,
+            "error": f"Speed must be between 0.1-1.0, got {speed}",
+        }
+    
+    return {
+        "success": True,
+        "message": f"Dropping the mic at speed {speed}",
+        "mqtt_publish": {
+            "topic": TOPIC_MOVEMENT_TEST,
+            "event_type": "movement.command",
+            "data": {
+                "command": "mic_drop",
+                "speed": speed,
+                "request_id": str(uuid.uuid4()),
+            },
+            "source": "mcp-movement",
+        },
+    }
+
+
+@app.tool()
+def monster_pose(speed: float = 0.7) -> dict[str, Any]:
+    """Defensive/threatening pose - arms up and spread wide.
+    
+    Use this to appear intimidating, protective, or when being playfully scary.
+    TARS raises both arms up and spreads them wide while crouching slightly.
+    
+    Args:
+        speed: Pose speed (0.1-1.0). Default 0.7.
+    
+    Returns:
+        dict with mqtt_publish directive for llm-worker
+    
+    Example:
+        User: "Show me your scary face"
+        TARS: "RAWR! *monster pose*"
+        TARS calls: monster_pose(speed=0.7)
+    """
+    if not 0.1 <= speed <= 1.0:
+        return {
+            "success": False,
+            "error": f"Speed must be between 0.1-1.0, got {speed}",
+        }
+    
+    return {
+        "success": True,
+        "message": f"Striking monster pose at speed {speed}",
+        "mqtt_publish": {
+            "topic": TOPIC_MOVEMENT_TEST,
+            "event_type": "movement.command",
+            "data": {
+                "command": "monster",
+                "speed": speed,
+                "request_id": str(uuid.uuid4()),
+            },
+            "source": "mcp-movement",
+        },
+    }
+
+
+@app.tool()
 def reset_position(speed: float = 0.8) -> dict[str, Any]:
     """Return to neutral position - reset all servos.
     

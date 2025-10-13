@@ -31,18 +31,22 @@ class TestMCPIntegration:
         assert hasattr(server, "pose")
         assert hasattr(server, "celebrate")
         assert hasattr(server, "swing_legs")
+        assert hasattr(server, "pezz_dispenser")
+        assert hasattr(server, "mic_drop")
+        assert hasattr(server, "monster_pose")
         assert hasattr(server, "reset_position")
     
     def test_tool_count(self):
         """Test expected number of tools."""
         from tars_mcp_movement import server
         
-        # 5 movement + 8 action = 13 total tools
-        expected_tools = 13
+        # 5 movement + 11 action = 16 total tools
+        expected_tools = 16
         
         tool_functions = [
             "move_forward", "move_backward", "turn_left", "turn_right", "stop_movement",
-            "wave", "laugh", "bow", "point", "pose", "celebrate", "swing_legs", "reset_position"
+            "wave", "laugh", "bow", "point", "pose", "celebrate", "swing_legs", 
+            "pezz_dispenser", "mic_drop", "monster_pose", "reset_position"
         ]
         
         for tool in tool_functions:

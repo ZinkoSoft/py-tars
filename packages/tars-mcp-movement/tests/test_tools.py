@@ -130,6 +130,30 @@ class TestActionTools:
         assert result["mqtt_publish"]["data"]["command"] == "swing_legs"
         assert result["mqtt_publish"]["data"]["speed"] == 0.6
     
+    def test_pezz_dispenser_valid(self, mock_env):
+        """Test pezz_dispenser action."""
+        result = server.pezz_dispenser(speed=0.5)
+        
+        assert result["success"] is True
+        assert result["mqtt_publish"]["data"]["command"] == "pezz_dispenser"
+        assert result["mqtt_publish"]["data"]["speed"] == 0.5
+    
+    def test_mic_drop_valid(self, mock_env):
+        """Test mic_drop action."""
+        result = server.mic_drop(speed=0.8)
+        
+        assert result["success"] is True
+        assert result["mqtt_publish"]["data"]["command"] == "mic_drop"
+        assert result["mqtt_publish"]["data"]["speed"] == 0.8
+    
+    def test_monster_pose_valid(self, mock_env):
+        """Test monster_pose action."""
+        result = server.monster_pose(speed=0.7)
+        
+        assert result["success"] is True
+        assert result["mqtt_publish"]["data"]["command"] == "monster"
+        assert result["mqtt_publish"]["data"]["speed"] == 0.7
+    
     def test_reset_position_valid(self, mock_env):
         """Test reset to neutral position."""
         result = server.reset_position(speed=0.8)
