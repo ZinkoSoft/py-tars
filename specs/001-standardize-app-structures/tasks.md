@@ -225,22 +225,22 @@ Tasks are organized by app migration. Each app migration is treated as an indepe
 
 ### Implementation for mcp-server
 
-- [ ] T110 [P] [mcp-server] Analyze current structure and document in `/apps/mcp-server/structure-before.txt`
-- [ ] T111 [P] [mcp-server] Create `/apps/mcp-server/src/mcp_server/` directory
-- [ ] T112 [P] [mcp-server] Move source files to `/apps/mcp-server/src/mcp_server/`
-- [ ] T113 [P] [mcp-server] Create `/apps/mcp-server/src/mcp_server/__main__.py` entry point
-- [ ] T114 [P] [mcp-server] Create `/apps/mcp-server/tests/` structure
-- [ ] T115 [P] [mcp-server] Create `/apps/mcp-server/tests/conftest.py`
-- [ ] T116 [P] [mcp-server] Create/update `/apps/mcp-server/pyproject.toml`
-- [ ] T117 [P] [mcp-server] Create `/apps/mcp-server/Makefile` with `PACKAGE_NAME := mcp_server`
-- [ ] T118 [P] [mcp-server] Create/update `/apps/mcp-server/README.md`
-- [ ] T119 [P] [mcp-server] Create `/apps/mcp-server/.env.example`
-- [ ] T120 [P] [mcp-server] Test installation and `make check`
-- [ ] T121 [P] [mcp-server] Update Dockerfile if needed
-- [ ] T122 [P] [mcp-server] Test Docker build
-- [ ] T123 [P] [mcp-server] Document changes in `/apps/mcp-server/structure-after.txt`
+- [X] T110 [mcp-server] Analyze current structure and document in `/apps/mcp-server/structure-before.txt`
+- [X] T111 [mcp-server] Create `/apps/mcp-server/src/tars_mcp_server/` directory
+- [X] T112 [mcp-server] Move source files to `/apps/mcp-server/src/tars_mcp_server/`
+- [X] T113 [mcp-server] Create `/apps/mcp-server/src/tars_mcp_server/__main__.py` entry point (already existed, updated)
+- [X] T114 [mcp-server] Create `/apps/mcp-server/tests/` structure (unit/integration/contract)
+- [X] T115 [mcp-server] Create `/apps/mcp-server/tests/conftest.py` with MQTT mocks
+- [X] T116 [mcp-server] Update `/apps/mcp-server/pyproject.toml` for src/ layout
+- [X] T117 [mcp-server] Create `/apps/mcp-server/Makefile` with `PACKAGE_NAME := tars_mcp_server`
+- [X] T118 [mcp-server] Create `/apps/mcp-server/README.md` (comprehensive documentation)
+- [X] T119 [mcp-server] Create `/apps/mcp-server/.env.example` with integration notes
+- [X] T120 [mcp-server] Test installation and `make check` (✅ 11 tests passing, 90% coverage)
+- [N/A] T121 [mcp-server] Update Dockerfile (not deployed in Docker)
+- [N/A] T122 [mcp-server] Test Docker build (not deployed in Docker)
+- [X] T123 [mcp-server] Document changes in `/apps/mcp-server/structure-after.txt`
 
-**Checkpoint**: Both MCP services standardized and validated
+**Checkpoint**: Both MCP services standardized and validated ✅ **[PHASE 8 COMPLETE]**
 
 ---
 
