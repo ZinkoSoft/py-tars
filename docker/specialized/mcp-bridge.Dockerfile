@@ -41,6 +41,6 @@ RUN python -c "import tomllib; print('\n'.join(tomllib.load(open('/tmp/mcp-bridg
 # This enables live code updates without container rebuild
 
 ENV LOG_LEVEL=INFO \
-    PYTHONPATH=/app
+    PYTHONPATH=/workspace/apps/mcp-bridge/src
 
-CMD ["python", "-m", "mcp_bridge.main"]
+CMD ["python", "-m", "mcp_bridge"]
