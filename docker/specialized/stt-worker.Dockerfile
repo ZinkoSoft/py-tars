@@ -40,12 +40,14 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 # Source code will be provided via volume mount at /workspace/apps/stt-worker
 # This enables live code updates without container rebuild
+# With src/ layout, code is at /workspace/apps/stt-worker/src/stt_worker
 
 # Create directories for models
 RUN mkdir -p /app/models /host-models
 
-# Set PYTHONPATH to workspace mount (will be overridden by compose.yml)
-ENV PYTHONPATH=/app
+# Set PYTHONPATH to workspace mount to find src/ layout
+# Format: /workspace/apps/stt-worker/src
+ENV PYTHONPATH=/workspace/apps/stt-worker/src
 
 # Use entrypoint to copy models from host mount if available
 ENTRYPOINT ["/bin/sh", "-c", "if [ -d /host-models ] && [ -n \"$(ls -A /host-models 2>/dev/null)\" ]; then echo 'Copying models from host...'; cp -r /host-models/* /app/models/ 2>/dev/null || true; fi; exec python -m stt_worker"]

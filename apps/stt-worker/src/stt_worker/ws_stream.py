@@ -76,7 +76,9 @@ class WebSocketStreamClient:
                 elif mtype == "final":
                     # Fulfill the current future if waiting
                     if self._final_future and not self._final_future.done():
-                        self._final_future.set_result((data.get("text", "") or "", data.get("confidence")))
+                        self._final_future.set_result(
+                            (data.get("text", "") or "", data.get("confidence"))
+                        )
                 elif mtype == "health":
                     # ignore health pings
                     continue

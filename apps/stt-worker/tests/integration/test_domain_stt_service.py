@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from collections import deque
 from dataclasses import dataclass
 from threading import Lock
@@ -27,7 +26,9 @@ class FakeVAD:
         with self._lock:
             self._utterances.append(utterance)
 
-    def process_chunk(self, chunk: bytes) -> bytes | None:  # pragma: no cover - exercised via to_thread
+    def process_chunk(
+        self, chunk: bytes
+    ) -> bytes | None:  # pragma: no cover - exercised via to_thread
         with self._lock:
             if self._utterances:
                 return self._utterances.popleft()
@@ -51,7 +52,9 @@ class FakeTranscriber:
         self.calls: int = 0
         self._lock = Lock()
 
-    def transcribe(self, audio: bytes, sample_rate: int) -> tuple[str, float | None, dict[str, float]]:  # pragma: no cover - exercised via to_thread
+    def transcribe(
+        self, audio: bytes, sample_rate: int
+    ) -> tuple[str, float | None, dict[str, float]]:  # pragma: no cover - exercised via to_thread
         with self._lock:
             self.calls += 1
             if self._responses:
@@ -125,15 +128,19 @@ async def test_process_chunk_accepts_candidate_sets_cooldown():
     vad = FakeVAD()
     utterance = b"\x01\x00" * 4000
     vad.queue_utterance(utterance)
-    transcriber = FakeTranscriber([
-        ("Hello World", 0.92, {"avg_no_speech_prob": 0.05}),
-    ])
+    transcriber = FakeTranscriber(
+        [
+            ("Hello World", 0.92, {"avg_no_speech_prob": 0.05}),
+        ]
+    )
     suppression = FakeSuppressionEngine(accept=True)
     service = _make_service(
         vad=vad,
         transcriber=transcriber,
         suppression=suppression,
-        partials=PartialSettings(enabled=False, min_duration_ms=0, min_chars=0, min_new_chars=0, alpha_ratio_min=0.0),
+        partials=PartialSettings(
+            enabled=False, min_duration_ms=0, min_chars=0, min_new_chars=0, alpha_ratio_min=0.0
+        ),
     )
 
     result = await service.process_chunk(b"\x00" * 640, now=100.0)
@@ -150,15 +157,19 @@ async def test_process_chunk_accepts_candidate_sets_cooldown():
 async def test_process_chunk_rejected_returns_reasons():
     vad = FakeVAD()
     vad.queue_utterance(b"\x01\x00" * 4000)
-    transcriber = FakeTranscriber([
-        ("Noisy", 0.4, {}),
-    ])
+    transcriber = FakeTranscriber(
+        [
+            ("Noisy", 0.4, {}),
+        ]
+    )
     suppression = FakeSuppressionEngine(accept=False, reasons=["noise"])
     service = _make_service(
         vad=vad,
         transcriber=transcriber,
         suppression=suppression,
-        partials=PartialSettings(enabled=False, min_duration_ms=0, min_chars=0, min_new_chars=0, alpha_ratio_min=0.0),
+        partials=PartialSettings(
+            enabled=False, min_duration_ms=0, min_chars=0, min_new_chars=0, alpha_ratio_min=0.0
+        ),
     )
 
     result = await service.process_chunk(b"\x00" * 640, now=10.0)
@@ -174,15 +185,19 @@ async def test_process_chunk_rejected_returns_reasons():
 async def test_maybe_partial_streaming_thresholds_and_deltas():
     sample_rate = 16000
     vad = FakeVAD()
-    buffer_bytes = (b"\x01\x00" * int(sample_rate * 0.25))
+    buffer_bytes = b"\x01\x00" * int(sample_rate * 0.25)
     vad.set_active(buffer_bytes, is_speech=True)
-    transcriber = FakeTranscriber([
-        ("hello there", 0.6, {}),
-        ("hello there", 0.6, {}),
-        ("hello there friend", 0.6, {}),
-    ])
+    transcriber = FakeTranscriber(
+        [
+            ("hello there", 0.6, {}),
+            ("hello there", 0.6, {}),
+            ("hello there friend", 0.6, {}),
+        ]
+    )
     suppression = FakeSuppressionEngine()
-    partials = PartialSettings(enabled=True, min_duration_ms=100, min_chars=4, min_new_chars=2, alpha_ratio_min=0.5)
+    partials = PartialSettings(
+        enabled=True, min_duration_ms=100, min_chars=4, min_new_chars=2, alpha_ratio_min=0.5
+    )
     service = _make_service(
         vad=vad,
         transcriber=transcriber,
@@ -207,18 +222,22 @@ async def test_maybe_partial_streaming_thresholds_and_deltas():
 async def test_final_transcript_resets_partial_history():
     sample_rate = 16000
     vad = FakeVAD()
-    buffer_bytes = (b"\x01\x00" * int(sample_rate * 0.2))
+    buffer_bytes = b"\x01\x00" * int(sample_rate * 0.2)
     vad.set_active(buffer_bytes, is_speech=True)
     utterance = b"\x01\x00" * 4000
     vad.queue_utterance(utterance)
 
-    transcriber = FakeTranscriber([
-        ("hello again", 0.5, {}),
-        ("HELLO AGAIN", 0.9, {}),
-        ("hello again", 0.6, {}),
-    ])
+    transcriber = FakeTranscriber(
+        [
+            ("hello again", 0.5, {}),
+            ("HELLO AGAIN", 0.9, {}),
+            ("hello again", 0.6, {}),
+        ]
+    )
     suppression = FakeSuppressionEngine(accept=True)
-    partials = PartialSettings(enabled=True, min_duration_ms=100, min_chars=4, min_new_chars=2, alpha_ratio_min=0.5)
+    partials = PartialSettings(
+        enabled=True, min_duration_ms=100, min_chars=4, min_new_chars=2, alpha_ratio_min=0.5
+    )
     service = _make_service(
         vad=vad,
         transcriber=transcriber,

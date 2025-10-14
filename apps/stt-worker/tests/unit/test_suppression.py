@@ -6,7 +6,6 @@ from pathlib import Path
 from types import ModuleType
 
 import numpy as np
-import pytest
 
 from tars.contracts.v1.stt import FinalTranscript  # type: ignore[import]
 

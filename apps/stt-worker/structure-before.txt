@@ -1,0 +1,31 @@
+.
+├── README.md
+├── __init__.py
+├── main.py
+├── pyproject.toml
+├── requirements.txt
+├── structure-before.txt
+├── stt_worker
+│   ├── __init__.py
+│   ├── app.py
+│   ├── audio_capture.py
+│   ├── audio_fanout.py
+│   ├── audio_preproc.py
+│   ├── config.py
+│   ├── fft_ws.py
+│   ├── mqtt_utils.py
+│   ├── noise_floor_calibrator.py
+│   ├── suppression.py
+│   ├── transcriber.py
+│   ├── vad.py
+│   └── ws_stream.py
+└── tests
+    ├── main.py
+    ├── test_async_transcription.py
+    ├── test_contracts.py
+    ├── test_domain_stt_service.py
+    ├── test_fft_ws.py
+    ├── test_suppression.py
+    └── test_wake_mic.py
+
+3 directories, 26 files

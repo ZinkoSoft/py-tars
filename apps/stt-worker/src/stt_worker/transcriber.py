@@ -35,7 +35,9 @@ class _LocalWhisperTranscriber:
     """Local Faster-Whisper implementation (CPU only by default)."""
 
     def __init__(self) -> None:
-        from faster_whisper import WhisperModel  # lazy import to avoid requiring package for WS backend
+        from faster_whisper import (
+            WhisperModel,
+        )  # lazy import to avoid requiring package for WS backend
 
         logger.info("Loading Whisper model: %s", WHISPER_MODEL)
         self.model = WhisperModel(
@@ -47,7 +49,9 @@ class _LocalWhisperTranscriber:
         )
         logger.info("Whisper model loaded successfully")
 
-    def transcribe(self, audio_data: bytes, input_sample_rate: int) -> Tuple[str, float, Dict[str, Any]]:
+    def transcribe(
+        self, audio_data: bytes, input_sample_rate: int
+    ) -> Tuple[str, float, Dict[str, Any]]:
         audio_np = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
         if input_sample_rate != 16000:
             original_length = len(audio_np)
@@ -79,7 +83,9 @@ class _LocalWhisperTranscriber:
             if lp is not None:
                 logprob_vals.append(lp)
         metrics = {
-            "avg_no_speech_prob": float(sum(no_speech_vals) / len(no_speech_vals)) if no_speech_vals else None,
+            "avg_no_speech_prob": (
+                float(sum(no_speech_vals) / len(no_speech_vals)) if no_speech_vals else None
+            ),
             "avg_logprob": float(sum(logprob_vals) / len(logprob_vals)) if logprob_vals else None,
             "num_segments": len(seg_list),
         }
@@ -92,7 +98,9 @@ class _WebSocketTranscriber:
     def __init__(self, ws_url: str) -> None:
         self.ws_url = ws_url
 
-    def transcribe(self, audio_data: bytes, input_sample_rate: int) -> Tuple[str, float, Dict[str, Any]]:
+    def transcribe(
+        self, audio_data: bytes, input_sample_rate: int
+    ) -> Tuple[str, float, Dict[str, Any]]:
         # Synchronous round-trip using websockets.sync to avoid interfering with asyncio loop
         from websockets.sync.client import connect
 
@@ -156,7 +164,9 @@ class _OpenAITranscriber:
             wf.writeframes(pcm_bytes)
         return buf.getvalue()
 
-    def transcribe(self, audio_data: bytes, input_sample_rate: int) -> Tuple[str, float, Dict[str, Any]]:
+    def transcribe(
+        self, audio_data: bytes, input_sample_rate: int
+    ) -> Tuple[str, float, Dict[str, Any]]:
         import httpx
 
         # Prefer sending native sample rate; OpenAI server handles resampling; keep file concise
@@ -213,23 +223,27 @@ class SpeechTranscriber:
         else:
             self._impl = _LocalWhisperTranscriber()
 
-    def transcribe(self, audio_data: bytes, input_sample_rate: int) -> Tuple[str, float, Dict[str, Any]]:
+    def transcribe(
+        self, audio_data: bytes, input_sample_rate: int
+    ) -> Tuple[str, float, Dict[str, Any]]:
         """Synchronous transcription (blocks for CPU-bound Whisper inference).
-        
+
         For async contexts, prefer transcribe_async() to avoid blocking the event loop.
         """
         return self._impl.transcribe(audio_data, input_sample_rate)
 
-    async def transcribe_async(self, audio_data: bytes, input_sample_rate: int) -> Tuple[str, float, Dict[str, Any]]:
+    async def transcribe_async(
+        self, audio_data: bytes, input_sample_rate: int
+    ) -> Tuple[str, float, Dict[str, Any]]:
         """Async wrapper for transcription using asyncio.to_thread().
-        
+
         Offloads CPU-bound work to a thread pool, keeping the event loop responsive.
         Recommended for all async contexts (e.g., within service event handlers).
-        
+
         Args:
             audio_data: Raw PCM16 audio bytes
             input_sample_rate: Sample rate of the input audio
-            
+
         Returns:
             Tuple of (text, confidence, metrics)
         """

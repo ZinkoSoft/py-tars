@@ -32,7 +32,13 @@ import pyaudio
 import webrtcvad
 
 from .audio_fanout import AudioFanoutPublisher
-from .config import AUDIO_DEVICE_NAME, CHUNK_DURATION_MS, SAMPLE_RATE, UNMUTE_GUARD_MS, VAD_AGGRESSIVENESS
+from .config import (
+    AUDIO_DEVICE_NAME,
+    CHUNK_DURATION_MS,
+    SAMPLE_RATE,
+    UNMUTE_GUARD_MS,
+    VAD_AGGRESSIVENESS,
+)
 
 logger = logging.getLogger("stt-worker.audio")
 
@@ -65,7 +71,9 @@ class AudioCapture:
                     flushed += 1
                 except Empty:
                     break
-            logger.info("Microphone muted%s; flushed %s frames", f" ({reason})" if reason else "", flushed)
+            logger.info(
+                "Microphone muted%s; flushed %s frames", f" ({reason})" if reason else "", flushed
+            )
 
     def unmute(self, reason: str = "") -> None:
         if self.is_muted:
@@ -89,10 +97,10 @@ class AudioCapture:
             )
             if result.returncode != 0:
                 return None
-            
+
             source_name = result.stdout.strip()
             logger.info("PulseAudio default source: %s", source_name)
-            
+
             # Get source details to find ALSA card
             result = subprocess.run(
                 ["pactl", "list", "sources"],
@@ -102,7 +110,7 @@ class AudioCapture:
             )
             if result.returncode != 0:
                 return None
-            
+
             # Parse output to find card number for this source
             lines = result.stdout.split("\n")
             in_target_source = False
@@ -121,7 +129,7 @@ class AudioCapture:
                         break
         except Exception as e:
             logger.warning("Could not query PulseAudio for default source: %s", e)
-        
+
         return None
 
     def start_capture(self) -> None:
@@ -133,14 +141,14 @@ class AudioCapture:
         usb_device = None
         device_count = self.audio.get_device_count()
         logger.info("Scanning %s audio devices for USB microphone...", device_count)
-        
+
         # Try to auto-detect host's default microphone via PulseAudio
         host_card = None
         if not AUDIO_DEVICE_NAME or AUDIO_DEVICE_NAME.lower() in ["auto", "pulse", "default"]:
             host_card = self._get_pulseaudio_default_card()
             if host_card is not None:
                 logger.info("Auto-detected host default microphone on card %d", host_card)
-        
+
         # If AUDIO_DEVICE_NAME is set and not a special auto-detect keyword, try to find it
         if AUDIO_DEVICE_NAME and AUDIO_DEVICE_NAME.lower() not in ["auto", "pulse", "default"]:
             logger.info("Looking for configured device: %s", AUDIO_DEVICE_NAME)
@@ -157,26 +165,36 @@ class AudioCapture:
                         logger.info("Found configured device: %s", device_info["name"])
                         break
                 if usb_device is None:
-                    logger.warning("Configured device '%s' not found, falling back to auto-detection", AUDIO_DEVICE_NAME)
-        
+                    logger.warning(
+                        "Configured device '%s' not found, falling back to auto-detection",
+                        AUDIO_DEVICE_NAME,
+                    )
+
         # Auto-detection if no device configured or configured device not found
         if usb_device is None:
             for i in range(device_count):
                 device_info = self.audio.get_device_info_by_index(i)
-                logger.info("Device %s: '%s' - inputs: %s", i, device_info["name"], device_info["maxInputChannels"])
-                
+                logger.info(
+                    "Device %s: '%s' - inputs: %s",
+                    i,
+                    device_info["name"],
+                    device_info["maxInputChannels"],
+                )
+
                 # If we have a host card number, try to match it first
                 if host_card is not None and device_info["maxInputChannels"] > 0:
                     # Check if this device name contains the card number (e.g., "hw:3,0" or "card 3")
-                    if f"(hw:{host_card}," in device_info["name"] or f"card {host_card}" in device_info["name"].lower():
+                    if (
+                        f"(hw:{host_card}," in device_info["name"]
+                        or f"card {host_card}" in device_info["name"].lower()
+                    ):
                         usb_device = device_info
                         logger.info("Matched host default microphone: %s", device_info["name"])
                         break
-                
+
                 # Fallback to USB detection
-                if (
-                    device_info["maxInputChannels"] > 0
-                    and ("USB" in device_info["name"] or "AIRHUG" in device_info["name"])
+                if device_info["maxInputChannels"] > 0 and (
+                    "USB" in device_info["name"] or "AIRHUG" in device_info["name"]
                 ):
                     supported_rates = []
                     for rate in [8000, 11025, 16000, 22050, 44100, 48000]:
@@ -198,7 +216,10 @@ class AudioCapture:
 
         # If auto-detection found a card but PyAudio can't enumerate it, use ALSA default (routed via PulseAudio)
         if usb_device is None and host_card is not None:
-            logger.info("PyAudio cannot enumerate card %d, using ALSA 'default' (routed via PulseAudio)", host_card)
+            logger.info(
+                "PyAudio cannot enumerate card %d, using ALSA 'default' (routed via PulseAudio)",
+                host_card,
+            )
             # Don't specify device - use system default which is now routed through PulseAudio
             usb_device = None  # Will fall through to PyAudio's default
 
@@ -217,7 +238,7 @@ class AudioCapture:
 
         logger.info("Using audio input: %s at %sHz", usb_device["name"], sample_rate)
         frame_size = int(sample_rate * CHUNK_DURATION_MS / 1000)
-        
+
         # If using ALSA hardware device name (hw:X,Y or plughw:X,Y), find/create PyAudio device
         device_index = usb_device.get("index")
         if usb_device.get("use_alsa_name"):
@@ -230,9 +251,11 @@ class AudioCapture:
                     logger.info("Found ALSA device '%s' at index %d", alsa_name, i)
                     break
             if device_index == -1:
-                logger.error("Cannot open ALSA device '%s' - not found in PyAudio enumeration", alsa_name)
+                logger.error(
+                    "Cannot open ALSA device '%s' - not found in PyAudio enumeration", alsa_name
+                )
                 raise RuntimeError(f"Audio device '{alsa_name}' not available")
-        
+
         self.stream = self.audio.open(
             format=pyaudio.paInt16,
             channels=1,

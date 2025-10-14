@@ -49,7 +49,9 @@ class FFTWebSocketServer:
             finally:
                 await self._unregister(websocket)
 
-        self._server = await serve(handler, self._host, self._port, ping_interval=self._ping_interval)
+        self._server = await serve(
+            handler, self._host, self._port, ping_interval=self._ping_interval
+        )
         actual_port = self.port
         logger.info("FFT websocket listening on ws://%s:%s%s", self._host, actual_port, self._path)
 

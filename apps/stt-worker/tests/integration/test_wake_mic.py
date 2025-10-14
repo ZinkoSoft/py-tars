@@ -42,6 +42,7 @@ class DummyCapture:
         self.is_muted = False
         self.unmute_calls.append(reason)
 
+
 def _encode_event(event_type: str, model) -> bytes:
     envelope = Envelope.new(event_type=event_type, data=model)
     return envelope.model_dump_json().encode()

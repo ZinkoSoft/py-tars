@@ -51,19 +51,21 @@ class VADProcessor:
         # Adaptive noise floor state (RMS units)
         self.noise_floor = float(NOISE_FLOOR_INIT)
         self.last_rms = 0.0
-        
+
         # Initialize noise floor calibrator if enabled
         self.calibrator = None
         if NOISE_FLOOR_CALIB_ENABLE:
             calib_config = {
-                'noise_calib_secs': NOISE_FLOOR_CALIB_SECS,
-                'adaptive_enable': bool(NOISE_FLOOR_ADAPTIVE_ENABLE),
-                'threshold_multiplier': NOISE_FLOOR_THRESHOLD_MULTIPLIER,
-                'update_interval': NOISE_FLOOR_UPDATE_INTERVAL,
+                "noise_calib_secs": NOISE_FLOOR_CALIB_SECS,
+                "adaptive_enable": bool(NOISE_FLOOR_ADAPTIVE_ENABLE),
+                "threshold_multiplier": NOISE_FLOOR_THRESHOLD_MULTIPLIER,
+                "update_interval": NOISE_FLOOR_UPDATE_INTERVAL,
             }
             self.calibrator = NoiseFloorCalibrator(calib_config)
             self.calibrator.set_sample_rate(sample_rate)
-            logger.info("Noise floor calibration enabled (%.1fs calibration)", NOISE_FLOOR_CALIB_SECS)
+            logger.info(
+                "Noise floor calibration enabled (%.1fs calibration)", NOISE_FLOOR_CALIB_SECS
+            )
 
     def process_chunk(self, audio_chunk: bytes) -> Optional[bytes]:
         """Process a single PCM16LE chunk and return a completed utterance if detected.
@@ -89,11 +91,11 @@ class VADProcessor:
                 if not is_calibrated:
                     # Still calibrating, skip this chunk
                     return None
-            
+
             # Update adaptive noise floor from non-speech segments
             if NOISE_FLOOR_ADAPTIVE_ENABLE and not self.is_speech:
                 self.calibrator.update_adaptive_noise_floor(rms)
-            
+
             # Get adaptive threshold
             adaptive_gate = self.calibrator.get_adaptive_threshold(NOISE_FLOOR_THRESHOLD_MULTIPLIER)
             if adaptive_gate is not None:
@@ -106,7 +108,9 @@ class VADProcessor:
             # Original noise floor logic when calibrator is disabled
             # Update adaptive noise floor using EMA when not in speech (or during trailing silence)
             if not self.is_speech:
-                self.noise_floor = (1.0 - NOISE_FLOOR_ALPHA) * self.noise_floor + NOISE_FLOOR_ALPHA * rms
+                self.noise_floor = (
+                    1.0 - NOISE_FLOOR_ALPHA
+                ) * self.noise_floor + NOISE_FLOOR_ALPHA * rms
             else:
                 # During speech, avoid training the floor to high levels; decay slowly toward current rms but more conservatively
                 decay_rate = NOISE_FLOOR_ALPHA * 0.1  # Much slower decay during speech
@@ -134,19 +138,22 @@ class VADProcessor:
 
             # Combine WebRTC VAD with spectral analysis
             # Require both VAD and spectral analysis to agree, or VAD alone with strong spectral evidence
-            confident_speech = has_speech and (speech_like or speech_analysis.get("speech_energy_ratio", 0) > 0.5)
+            confident_speech = has_speech and (
+                speech_like or speech_analysis.get("speech_energy_ratio", 0) > 0.5
+            )
         else:
             confident_speech = has_speech
 
         if confident_speech:
             if not self.is_speech:
                 current_noise_floor = (
-                    self.calibrator.get_noise_floor() if self.calibrator and self.calibrator.is_calibrated()
+                    self.calibrator.get_noise_floor()
+                    if self.calibrator and self.calibrator.is_calibrated()
                     else self.noise_floor
                 )
                 logger.info(
-                    "Speech started (VAD: %s, spectral: %s, RMS: %.3f, gate: %.3f, noise_floor: %.6f)", 
-                    has_speech, 
+                    "Speech started (VAD: %s, spectral: %s, RMS: %.3f, gate: %.3f, noise_floor: %.6f)",
+                    has_speech,
                     speech_like if VAD_ENHANCED_ANALYSIS else "disabled",
                     rms,
                     gate,
@@ -197,30 +204,35 @@ class VADProcessor:
             spectral_rolloff = freqs[rolloff_idx[0]] if len(rolloff_idx) > 0 else 0
 
             # 4. Spectral flux (sudden changes in spectrum indicate speech)
-            if hasattr(self, '_prev_magnitude'):
-                spectral_flux = np.sum((magnitude - self._prev_magnitude)**2)
+            if hasattr(self, "_prev_magnitude"):
+                spectral_flux = np.sum((magnitude - self._prev_magnitude) ** 2)
             else:
                 spectral_flux = 0.0
             self._prev_magnitude = magnitude.copy()
 
             # 5. Energy in speech bands (300-3400 Hz is main speech range)
             speech_band_mask = (freqs >= 300) & (freqs <= 3400)
-            speech_energy = np.sum(magnitude[speech_band_mask]**2)
+            speech_energy = np.sum(magnitude[speech_band_mask] ** 2)
             total_energy = np.sum(magnitude**2)
             speech_energy_ratio = speech_energy / total_energy if total_energy > 0 else 0
 
             # 6. RMS in different frequency bands
             low_freq_mask = freqs < 1000
             high_freq_mask = freqs > 1000
-            low_rms = np.sqrt(np.mean(magnitude[low_freq_mask]**2)) if np.any(low_freq_mask) else 0
-            high_rms = np.sqrt(np.mean(magnitude[high_freq_mask]**2)) if np.any(high_freq_mask) else 0
+            low_rms = (
+                np.sqrt(np.mean(magnitude[low_freq_mask] ** 2)) if np.any(low_freq_mask) else 0
+            )
+            high_rms = (
+                np.sqrt(np.mean(magnitude[high_freq_mask] ** 2)) if np.any(high_freq_mask) else 0
+            )
 
             # Speech detection heuristics
             is_speech_like = (
-                zcr > 0.1 and  # High zero-crossing rate
-                spectral_centroid > 1000 and spectral_centroid < 3000 and  # Speech frequency range
-                speech_energy_ratio > 0.3 and  # Significant energy in speech bands
-                high_rms > low_rms * 0.5  # Balanced high/low frequency energy
+                zcr > 0.1  # High zero-crossing rate
+                and spectral_centroid > 1000
+                and spectral_centroid < 3000  # Speech frequency range
+                and speech_energy_ratio > 0.3  # Significant energy in speech bands
+                and high_rms > low_rms * 0.5  # Balanced high/low frequency energy
             )
 
             return {
@@ -250,17 +262,17 @@ class VADProcessor:
 
     def get_noise_floor_info(self) -> dict:
         """Get noise floor calibration information for debugging.
-        
+
         Returns:
             dict: Noise floor state and calibration progress
         """
         result = {
-            'legacy_noise_floor': self.noise_floor,
-            'last_rms': self.last_rms,
-            'calibrator_enabled': self.calibrator is not None,
+            "legacy_noise_floor": self.noise_floor,
+            "last_rms": self.last_rms,
+            "calibrator_enabled": self.calibrator is not None,
         }
-        
+
         if self.calibrator:
             result.update(self.calibrator.get_calibration_progress())
-        
+
         return result

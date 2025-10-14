@@ -30,22 +30,15 @@ from .config import (
     DICT_MATCH_MIN_RATIO,
     ECHO_FUZZ_MIN_RATIO,
     ECHO_SUPPRESS_MATCH,
-    NOISE_FLOOR_ALPHA,
-    NOISE_FLOOR_INIT,
-    NOISE_GATE_OFFSET,
     NOISE_MAX_PUNCT_RATIO,
     NOISE_MIN_ALPHA_RATIO,
     NOISE_MIN_DURATION_MS,
     NOISE_MIN_LENGTH,
     NOISE_MIN_RMS,
     NO_SPEECH_MAX,
-    POST_PUBLISH_COOLDOWN_MS,
     REPEAT_COOLDOWN_SEC,
     SUPPRESS_USE_RAPIDFUZZ,
     SUPPRESS_USE_SYLLAPY,
-    TTS_BASE_MUTE_MS,
-    TTS_MAX_MUTE_MS,
-    TTS_PER_CHAR_MS,
 )
 
 logger = logging.getLogger("stt-worker.suppression")
@@ -199,7 +192,9 @@ class SuppressionEngine:
             dict_ratio = 0.0
         if dict_ratio < DICT_MATCH_MIN_RATIO and len(raw_text) >= NOISE_MIN_LENGTH:
             # During response windows, be more lenient with dictionary matching
-            min_ratio = 0.05 if in_response_window else DICT_MATCH_MIN_RATIO  # 5% vs 12% during response window
+            min_ratio = (
+                0.05 if in_response_window else DICT_MATCH_MIN_RATIO
+            )  # 5% vs 12% during response window
             if dict_ratio < min_ratio:
                 matched_words = [w for w in word_tokens if w in COMMON_WORDS]
                 info["dict_ratio"] = round(dict_ratio, 3)

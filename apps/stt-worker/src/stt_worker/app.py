@@ -21,7 +21,6 @@ from .audio_preproc import preprocess_pcm
 from .config import (
     AUDIO_FANOUT_PATH,
     AUDIO_FANOUT_RATE,
-    CHUNK_DURATION_MS,
     FFT_BINS,
     FFT_LOG_SCALE,
     FFT_PUBLISH,
@@ -43,15 +42,11 @@ from .config import (
     POST_PUBLISH_COOLDOWN_MS,
     PREPROCESS_ENABLE,
     PREPROCESS_MIN_MS,
-    SAMPLE_RATE,
     STREAMING_PARTIALS,
     STT_BACKEND,
-    TTS_BASE_MUTE_MS,
     TTS_MAX_MUTE_MS,
-    TTS_PER_CHAR_MS,
     TTS_RESPONSE_WINDOW_SEC,
     UNMUTE_GUARD_MS,
-    VAD_AGGRESSIVENESS,
     WAKE_EVENT_FALLBACK_DELAY_MS,
     WAKE_EVENT_FALLBACK_TTL_MS,
 )
@@ -71,14 +66,12 @@ from tars.contracts.v1 import (  # type: ignore[import]
     EVENT_TYPE_WAKE_MIC,
     FinalTranscript,
     HealthPing,
-    PartialTranscript,
     TtsSay,
     TtsStatus,
     WakeEvent,
     WakeMicCommand,
 )
 from tars.domain.stt import (  # type: ignore[import]
-    STTProcessResult,
     STTService,
     STTServiceConfig,
     PartialSettings,
@@ -300,7 +293,10 @@ class STTWorker:
                     self._stay_muted_until_wake = False  # Clear stay-muted flag for response window
                     self.recent_unmute_time = time.time()
                     self._in_response_window = True  # Mark that we're in response window
-                    logger.info("Microphone unmuted for %.1f-second response window after TTS", TTS_RESPONSE_WINDOW_SEC)
+                    logger.info(
+                        "Microphone unmuted for %.1f-second response window after TTS",
+                        TTS_RESPONSE_WINDOW_SEC,
+                    )
 
                     # Keep unmuted for 10 seconds
                     await asyncio.sleep(TTS_RESPONSE_WINDOW_SEC)
@@ -309,7 +305,10 @@ class STTWorker:
                     if not self.pending_tts and not self._resume_after_tts:
                         self.audio_capture.mute("tts response window timeout")
                         self._stay_muted_until_wake = True  # Stay muted until next wake event
-                        logger.info("Response window timeout (%.1fs); microphone muted", TTS_RESPONSE_WINDOW_SEC)
+                        logger.info(
+                            "Response window timeout (%.1fs); microphone muted",
+                            TTS_RESPONSE_WINDOW_SEC,
+                        )
                     self._in_response_window = False  # Clear response window flag
                 except asyncio.CancelledError:
                     self._in_response_window = False  # Clear flag on cancellation
@@ -358,7 +357,9 @@ class STTWorker:
                         self.audio_capture.unmute("tts say fallback-timeout")
                         self.recent_unmute_time = time.time()
                     else:
-                        logger.debug("Skipping fallback TTS auto-unmute; microphone was muted before playback")
+                        logger.debug(
+                            "Skipping fallback TTS auto-unmute; microphone was muted before playback"
+                        )
             except asyncio.CancelledError:  # pragma: no cover - task cleanup
                 pass
             finally:
@@ -400,12 +401,16 @@ class STTWorker:
             logger.info("Microphone state after wake unmute: muted=%s", self.audio_capture.is_muted)
             logger.info("Wake control unmuted microphone")
             if isinstance(ttl_ms, (int, float)) and ttl_ms > 0:
-                self._wake_ttl_task = asyncio.create_task(self._schedule_wake_ttl("mute", ttl_ms, reason))
+                self._wake_ttl_task = asyncio.create_task(
+                    self._schedule_wake_ttl("mute", ttl_ms, reason)
+                )
         else:
             self.audio_capture.mute(f"wake/{reason}")
             logger.info("Wake control muted microphone")
             if isinstance(ttl_ms, (int, float)) and ttl_ms > 0:
-                self._wake_ttl_task = asyncio.create_task(self._schedule_wake_ttl("unmute", ttl_ms, reason))
+                self._wake_ttl_task = asyncio.create_task(
+                    self._schedule_wake_ttl("unmute", ttl_ms, reason)
+                )
 
     def _cancel_wake_fallback(self) -> None:
         task = self._wake_fallback_task
@@ -485,7 +490,7 @@ class STTWorker:
             raise RuntimeError("STT service not initialized")
 
         calibration_log_counter = 0
-        
+
         async for chunk in self.audio_capture.get_audio_chunks():
             await asyncio.sleep(0)
             now = time.time()
@@ -493,7 +498,9 @@ class STTWorker:
                 continue
             if service.in_cooldown(now):
                 continue
-            if self.recent_unmute_time and (now - self.recent_unmute_time) < (UNMUTE_GUARD_MS / 1000.0):
+            if self.recent_unmute_time and (now - self.recent_unmute_time) < (
+                UNMUTE_GUARD_MS / 1000.0
+            ):
                 np_chunk = np.frombuffer(chunk, dtype=np.int16)
                 if np_chunk.size:
                     rms = float(np.sqrt(np.mean(np_chunk.astype(np.float32) ** 2)))
@@ -505,11 +512,13 @@ class STTWorker:
                 calibration_log_counter += 1
                 if calibration_log_counter % 500 == 0:  # Log every ~500 chunks
                     noise_info = self.vad_processor.get_noise_floor_info()
-                    if not noise_info.get('is_calibrated', True):
-                        progress = noise_info.get('progress', 0) * 100
+                    if not noise_info.get("is_calibrated", True):
+                        progress = noise_info.get("progress", 0) * 100
                         logger.info("Calibrating noise floor: %.1f%% complete", progress)
-                    
-            result = await service.process_chunk(chunk, now=now, in_response_window=self._in_response_window)
+
+            result = await service.process_chunk(
+                chunk, now=now, in_response_window=self._in_response_window
+            )
             if result.error:
                 logger.error(result.error)
                 await self.publish_health(False, result.error)
@@ -544,7 +553,11 @@ class STTWorker:
             async def fallback_unmute(ts: float = unmute_at) -> None:
                 try:
                     await asyncio.sleep(max(0, ts - time.time()))
-                    if self.audio_capture.is_muted and not self.pending_tts and not self._stay_muted_until_wake:
+                    if (
+                        self.audio_capture.is_muted
+                        and not self.pending_tts
+                        and not self._stay_muted_until_wake
+                    ):
                         self.audio_capture.unmute("fallback-timeout")
                         self.recent_unmute_time = time.time()
                 except asyncio.CancelledError:  # pragma: no cover
@@ -561,13 +574,16 @@ class STTWorker:
                 self.audio_capture.sample_rate,
                 self.audio_capture.frame_size,
             )
-            
+
             # Log noise floor calibration status
             if NOISE_FLOOR_CALIB_ENABLE:
-                logger.info("Noise floor calibration enabled (%.1fs bootstrap period)", NOISE_FLOOR_CALIB_SECS)
+                logger.info(
+                    "Noise floor calibration enabled (%.1fs bootstrap period)",
+                    NOISE_FLOOR_CALIB_SECS,
+                )
             else:
                 logger.info("Using legacy noise floor adaptation")
-                
+
             partial_settings = PartialSettings(
                 enabled=bool(self._enable_partials),
                 min_duration_ms=PARTIAL_MIN_DURATION_MS,
@@ -634,7 +650,9 @@ class STTWorker:
                 continue
             if self.pending_tts or self.audio_capture.is_muted:
                 continue
-            if self.recent_unmute_time and (time.time() - self.recent_unmute_time) < (UNMUTE_GUARD_MS / 1000.0):
+            if self.recent_unmute_time and (time.time() - self.recent_unmute_time) < (
+                UNMUTE_GUARD_MS / 1000.0
+            ):
                 continue
             partial = await service.maybe_partial()
             if not partial:
