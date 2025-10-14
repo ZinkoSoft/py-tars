@@ -29,14 +29,12 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install /tmp/tars-core && \
     rm -rf /tmp/tars-core
 
-# Install STT worker dependencies ONLY (cached unless requirements.txt or pyproject.toml changes)
-COPY apps/stt-worker/requirements.txt /app/requirements.txt
+# Install STT worker dependencies from pyproject.toml (cached unless pyproject.toml changes)
 COPY apps/stt-worker/pyproject.toml /tmp/stt-worker/pyproject.toml
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r /app/requirements.txt && \
-    python -c "import tomllib; print('\n'.join(tomllib.load(open('/tmp/stt-worker/pyproject.toml','rb'))['project']['dependencies']))" > /tmp/stt-requirements.txt && \
-    pip install -r /tmp/stt-requirements.txt && \
-    rm -rf /tmp/stt-worker /tmp/stt-requirements.txt
+    python -c "import tomllib; deps = tomllib.load(open('/tmp/stt-worker/pyproject.toml','rb'))['project']['dependencies']; print('\n'.join(deps))" > /tmp/deps.txt && \
+    pip install -r /tmp/deps.txt && \
+    rm -rf /tmp/stt-worker /tmp/deps.txt
 
 # Source code will be provided via volume mount at /workspace/apps/stt-worker
 # This enables live code updates without container rebuild
