@@ -1,7 +1,6 @@
 import asyncio
 import signal
 import time
-from pathlib import Path
 
 import pytest
 
@@ -59,6 +58,7 @@ class DummyCachingSynth(DummySynth):
         with open(wav_path, "wb") as f:
             f.write(b"RIFFTEST")
 
+
 def make_callbacks(collected: list[TtsStatus]) -> TTSCallbacks:
     async def publish_status(
         event: str,
@@ -66,6 +66,7 @@ def make_callbacks(collected: list[TtsStatus]) -> TTSCallbacks:
         utt_id: str | None,
         reason: str | None,
         wake_ack: bool | None,
+        system_announce: bool | None = None,
     ) -> None:
         collected.append(
             TtsStatus(
@@ -125,7 +126,9 @@ async def test_pause_without_player_sets_pending_state() -> None:
     session = PlaybackSession(utt_id="utt-1", text="hello", started_at=time.time())
     service._current_session = session  # type: ignore[attr-defined]
 
-    await service.handle_control(TTSControlMessage(action="pause", reason="wake_interrupt", request_id="utt-1"), callbacks)
+    await service.handle_control(
+        TTSControlMessage(action="pause", reason="wake_interrupt", request_id="utt-1"), callbacks
+    )
 
     assert session.pause_pending is True
     assert session.paused is True
@@ -140,7 +143,9 @@ async def test_pause_sends_signal_when_player_exists() -> None:
     session.player_proc = DummyProc()
     service._current_session = session  # type: ignore[attr-defined]
 
-    await service.handle_control(TTSControlMessage(action="pause", reason="wake_interrupt", request_id="utt-2"), callbacks)
+    await service.handle_control(
+        TTSControlMessage(action="pause", reason="wake_interrupt", request_id="utt-2"), callbacks
+    )
 
     assert session.pause_pending is False
     assert session.paused is True
@@ -158,7 +163,9 @@ async def test_resume_issues_sigcont_and_status() -> None:
     session.paused = True
     service._current_session = session  # type: ignore[attr-defined]
 
-    await service.handle_control(TTSControlMessage(action="resume", reason="wake_resume", request_id="utt-3"), callbacks)
+    await service.handle_control(
+        TTSControlMessage(action="resume", reason="wake_resume", request_id="utt-3"), callbacks
+    )
 
     assert session.paused is False
     assert proc.signals[-1] == signal.SIGCONT
@@ -176,7 +183,9 @@ async def test_stop_terminates_player_and_clears_queue() -> None:
     service._agg_id = "utt-4"  # type: ignore[attr-defined]
     service._agg_texts = ["chunk"]  # type: ignore[attr-defined]
 
-    await service.handle_control(TTSControlMessage(action="stop", reason="wake_cancel", request_id="utt-4"), callbacks)
+    await service.handle_control(
+        TTSControlMessage(action="stop", reason="wake_cancel", request_id="utt-4"), callbacks
+    )
 
     assert proc.terminated is True or proc.killed is True
     assert service._agg_texts == []  # type: ignore[attr-defined]
@@ -191,7 +200,9 @@ async def test_control_message_ignores_mismatched_id() -> None:
     session = PlaybackSession(utt_id="utt-5", text="hello", started_at=time.time())
     service._current_session = session  # type: ignore[attr-defined]
 
-    await service.handle_control(TTSControlMessage(action="pause", reason="wake", request_id="other"), callbacks)
+    await service.handle_control(
+        TTSControlMessage(action="pause", reason="wake", request_id="other"), callbacks
+    )
 
     # No status should be emitted because the ids do not match.
     assert not statuses

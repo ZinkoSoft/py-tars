@@ -139,7 +139,9 @@ class TTSService:
             logger.error("Invalid %s payload: %s", model.__name__, exc)
             return None
 
-    async def _publish_event(self, event_type: str, data: Any, *, qos: int = 1, retain: bool = False) -> str | None:
+    async def _publish_event(
+        self, event_type: str, data: Any, *, qos: int = 1, retain: bool = False
+    ) -> str | None:
         publisher = self._publisher
         if publisher is None:
             logger.warning("MQTT publisher unavailable; dropping %s", event_type)
@@ -180,7 +182,9 @@ class TTSService:
         )
         message_id = await self._publish_event(EVENT_TYPE_TTS_STATUS, status, qos=1)
         if message_id is None:
-            envelope = Envelope.new(event_type=EVENT_TYPE_TTS_STATUS, data=status, source=SOURCE_NAME)
+            envelope = Envelope.new(
+                event_type=EVENT_TYPE_TTS_STATUS, data=status, source=SOURCE_NAME
+            )
             await mqtt_client.publish(STATUS_TOPIC, envelope.model_dump_json().encode(), qos=1)
             message_id = envelope.id
         logger.log(
@@ -194,12 +198,18 @@ class TTSService:
         host, port, username, password = parse_mqtt(MQTT_URL)
         logger.info("Connecting to MQTT %s:%s", host, port)
         try:
-            async with mqtt.Client(hostname=host, port=port, username=username, password=password, client_id="tars-tts") as client:
+            async with mqtt.Client(
+                hostname=host, port=port, username=username, password=password, client_id="tars-tts"
+            ) as client:
                 logger.info("Connected to MQTT %s:%s as tars-tts", host, port)
                 self._publisher = AsyncioMQTTPublisher(client)
-                await self._publish_event(EVENT_TYPE_HEALTH_TTS, HealthPing(ok=True, event="ready"), retain=True)
+                await self._publish_event(
+                    EVENT_TYPE_HEALTH_TTS, HealthPing(ok=True, event="ready"), retain=True
+                )
                 await client.subscribe([(SAY_TOPIC, 0), (CONTROL_TOPIC, 0)])
-                logger.info("Subscribed to %s and %s, ready to process messages", SAY_TOPIC, CONTROL_TOPIC)
+                logger.info(
+                    "Subscribed to %s and %s, ready to process messages", SAY_TOPIC, CONTROL_TOPIC
+                )
                 callbacks = self._build_callbacks(client)
                 logger.debug("Starting phrase cache preload task")
                 preload_task: asyncio.Task[None] | None = None
@@ -223,7 +233,9 @@ class TTSService:
                             try:
                                 logger.info("Received message on %s", msg.topic)
                                 if msg.topic.value == SAY_TOPIC:
-                                    say = self._decode_event(msg.payload, TtsSay, event_type=EVENT_TYPE_SAY)
+                                    say = self._decode_event(
+                                        msg.payload, TtsSay, event_type=EVENT_TYPE_SAY
+                                    )
                                     if say is None:
                                         continue
                                     await self._domain.handle_say(say, callbacks)
@@ -243,7 +255,11 @@ class TTSService:
                                     logger.debug("Ignoring unexpected topic %s", msg.topic)
                             except Exception as exc:
                                 logger.error("Error processing message: %s", exc)
-                                await self._publish_event(EVENT_TYPE_HEALTH_TTS, HealthPing(ok=False, err=str(exc)), retain=True)
+                                await self._publish_event(
+                                    EVENT_TYPE_HEALTH_TTS,
+                                    HealthPing(ok=False, err=str(exc)),
+                                    retain=True,
+                                )
                 finally:
                     if preload_task is not None and not preload_task.done():
                         preload_task.cancel()
@@ -253,4 +269,3 @@ class TTSService:
             logger.info("MQTT disconnected: %s; shutting down gracefully", exc)
         finally:
             self._publisher = None
-

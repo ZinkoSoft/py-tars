@@ -54,6 +54,7 @@ def _should_abort() -> bool:
 
 try:
     from piper.voice import PiperVoice  # type: ignore
+
     logger.info("Piper Python API is available")
     _HAS_PIPER_API = True
 except Exception as e:  # pragma: no cover - environment dependent
@@ -97,7 +98,9 @@ class PiperSynth:
                 try:
                     total += self._stream_to_player(chunk)
                 except Exception as e:
-                    logger.warning(f"Streaming failed on chunk {idx+1}/{len(chunks)}: {e}; falling back to file playback for this chunk")
+                    logger.warning(
+                        f"Streaming failed on chunk {idx+1}/{len(chunks)}: {e}; falling back to file playback for this chunk"
+                    )
                     total += self._file_playback(chunk)
             return total
 
@@ -106,6 +109,7 @@ class PiperSynth:
         try:
             # Late import to avoid circulars
             from .config import TTS_CONCURRENCY  # type: ignore
+
             concurrency = max(1, int(TTS_CONCURRENCY))
         except Exception:
             concurrency = 1
@@ -127,9 +131,11 @@ class PiperSynth:
         self._synth_to_wav(text, wav_path)
 
     # ----- Async API -----
-    async def synth_and_play_async(self, text: str, streaming: bool = False, pipeline: bool = True) -> float:
+    async def synth_and_play_async(
+        self, text: str, streaming: bool = False, pipeline: bool = True
+    ) -> float:
         """Async wrapper for synth_and_play. Offloads CPU-bound synthesis to thread pool.
-        
+
         Returns total elapsed seconds until playback finishes.
         Prevents event loop blocking during Piper synthesis (typically 100-500ms per sentence).
         """
@@ -137,7 +143,7 @@ class PiperSynth:
 
     async def synth_to_wav_async(self, text: str, wav_path: str) -> None:
         """Async wrapper for synth_to_wav. Offloads CPU-bound synthesis to thread pool.
-        
+
         Prevents event loop blocking during Piper synthesis operations.
         """
         await asyncio.to_thread(self.synth_to_wav, text, wav_path)
@@ -152,7 +158,11 @@ class PiperSynth:
                 self.voice = PiperVoice.load(self.voice_path)  # type: ignore[attr-defined]
             except TypeError:
                 with open(self.voice_path, "rb") as mf:
-                    config_path = self.voice_path + ".json" if os.path.exists(self.voice_path + ".json") else None
+                    config_path = (
+                        self.voice_path + ".json"
+                        if os.path.exists(self.voice_path + ".json")
+                        else None
+                    )
                     if config_path:
                         try:
                             self.voice = PiperVoice.load(mf, config_path=config_path)  # type: ignore
@@ -197,9 +207,13 @@ class PiperSynth:
                                 # Let outer logic decide on unsupported chunk types
                                 raise TypeError(f"Unsupported chunk type: {type(chunk)!r}")
 
-                        if isinstance(audio_obj, (bytes, bytearray, memoryview)) or hasattr(audio_obj, "tobytes"):
+                        if isinstance(audio_obj, (bytes, bytearray, memoryview)) or hasattr(
+                            audio_obj, "tobytes"
+                        ):
                             _write_chunk(audio_obj)
-                        elif hasattr(audio_obj, "__iter__") and not isinstance(audio_obj, (str, bytes, bytearray)):
+                        elif hasattr(audio_obj, "__iter__") and not isinstance(
+                            audio_obj, (str, bytes, bytearray)
+                        ):
                             # Generator/iterable of chunks
                             iterator = iter(audio_obj)
                             try:
@@ -221,7 +235,9 @@ class PiperSynth:
                                         return samples.tobytes()  # type: ignore[attr-defined]
                                     return bytes(samples)
 
-                                channels = getattr(first, "channels", getattr(first, "num_channels", 1))
+                                channels = getattr(
+                                    first, "channels", getattr(first, "num_channels", 1)
+                                )
                                 sampwidth = getattr(first, "sample_width", 2)  # default 16-bit
                                 framerate = getattr(first, "sample_rate", 22050)
 
@@ -235,7 +251,9 @@ class PiperSynth:
                                             wf.writeframes(_as_bytes(getattr(ch, "samples")))
                                         else:
                                             # Mixed types; fallback for safety
-                                            raise TypeError(f"Mixed or unsupported chunk type: {type(ch)!r}")
+                                            raise TypeError(
+                                                f"Mixed or unsupported chunk type: {type(ch)!r}"
+                                            )
                             else:
                                 # Unsupported chunk structure; fall back to CLI silently
                                 f.close()
@@ -276,7 +294,9 @@ class PiperSynth:
                 try:
                     self._synth_to_wav(txt, out_path)
                 except Exception as e:
-                    logger.warning(f"Synthesis failed for chunk {idx}: {e}; retrying via CLI fallback")
+                    logger.warning(
+                        f"Synthesis failed for chunk {idx}: {e}; retrying via CLI fallback"
+                    )
                     # _synth_to_wav already falls back internally; in case of persistent failure, create empty file
                     try:
                         open(out_path, "wb").close()
@@ -348,10 +368,13 @@ class PiperSynth:
         class _PipeWriter(io.RawIOBase):
             def __init__(self, fh):
                 self.fh = fh
+
             def writable(self):
                 return True
+
             def write(self, b):
                 return self.fh.write(b)
+
             def flush(self):
                 try:
                     self.fh.flush()
@@ -390,7 +413,9 @@ class PiperSynth:
             pass
         if rc != 0:
             if rc < 0 or _should_abort():
-                logger.debug(f"Streaming player exited with code {rc}; aborting playback per stop request")
+                logger.debug(
+                    f"Streaming player exited with code {rc}; aborting playback per stop request"
+                )
                 return time.time() - t0
             logger.warning(f"paplay/aplay exited with code {rc}; falling back to file playback")
             return self._file_playback(text)
@@ -408,9 +433,13 @@ class PiperSynth:
         p_piper.wait()
         if rc != 0:
             if rc < 0 or _should_abort():
-                logger.debug(f"CLI streaming player exited with code {rc}; aborting playback per stop request")
+                logger.debug(
+                    f"CLI streaming player exited with code {rc}; aborting playback per stop request"
+                )
                 return time.time() - t0
-            logger.warning(f"paplay/aplay exited with code {rc} (CLI stream); falling back to file playback")
+            logger.warning(
+                f"paplay/aplay exited with code {rc} (CLI stream); falling back to file playback"
+            )
             return self._file_playback(text)
         return time.time() - t0
 
@@ -430,13 +459,19 @@ class PiperSynth:
             try:
                 import simpleaudio as sa  # type: ignore
                 import wave
-                with wave.open(path, 'rb') as wf:
+
+                with wave.open(path, "rb") as wf:
                     audio_data = wf.readframes(wf.getnframes())
                     sample_rate = wf.getframerate()
                     num_channels = wf.getnchannels()
                     sample_width = wf.getsampwidth()
                 # simpleaudio expects raw PCM parameters
-                play_obj = sa.play_buffer(audio_data, num_channels=num_channels, bytes_per_sample=sample_width, sample_rate=sample_rate)
+                play_obj = sa.play_buffer(
+                    audio_data,
+                    num_channels=num_channels,
+                    bytes_per_sample=sample_width,
+                    sample_rate=sample_rate,
+                )
                 play_obj.wait_done()
                 return
             except Exception as e:
@@ -471,6 +506,7 @@ class PiperSynth:
 
 def _supports_wav_file(voice: object) -> bool:
     import inspect
+
     try:
         sig = inspect.signature(voice.synthesize)  # type: ignore[attr-defined]
     except Exception:

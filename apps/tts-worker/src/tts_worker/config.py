@@ -21,7 +21,9 @@ LOG_LEVEL = getenv("LOG_LEVEL", "INFO")
 MQTT_URL = getenv("MQTT_URL", "mqtt://tars:pass@127.0.0.1:1883")
 PIPER_VOICE = getenv("PIPER_VOICE", "/voices/TARS.onnx")
 TTS_STREAMING = int(getenv("TTS_STREAMING", "0"))  # default to reliable file playback
-TTS_PIPELINE = int(getenv("TTS_PIPELINE", "1"))  # play sentence-by-sentence to reduce time-to-first-audio
+TTS_PIPELINE = int(
+    getenv("TTS_PIPELINE", "1")
+)  # play sentence-by-sentence to reduce time-to-first-audio
 
 # Optional: play audio with simpleaudio instead of paplay/aplay subprocesses (0/1)
 TTS_SIMPLEAUDIO = int(getenv("TTS_SIMPLEAUDIO", "0"))
@@ -59,4 +61,6 @@ ELEVEN_API_BASE = getenv("ELEVEN_API_BASE", "https://api.elevenlabs.io/v1")
 ELEVEN_API_KEY = getenv("ELEVEN_API_KEY", "")
 ELEVEN_VOICE_ID = getenv("ELEVEN_VOICE_ID", "")  # required when TTS_PROVIDER=elevenlabs
 ELEVEN_MODEL_ID = getenv("ELEVEN_MODEL_ID", "eleven_multilingual_v2")
-ELEVEN_OPTIMIZE_STREAMING = int(getenv("ELEVEN_OPTIMIZE_STREAMING", "0"))  # 0/1/2/3 per ElevenLabs docs
+ELEVEN_OPTIMIZE_STREAMING = int(
+    getenv("ELEVEN_OPTIMIZE_STREAMING", "0")
+)  # 0/1/2/3 per ElevenLabs docs

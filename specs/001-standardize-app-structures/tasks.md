@@ -279,22 +279,22 @@ Tasks are organized by app migration. Each app migration is treated as an indepe
 
 ### Implementation for tts-worker
 
-- [ ] T138 [tts-worker] Analyze current structure and document in `/apps/tts-worker/structure-before.txt`
-- [ ] T139 [tts-worker] Create `/apps/tts-worker/src/tts_worker/` directory
-- [ ] T140 [tts-worker] Move existing package to `/apps/tts-worker/src/tts_worker/`
-- [ ] T141 [tts-worker] Ensure `/apps/tts-worker/src/tts_worker/__main__.py` entry point exists
-- [ ] T142 [tts-worker] Organize tests into `/apps/tts-worker/tests/unit/`, `/apps/tts-worker/tests/integration/`, `/apps/tts-worker/tests/contract/`
-- [ ] T143 [tts-worker] Create `/apps/tts-worker/tests/conftest.py`
-- [ ] T144 [tts-worker] Update `/apps/tts-worker/pyproject.toml` for src/ layout
-- [ ] T145 [tts-worker] Create `/apps/tts-worker/Makefile` with `PACKAGE_NAME := tts_worker`
-- [ ] T146 [tts-worker] Update `/apps/tts-worker/README.md` with MQTT topics
-- [ ] T147 [tts-worker] Update `/apps/tts-worker/.env.example`
-- [ ] T148 [tts-worker] Test installation and `make check`
-- [ ] T149 [tts-worker] Update Dockerfile for src/ layout
-- [ ] T150 [tts-worker] Test Docker build
-- [ ] T151 [tts-worker] Document changes in `/apps/tts-worker/structure-after.txt`
+- [X] T138 [tts-worker] Analyze current structure and document in `/apps/tts-worker/structure-before.txt`
+- [X] T139 [tts-worker] Create `/apps/tts-worker/src/tts_worker/` directory
+- [X] T140 [tts-worker] Move existing package to `/apps/tts-worker/src/tts_worker/`
+- [X] T141 [tts-worker] Ensure `/apps/tts-worker/src/tts_worker/__main__.py` entry point exists
+- [X] T142 [tts-worker] Organize tests into `/apps/tts-worker/tests/unit/`, `/apps/tts-worker/tests/integration/`, `/apps/tts-worker/tests/contract/`
+- [X] T143 [tts-worker] Create `/apps/tts-worker/tests/conftest.py`
+- [X] T144 [tts-worker] Update `/apps/tts-worker/pyproject.toml` for src/ layout
+- [X] T145 [tts-worker] Create `/apps/tts-worker/Makefile` with `PACKAGE_NAME := tts_worker`
+- [X] T146 [tts-worker] Update `/apps/tts-worker/README.md` with MQTT topics
+- [X] T147 [tts-worker] Update `/apps/tts-worker/.env.example`
+- [X] T148 [tts-worker] Test installation and `make check` (✅ 9 tests passing)
+- [X] T149 [tts-worker] Update Dockerfile for src/ layout (✅ PYTHONPATH updated)
+- [X] T150 [tts-worker] Test Docker build (✅ tars/tts:dev built successfully)
+- [X] T151 [tts-worker] Document changes in `/apps/tts-worker/structure-after.txt`
 
-**Checkpoint**: tts-worker standardized and validated
+**Checkpoint**: tts-worker standardized and validated ✅ **[PHASE 9 COMPLETE]**
 
 ---
 

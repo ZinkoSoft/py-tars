@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import io
 import logging
 import os
 import tempfile
 import time
-from typing import Optional
 
 import httpx
 
@@ -77,7 +75,12 @@ class ElevenLabsTTS(TTSExternalService):
             dt = time.time() - t0
             logger.info(
                 "ElevenLabs streaming playback finished",
-                extra={"service": "tts", "provider": "elevenlabs", "path": "stream", "duration_s": round(dt, 3)},
+                extra={
+                    "service": "tts",
+                    "provider": "elevenlabs",
+                    "path": "stream",
+                    "duration_s": round(dt, 3),
+                },
             )
             return dt
         except Exception as e:

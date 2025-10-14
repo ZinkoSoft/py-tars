@@ -69,7 +69,9 @@ async def _async_main() -> None:
     try:
         service, fallback = _build_service()
     except Exception:
-        logging.exception("Failed to initialize TTS provider '%s'; falling back to Piper", TTS_PROVIDER)
+        logging.exception(
+            "Failed to initialize TTS provider '%s'; falling back to Piper", TTS_PROVIDER
+        )
         final_synth = fallback or PiperSynth(PIPER_VOICE)
         service = TTSService(final_synth)
     await service.run()
