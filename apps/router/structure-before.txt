@@ -1,0 +1,43 @@
+.
+├── .pytest_cache
+│   ├── v
+│   │   └── cache
+│   ├── .gitignore
+│   ├── CACHEDIR.TAG
+│   └── README.md
+├── __pycache__
+│   └── __init__.cpython-312.pyc
+├── tars_router.egg-info
+│   ├── PKG-INFO
+│   ├── SOURCES.txt
+│   ├── dependency_links.txt
+│   ├── requires.txt
+│   └── top_level.txt
+├── tests
+│   ├── __pycache__
+│   │   ├── test_mqtt_adapter.cpython-312-pytest-8.4.2.pyc
+│   │   ├── test_router_config.cpython-312-pytest-8.4.2.pyc
+│   │   ├── test_router_metrics.cpython-312-pytest-8.4.2.pyc
+│   │   ├── test_router_mqtt_integration.cpython-312-pytest-8.4.2.pyc
+│   │   ├── test_router_streaming.cpython-312-pytest-8.4.2.pyc
+│   │   ├── test_runtime_dispatcher.cpython-312-pytest-8.4.2.pyc
+│   │   ├── test_runtime_helpers.cpython-312-pytest-8.4.2.pyc
+│   │   ├── test_runtime_logging.cpython-312-pytest-8.4.2.pyc
+│   │   ├── test_runtime_registry.cpython-312-pytest-8.4.2.pyc
+│   │   └── test_wake_mode.cpython-312-pytest-8.4.2.pyc
+│   ├── test_mqtt_adapter.py
+│   ├── test_router_config.py
+│   ├── test_router_metrics.py
+│   ├── test_router_mqtt_integration.py
+│   ├── test_router_streaming.py
+│   ├── test_runtime_dispatcher.py
+│   ├── test_runtime_helpers.py
+│   ├── test_runtime_logging.py
+│   ├── test_runtime_registry.py
+│   └── test_wake_mode.py
+├── __init__.py
+├── main.py
+├── pyproject.toml
+└── structure-before.txt
+
+8 directories, 33 files

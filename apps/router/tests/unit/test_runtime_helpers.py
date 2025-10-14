@@ -135,9 +135,15 @@ def test_message_deduplicator_allows_sequence_variants() -> None:
     dedupe = MessageDeduplicator(ttl=60.0, max_entries=32)
     base_id = "req-123"
 
-    first_chunk = _make_payload(base_id, event_type="llm.stream", payload={"seq": 1, "delta": "Hel"})
-    second_chunk = _make_payload(base_id, event_type="llm.stream", payload={"seq": 2, "delta": "lo"})
-    repeat_second = _make_payload(base_id, event_type="llm.stream", payload={"seq": 2, "delta": "lo"})
+    first_chunk = _make_payload(
+        base_id, event_type="llm.stream", payload={"seq": 1, "delta": "Hel"}
+    )
+    second_chunk = _make_payload(
+        base_id, event_type="llm.stream", payload={"seq": 2, "delta": "lo"}
+    )
+    repeat_second = _make_payload(
+        base_id, event_type="llm.stream", payload={"seq": 2, "delta": "lo"}
+    )
     final_resp = _make_payload(base_id, event_type="llm.response", payload={"reply": "Hello"})
 
     assert dedupe.is_duplicate(first_chunk) is False

@@ -19,7 +19,8 @@ def _load_stt_module():
     module_name = "stt_worker_main_for_test"
     if module_name in sys.modules:
         return sys.modules[module_name]
-    module_path = Path(__file__).resolve().parent / "main.py"
+    # Updated path for src/ layout
+    module_path = Path(__file__).resolve().parents[2] / "src" / "stt_worker" / "__main__.py"
     spec = importlib.util.spec_from_file_location(module_name, module_path)
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
@@ -102,6 +103,8 @@ async def test_wake_mic_mute_triggers_unmute_ttl():
 
 @pytest.mark.asyncio
 async def test_wake_event_fallback_unmutes_when_mic_stays_muted(monkeypatch):
+    import stt_worker.app as stt_app
+
     stt_main = _load_stt_module()
     worker = object.__new__(stt_main.STTWorker)
     dummy = DummyCapture()
@@ -113,8 +116,8 @@ async def test_wake_event_fallback_unmutes_when_mic_stays_muted(monkeypatch):
     worker._wake_ttl_task = None
     worker._wake_fallback_task = None
 
-    monkeypatch.setattr(stt_main, "WAKE_EVENT_FALLBACK_DELAY_MS", 5)
-    monkeypatch.setattr(stt_main, "WAKE_EVENT_FALLBACK_TTL_MS", 20)
+    monkeypatch.setattr(stt_app, "WAKE_EVENT_FALLBACK_DELAY_MS", 5)
+    monkeypatch.setattr(stt_app, "WAKE_EVENT_FALLBACK_TTL_MS", 20)
 
     event = WakeEvent(type="wake")
     payload = _encode_event(EVENT_TYPE_WAKE_EVENT, event)

@@ -1,7 +1,13 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "tars-router"
 version = "0.1.0"
-requires-python = ">=3.10"
+description = "Router service for TARS voice assistant - central message orchestration"
+readme = "README.md"
+requires-python = ">=3.11"
 dependencies = [
   "asyncio-mqtt>=0.16.2",
   "orjson>=3.10.7",
@@ -9,5 +15,41 @@ dependencies = [
   "paho-mqtt<2.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2",
+  "pytest-asyncio>=0.23",
+  "pytest-cov>=5.0",
+  "black>=24.0",
+  "ruff>=0.5",
+  "mypy>=1.10",
+  "types-orjson>=3.6",
+]
+
+[project.scripts]
+tars-router = "router.__main__:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["router"]
+
 [tool.ruff]
 line-length = 100
+
+[tool.black]
+line-length = 100
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --strict-markers"

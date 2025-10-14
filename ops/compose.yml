@@ -45,7 +45,7 @@ services:
         PY_VERSION: "3.11"
         APP_PATH: apps/router
         CONTRACTS_PATH: packages/tars-core
-        APP_MODULE: main
+        APP_MODULE: router.__main__
     env_file: ../.env
     image: tars/router:dev
     container_name: tars-router
@@ -147,9 +147,9 @@ services:
       NOISE_FLOOR_ADAPTIVE_ENABLE: ${NOISE_FLOOR_ADAPTIVE_ENABLE:-1}
       NOISE_FLOOR_THRESHOLD_MULTIPLIER: ${NOISE_FLOOR_THRESHOLD_MULTIPLIER:-3.0}
       NOISE_FLOOR_UPDATE_INTERVAL: ${NOISE_FLOOR_UPDATE_INTERVAL:-50}
-      PYTHONPATH: /workspace/apps/stt-worker
+      PYTHONPATH: /workspace/apps/stt-worker/src:/workspace/packages/tars-core/src
     entrypoint: ["/bin/sh", "-c"]
-    command: ["if [ -d /host-models ] && [ -n \"$(ls -A /host-models 2>/dev/null)\" ]; then echo 'Copying models from host...'; cp -r /host-models/* /app/models/ 2>/dev/null || true; fi; exec python /workspace/apps/stt-worker/main.py"]
+    command: ["if [ -d /host-models ] && [ -n \"$(ls -A /host-models 2>/dev/null)\" ]; then echo 'Copying models from host...'; cp -r /host-models/* /app/models/ 2>/dev/null || true; fi; exec python -m stt_worker"]
     depends_on:
       mqtt:
         condition: service_started
@@ -348,7 +348,8 @@ services:
       OPENAI_RESPONSES_MODELS: ${OPENAI_RESPONSES_MODELS:-gpt-5*,gpt-5-mini,gpt-5-nano}
       TOPIC_TOOLS_REGISTRY: ${TOPIC_TOOLS_REGISTRY:-llm/tools/registry}
       TOPIC_TOOL_CALL_RESULT: ${TOPIC_TOOL_CALL_RESULT:-llm/tools/result}
-      PYTHONPATH: /workspace/apps/llm-worker
+      PYTHONPATH: /workspace/apps/llm-worker/src:/workspace/packages/tars-core/src
+    command: ["python", "-m", "llm_worker"]
     volumes:
       - ..:/workspace:ro
     depends_on:

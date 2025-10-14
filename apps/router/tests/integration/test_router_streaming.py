@@ -27,7 +27,9 @@ class DummyPublisher(Publisher):
     def __init__(self) -> None:
         self.messages: list[Tuple[str, object]] = []
 
-    async def publish(self, topic: str, payload: bytes, qos: int = 0, retain: bool = False) -> None:  # pragma: no cover - trivial
+    async def publish(
+        self, topic: str, payload: bytes, qos: int = 0, retain: bool = False
+    ) -> None:  # pragma: no cover - trivial
         envelope = Envelope.model_validate_json(payload)
         model_cls = _EVENT_MODEL_MAP.get(envelope.type)
         parsed = model_cls.model_validate(envelope.data) if model_cls else envelope.data
@@ -60,7 +62,9 @@ def _make_ctx(policy: RouterPolicy) -> tuple[Ctx, DummyPublisher]:
 
 
 @pytest.mark.asyncio
-async def test_streaming_skips_duplicate_final_response(streaming_policy: Tuple[RouterPolicy, RouterSettings]) -> None:
+async def test_streaming_skips_duplicate_final_response(
+    streaming_policy: Tuple[RouterPolicy, RouterSettings],
+) -> None:
     policy, settings = streaming_policy
     ctx, publisher = _make_ctx(policy)
     rid = "rt-stream-duplicate"
@@ -70,7 +74,9 @@ async def test_streaming_skips_duplicate_final_response(streaming_policy: Tuple[
         LLMStreamDelta(id=rid, delta="The capital of Florida is Tallahassee. ", done=False),
         ctx,
     )
-    await policy.handle_llm_stream(LLMStreamDelta(id=rid, delta="Need anything else?", done=True), ctx)
+    await policy.handle_llm_stream(
+        LLMStreamDelta(id=rid, delta="Need anything else?", done=True), ctx
+    )
 
     tts_messages = [msg for topic, msg in publisher.decoded() if topic == settings.topic_tts_say]
     assert [m.text for m in tts_messages if isinstance(m, TtsSay)] == [
@@ -97,7 +103,9 @@ async def test_streaming_skips_duplicate_final_response(streaming_policy: Tuple[
 
 
 @pytest.mark.asyncio
-async def test_streaming_speaks_residual_text(streaming_policy: Tuple[RouterPolicy, RouterSettings]) -> None:
+async def test_streaming_speaks_residual_text(
+    streaming_policy: Tuple[RouterPolicy, RouterSettings],
+) -> None:
     policy, settings = streaming_policy
     ctx, publisher = _make_ctx(policy)
     rid = "rt-stream-residual"

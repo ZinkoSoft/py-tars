@@ -21,7 +21,9 @@ class SampleEvent(BaseModel):
 
 
 class DummySubscriber(Subscriber):
-    async def messages(self, topic: str, qos: int = 0) -> AsyncIterable[Any]:  # pragma: no cover - unused helper
+    async def messages(
+        self, topic: str, qos: int = 0
+    ) -> AsyncIterable[Any]:  # pragma: no cover - unused helper
         raise AssertionError("messages should not be invoked in unit tests")
 
 
@@ -156,7 +158,10 @@ async def test_dispatcher_block_strategy_honors_timeout() -> None:
     assert queued_payload.text == "stay"
     assert queued_sub is sub
 
-    assert any(record["kwargs"].get("extra", {}).get("mode") == "block_timeout" for record in logger.warnings)
+    assert any(
+        record["kwargs"].get("extra", {}).get("mode") == "block_timeout"
+        for record in logger.warnings
+    )
 
 
 @pytest.mark.asyncio

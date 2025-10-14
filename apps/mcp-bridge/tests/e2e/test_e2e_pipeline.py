@@ -31,8 +31,8 @@ async def test_e2e_pipeline_with_local_package(tmp_path):
     config_dir.mkdir()
 
     # Point to real tars-mcp-character package
-    # Path: tests/test_e2e_pipeline.py -> tests -> apps/mcp-bridge -> apps -> py-tars
-    repo_root = Path(__file__).parent.parent.parent.parent
+    # Path: test_e2e_pipeline.py -> e2e -> tests -> mcp-bridge -> apps -> py-tars
+    repo_root = Path(__file__).parent.parent.parent.parent.parent
     real_char_package = repo_root / "packages" / "tars-mcp-character"
 
     if not real_char_package.exists():
@@ -214,9 +214,11 @@ async def test_e2e_config_output_path_customization(tmp_path):
     custom_output.mkdir()
 
     # Point to real package
-    repo_root = Path(__file__).parent.parent.parent.parent
+    repo_root = Path(__file__).parent.parent.parent.parent.parent
     try:
-        (packages_dir / "tars-mcp-character").symlink_to(repo_root / "packages" / "tars-mcp-character")
+        (packages_dir / "tars-mcp-character").symlink_to(
+            repo_root / "packages" / "tars-mcp-character", target_is_directory=True
+        )
     except (OSError, NotImplementedError):
         pytest.skip("Cannot create symlink")
 
@@ -257,9 +259,11 @@ async def test_e2e_config_file_content_validity(tmp_path):
     config_dir.mkdir()
 
     # Point to real package
-    repo_root = Path(__file__).parent.parent.parent.parent
+    repo_root = Path(__file__).parent.parent.parent.parent.parent
     try:
-        (packages_dir / "tars-mcp-character").symlink_to(repo_root / "packages" / "tars-mcp-character")
+        (packages_dir / "tars-mcp-character").symlink_to(
+            repo_root / "packages" / "tars-mcp-character", target_is_directory=True
+        )
     except (OSError, NotImplementedError):
         pytest.skip("Cannot create symlink")
 
@@ -408,9 +412,11 @@ async def test_e2e_config_file_is_atomic(tmp_path):
     config_dir.mkdir()
 
     # Point to real package
-    repo_root = Path(__file__).parent.parent.parent.parent
+    repo_root = Path(__file__).parent.parent.parent.parent.parent
     try:
-        (packages_dir / "tars-mcp-character").symlink_to(repo_root / "packages" / "tars-mcp-character")
+        (packages_dir / "tars-mcp-character").symlink_to(
+            repo_root / "packages" / "tars-mcp-character", target_is_directory=True
+        )
     except (OSError, NotImplementedError):
         pytest.skip("Cannot create symlink")
 

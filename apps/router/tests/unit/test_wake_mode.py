@@ -28,7 +28,9 @@ class DummyPublisher(Publisher):
     def __init__(self) -> None:
         self.messages: list[Tuple[str, object]] = []
 
-    async def publish(self, topic: str, payload: bytes, qos: int = 0, retain: bool = False) -> None:  # pragma: no cover - trivial
+    async def publish(
+        self, topic: str, payload: bytes, qos: int = 0, retain: bool = False
+    ) -> None:  # pragma: no cover - trivial
         envelope = Envelope.model_validate_json(payload)
         model_cls = _EVENT_MODEL_MAP.get(envelope.type)
         parsed = model_cls.model_validate(envelope.data) if model_cls else envelope.data
@@ -160,7 +162,9 @@ async def test_live_mode_enable_disable(router_policy: Tuple[RouterPolicy, Route
 
 
 @pytest.mark.asyncio
-async def test_timeout_event_closes_window(router_policy: Tuple[RouterPolicy, RouterSettings]) -> None:
+async def test_timeout_event_closes_window(
+    router_policy: Tuple[RouterPolicy, RouterSettings],
+) -> None:
     policy, settings = router_policy
     ctx, publisher = _make_ctx(policy)
 

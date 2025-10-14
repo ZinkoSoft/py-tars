@@ -1,0 +1,195 @@
+.
+├── .mypy_cache
+│   ├── 3.11
+│   │   ├── _typeshed
+│   │   ├── apps
+│   │   ├── asyncio
+│   │   ├── asyncio_mqtt
+│   │   ├── collections
+│   │   ├── concurrent
+│   │   ├── ctypes
+│   │   ├── email
+│   │   ├── importlib
+│   │   ├── logging
+│   │   ├── multiprocessing
+│   │   ├── os
+│   │   ├── pathlib
+│   │   ├── string
+│   │   ├── sys
+│   │   ├── urllib
+│   │   ├── zipfile
+│   │   ├── @plugins_snapshot.json
+│   │   ├── __future__.data.json
+│   │   ├── __future__.meta.json
+│   │   ├── _ast.data.json
+│   │   ├── _ast.meta.json
+│   │   ├── _asyncio.data.json
+│   │   ├── _asyncio.meta.json
+│   │   ├── _codecs.data.json
+│   │   ├── _codecs.meta.json
+│   │   ├── _collections_abc.data.json
+│   │   ├── _collections_abc.meta.json
+│   │   ├── _contextvars.data.json
+│   │   ├── _contextvars.meta.json
+│   │   ├── _ctypes.data.json
+│   │   ├── _ctypes.meta.json
+│   │   ├── _frozen_importlib.data.json
+│   │   ├── _frozen_importlib.meta.json
+│   │   ├── _frozen_importlib_external.data.json
+│   │   ├── _frozen_importlib_external.meta.json
+│   │   ├── _io.data.json
+│   │   ├── _io.meta.json
+│   │   ├── _pickle.data.json
+│   │   ├── _pickle.meta.json
+│   │   ├── _queue.data.json
+│   │   ├── _queue.meta.json
+│   │   ├── _sitebuiltins.data.json
+│   │   ├── _sitebuiltins.meta.json
+│   │   ├── _socket.data.json
+│   │   ├── _socket.meta.json
+│   │   ├── _ssl.data.json
+│   │   ├── _ssl.meta.json
+│   │   ├── _thread.data.json
+│   │   ├── _thread.meta.json
+│   │   ├── _weakref.data.json
+│   │   ├── _weakref.meta.json
+│   │   ├── _weakrefset.data.json
+│   │   ├── _weakrefset.meta.json
+│   │   ├── abc.data.json
+│   │   ├── abc.meta.json
+│   │   ├── ast.data.json
+│   │   ├── ast.meta.json
+│   │   ├── builtins.data.json
+│   │   ├── builtins.meta.json
+│   │   ├── codecs.data.json
+│   │   ├── codecs.meta.json
+│   │   ├── contextlib.data.json
+│   │   ├── contextlib.meta.json
+│   │   ├── contextvars.data.json
+│   │   ├── contextvars.meta.json
+│   │   ├── copyreg.data.json
+│   │   ├── copyreg.meta.json
+│   │   ├── dataclasses.data.json
+│   │   ├── dataclasses.meta.json
+│   │   ├── enum.data.json
+│   │   ├── enum.meta.json
+│   │   ├── functools.data.json
+│   │   ├── functools.meta.json
+│   │   ├── genericpath.data.json
+│   │   ├── genericpath.meta.json
+│   │   ├── io.data.json
+│   │   ├── io.meta.json
+│   │   ├── pickle.data.json
+│   │   ├── pickle.meta.json
+│   │   ├── posixpath.data.json
+│   │   ├── posixpath.meta.json
+│   │   ├── queue.data.json
+│   │   ├── queue.meta.json
+│   │   ├── re.data.json
+│   │   ├── re.meta.json
+│   │   ├── resource.data.json
+│   │   ├── resource.meta.json
+│   │   ├── selectors.data.json
+│   │   ├── selectors.meta.json
+│   │   ├── signal.data.json
+│   │   ├── signal.meta.json
+│   │   ├── socket.data.json
+│   │   ├── socket.meta.json
+│   │   ├── sre_compile.data.json
+│   │   ├── sre_compile.meta.json
+│   │   ├── sre_constants.data.json
+│   │   ├── sre_constants.meta.json
+│   │   ├── sre_parse.data.json
+│   │   ├── sre_parse.meta.json
+│   │   ├── ssl.data.json
+│   │   ├── ssl.meta.json
+│   │   ├── subprocess.data.json
+│   │   ├── subprocess.meta.json
+│   │   ├── threading.data.json
+│   │   ├── threading.meta.json
+│   │   ├── time.data.json
+│   │   ├── time.meta.json
+│   │   ├── types.data.json
+│   │   ├── types.meta.json
+│   │   ├── typing.data.json
+│   │   ├── typing.meta.json
+│   │   ├── typing_extensions.data.json
+│   │   ├── typing_extensions.meta.json
+│   │   ├── weakref.data.json
+│   │   ├── weakref.meta.json
+│   │   ├── zipimport.data.json
+│   │   └── zipimport.meta.json
+│   ├── .gitignore
+│   └── CACHEDIR.TAG
+├── .pytest_cache
+│   ├── v
+│   │   └── cache
+│   ├── .gitignore
+│   ├── CACHEDIR.TAG
+│   └── README.md
+├── .ruff_cache
+│   ├── 0.14.0
+│   │   ├── 10252894984017204760
+│   │   ├── 16853690879387901854
+│   │   ├── 2728177591447311145
+│   │   └── 6786038402373643079
+│   ├── .gitignore
+│   └── CACHEDIR.TAG
+├── __pycache__
+│   └── __init__.cpython-312.pyc
+├── src
+│   ├── router
+│   │   ├── __init__.py
+│   │   └── __main__.py
+│   └── tars_router.egg-info
+│       ├── PKG-INFO
+│       ├── SOURCES.txt
+│       ├── dependency_links.txt
+│       ├── entry_points.txt
+│       ├── requires.txt
+│       └── top_level.txt
+├── tars_router.egg-info
+│   ├── PKG-INFO
+│   ├── SOURCES.txt
+│   ├── dependency_links.txt
+│   ├── requires.txt
+│   └── top_level.txt
+├── tests
+│   ├── __pycache__
+│   │   ├── conftest.cpython-312-pytest-8.4.2.pyc
+│   │   ├── test_mqtt_adapter.cpython-312-pytest-8.4.2.pyc
+│   │   ├── test_router_config.cpython-312-pytest-8.4.2.pyc
+│   │   ├── test_router_metrics.cpython-312-pytest-8.4.2.pyc
+│   │   ├── test_router_mqtt_integration.cpython-312-pytest-8.4.2.pyc
+│   │   ├── test_router_streaming.cpython-312-pytest-8.4.2.pyc
+│   │   ├── test_runtime_dispatcher.cpython-312-pytest-8.4.2.pyc
+│   │   ├── test_runtime_helpers.cpython-312-pytest-8.4.2.pyc
+│   │   ├── test_runtime_logging.cpython-312-pytest-8.4.2.pyc
+│   │   ├── test_runtime_registry.cpython-312-pytest-8.4.2.pyc
+│   │   └── test_wake_mode.cpython-312-pytest-8.4.2.pyc
+│   ├── contract
+│   ├── integration
+│   │   ├── __pycache__
+│   │   ├── test_mqtt_adapter.py
+│   │   ├── test_router_mqtt_integration.py
+│   │   ├── test_router_streaming.py
+│   │   └── test_runtime_dispatcher.py
+│   ├── unit
+│   │   ├── __pycache__
+│   │   ├── test_router_config.py
+│   │   ├── test_router_metrics.py
+│   │   ├── test_runtime_helpers.py
+│   │   ├── test_runtime_logging.py
+│   │   ├── test_runtime_registry.py
+│   │   └── test_wake_mode.py
+│   └── conftest.py
+├── .coverage
+├── .env.example
+├── Makefile
+├── README.md
+├── __init__.py
+├── pyproject.toml
+├── structure-after.txt
+└── structure-before.txt
+
+37 directories, 156 files

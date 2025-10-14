@@ -27,7 +27,6 @@ from tars.runtime.registry import register_topics  # type: ignore[import]
 from tars.runtime.subscription import Sub  # type: ignore[import]
 
 
-
 def parse_mqtt(url: str) -> tuple[str, int, str | None, str | None]:
     parsed = urlparse(url)
     return (
@@ -61,8 +60,18 @@ def _build_subscriptions(settings: RouterSettings, policy: RouterPolicy) -> Iter
         await policy.handle_tts_status(event, ctx)
 
     return (
-        Sub(settings.topic_health_tts, HealthPing, lambda evt, ctx: handle_health("tts", evt, ctx), qos=1),
-        Sub(settings.topic_health_stt, HealthPing, lambda evt, ctx: handle_health("stt", evt, ctx), qos=1),
+        Sub(
+            settings.topic_health_tts,
+            HealthPing,
+            lambda evt, ctx: handle_health("tts", evt, ctx),
+            qos=1,
+        ),
+        Sub(
+            settings.topic_health_stt,
+            HealthPing,
+            lambda evt, ctx: handle_health("stt", evt, ctx),
+            qos=1,
+        ),
         Sub(settings.topic_stt_final, FinalTranscript, handle_stt, qos=1),
         Sub(settings.topic_llm_resp, LLMResponse, handle_llm_response, qos=1),
         Sub(settings.topic_llm_stream, LLMStreamDelta, handle_llm_stream, qos=1),
@@ -121,14 +130,18 @@ async def run_router() -> None:
                     handler_timeout=settings.stream_settings.handler_timeout_sec,
                 )
                 ctx = Ctx(pub=publisher, policy=policy, logger=logger, metrics=metrics)
-                await ctx.publish("system.health.router", HealthPing(ok=True, event="ready"), qos=1, retain=True)
+                await ctx.publish(
+                    "system.health.router", HealthPing(ok=True, event="ready"), qos=1, retain=True
+                )
                 backoff = 1.0
                 try:
                     await dispatcher.run()
                 finally:
                     await dispatcher.stop()
         except MqttError as exc:
-            logger.warning("router.mqtt.disconnected", extra={"error": str(exc), "backoff": backoff})
+            logger.warning(
+                "router.mqtt.disconnected", extra={"error": str(exc), "backoff": backoff}
+            )
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2.0, 8.0)
         except Exception as exc:  # pragma: no cover - safety net
