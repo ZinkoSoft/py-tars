@@ -386,12 +386,40 @@ services:
     volumes:
       - ../data/memory:/data
       - ../data/model_cache:/data/model_cache
-      - ../apps/voice/characters:/config/characters:ro
+      - ../apps/memory-worker/characters:/config/characters:ro
       - ..:/workspace:ro
       - /proc/device-tree/compatible:/proc/device-tree/compatible:ro
       - /lib/librknnrt.so:/usr/lib/aarch64-linux-gnu/librknnrt.so:ro
     devices:
       - /dev/dri/renderD129:/dev/dri/renderD129
+    depends_on:
+      mqtt:
+        condition: service_started
+    restart: unless-stopped
+
+  movement:
+    build:
+      context: ..
+      dockerfile: docker/app.Dockerfile
+      args:
+        PY_VERSION: "3.11"
+        APP_PATH: apps/movement-service
+        CONTRACTS_PATH: packages/tars-core
+        APP_MODULE: movement_service
+    image: tars/movement:dev
+    container_name: tars-movement
+    env_file: ../.env
+    environment:
+      MQTT_URL: mqtt://mqtt:1883
+      MQTT_HOST: mqtt
+      MQTT_PORT: "1883"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      MOVEMENT_TEST_TOPIC: ${MOVEMENT_TEST_TOPIC:-movement/test}
+      MOVEMENT_HEALTH_TOPIC: ${MOVEMENT_HEALTH_TOPIC:-system/health/movement}
+      MOVEMENT_PUBLISH_QOS: ${MOVEMENT_PUBLISH_QOS:-1}
+      PYTHONPATH: /workspace/apps/movement-service/src
+    volumes:
+      - ..:/workspace:ro
     depends_on:
       mqtt:
         condition: service_started

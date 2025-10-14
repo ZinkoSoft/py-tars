@@ -509,7 +509,7 @@ Extend `apps/llm-worker/llm_worker/providers/` with new provider implementations
 3. Update services to handle new events
 
 ### Memory & Character Customization
-- Place character TOML files in `apps/voice/characters/`
+- Place character TOML files in `apps/memory-worker/characters/`
 - Extend memory worker RAG strategies in `apps/memory-worker/memory_worker/hyperdb.py`
 - Customize embedding models via `EMBED_MODEL` environment variable
 

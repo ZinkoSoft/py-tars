@@ -144,57 +144,57 @@ Tasks are organized by app migration. Each app migration is treated as an indepe
 
 ---
 
-## Phase 6: Voice Service Migration (Priority: P4)
+## Phase 6: Voice Service Migration (Priority: P4) - ⚠️ COMPLETED (Reorganized)
 
-**Goal**: Migrate voice service
+**Status**: COMPLETED - `apps/voice` was not a service, just character configuration data
 
-**Independent Test**: `cd apps/voice && make check && docker compose build voice`
+**Resolution**: Moved `apps/voice/characters/` → `apps/memory-worker/characters/` since memory-worker is the service that consumes this data. Updated all references in:
+- ops/compose.yml
+- ops/compose.npu.yml
+- README.md
+- docs/TARS_PERSONALITY_SYSTEM.md
+- docs/TARS_AI_COMMUNITY_ANALYSIS.md
+- scripts/run.tests.sh
+- apps/ui-web/static/index.html
+- .env.example
 
-### Implementation for voice
-
-- [ ] T068 [voice] Analyze current structure and document in `/apps/voice/structure-before.txt`
-- [ ] T069 [voice] Create `/apps/voice/src/voice/` directory
-- [ ] T070 [voice] Move source files to `/apps/voice/src/voice/`
-- [ ] T071 [voice] Create `/apps/voice/src/voice/__main__.py` entry point
-- [ ] T072 [voice] Create `/apps/voice/tests/` structure (unit/integration/contract)
-- [ ] T073 [voice] Create `/apps/voice/tests/conftest.py`
-- [ ] T074 [voice] Create `/apps/voice/pyproject.toml`
-- [ ] T075 [voice] Create `/apps/voice/Makefile` with `PACKAGE_NAME := voice`
-- [ ] T076 [voice] Create `/apps/voice/README.md` with MQTT topics
-- [ ] T077 [voice] Create `/apps/voice/.env.example`
-- [ ] T078 [voice] Test installation and `make check`
-- [ ] T079 [voice] Update Dockerfile if needed
-- [ ] T080 [voice] Test Docker build
-- [ ] T081 [voice] Document changes in `/apps/voice/structure-after.txt`
-
-**Checkpoint**: voice service standardized and validated
+**Checkpoint**: ✅ Character configuration relocated to correct service
 
 ---
 
 ## Phase 7: Movement Service Migration (Priority: P5)
 
-**Goal**: Migrate movement-service
+**Goal**: Migrate movement-service (simplified to command-based architecture)
 
 **Independent Test**: `cd apps/movement-service && make check && docker compose build movement-service`
 
+**Note**: Movement service is used by MCP bridge (tars-mcp-movement package) for robot movement control. DO NOT DELETE.
+
+**Architecture Simplification** (COMPLETED):
+- ✅ Removed frame-based architecture (calibration.py, sequences.py)
+- ✅ Converted to command-based: validates TestMovementRequest and forwards to ESP32
+- ✅ ESP32 firmware (tars_controller.py) autonomously executes movements
+- ✅ Updated contracts to use TestMovementRequest, TestMovementCommand
+- ✅ Updated README.md to reflect command-based architecture
+
 ### Implementation for movement-service
 
-- [ ] T082 [movement-service] Analyze current structure and document in `/apps/movement-service/structure-before.txt`
-- [ ] T083 [movement-service] Create `/apps/movement-service/src/movement_service/` directory
-- [ ] T084 [movement-service] Move source files to `/apps/movement-service/src/movement_service/`
-- [ ] T085 [movement-service] Create `/apps/movement-service/src/movement_service/__main__.py` entry point
-- [ ] T086 [movement-service] Create `/apps/movement-service/tests/` structure
-- [ ] T087 [movement-service] Create `/apps/movement-service/tests/conftest.py`
-- [ ] T088 [movement-service] Create `/apps/movement-service/pyproject.toml`
-- [ ] T089 [movement-service] Create `/apps/movement-service/Makefile` with `PACKAGE_NAME := movement_service`
-- [ ] T090 [movement-service] Create `/apps/movement-service/README.md` with MQTT topics
-- [ ] T091 [movement-service] Create `/apps/movement-service/.env.example`
-- [ ] T092 [movement-service] Test installation and `make check`
-- [ ] T093 [movement-service] Update Dockerfile if needed
-- [ ] T094 [movement-service] Test Docker build
-- [ ] T095 [movement-service] Document changes in `/apps/movement-service/structure-after.txt`
+- [X] T082 [movement-service] Analyze current structure and document in `/apps/movement-service/structure-before.txt`
+- [X] T083 [movement-service] Create `/apps/movement-service/src/movement_service/` directory
+- [X] T084 [movement-service] Move source files to `/apps/movement-service/src/movement_service/`
+- [X] T085 [movement-service] Create `/apps/movement-service/src/movement_service/__main__.py` entry point (moved from root)
+- [X] T086 [movement-service] Create `/apps/movement-service/tests/` structure (unit/integration/contract)
+- [X] T087 [movement-service] Create `/apps/movement-service/tests/conftest.py`
+- [X] T088 [movement-service] Create `/apps/movement-service/pyproject.toml` (updated for src/ layout)
+- [X] T089 [movement-service] Create `/apps/movement-service/Makefile` with `PACKAGE_NAME := movement_service`
+- [X] T090 [movement-service] Create `/apps/movement-service/README.md` with MQTT topics (updated for command-based)
+- [X] T091 [movement-service] Create `/apps/movement-service/.env.example`
+- [X] T092 [movement-service] Test installation and `make check` (✅ 8 tests passing)
+- [X] T093 [movement-service] Update Dockerfile (✅ uses generic app.Dockerfile)
+- [X] T094 [movement-service] Test Docker build (✅ tars/movement:dev built successfully)
+- [X] T095 [movement-service] Document changes in `/apps/movement-service/structure-after.txt`
 
-**Checkpoint**: movement-service standardized and validated
+**Checkpoint**: movement-service standardized and validated ✅ **[PHASE 7 COMPLETE]**
 
 ---
 
@@ -269,7 +269,7 @@ Tasks are organized by app migration. Each app migration is treated as an indepe
 
 ---
 
-## Phase 10: TTS Worker Migration (Priority: P8)
+## Phase 9: TTS Worker Migration (Priority: P6)
 
 **Goal**: Migrate tts-worker (audio output service)
 
@@ -296,7 +296,7 @@ Tasks are organized by app migration. Each app migration is treated as an indepe
 
 ---
 
-## Phase 11: LLM Worker Migration (Priority: P9)
+## Phase 10: LLM Worker Migration (Priority: P7)
 
 **Goal**: Migrate llm-worker (LLM integration service)
 
@@ -323,7 +323,7 @@ Tasks are organized by app migration. Each app migration is treated as an indepe
 
 ---
 
-## Phase 12: STT Worker Migration (Priority: P10)
+## Phase 11: STT Worker Migration (Priority: P8)
 
 **Goal**: Migrate stt-worker (audio input service)
 
@@ -350,7 +350,7 @@ Tasks are organized by app migration. Each app migration is treated as an indepe
 
 ---
 
-## Phase 13: Router Migration (Priority: P11 - CRITICAL)
+## Phase 12: Router Migration (Priority: P9 - CRITICAL)
 
 **Goal**: Migrate router (central service - do last, most critical)
 
@@ -380,7 +380,7 @@ Tasks are organized by app migration. Each app migration is treated as an indepe
 
 ---
 
-## Phase 14: Polish & Cross-Cutting Concerns
+## Phase 13: Polish & Cross-Cutting Concerns
 
 **Purpose**: Final touches and documentation
 
@@ -405,25 +405,25 @@ Tasks are organized by app migration. Each app migration is treated as an indepe
 
 1. **Phase 1 (Setup)**: No dependencies - creates templates/tools
 2. **Phase 2 (Foundational)**: Depends on Phase 1 - establishes standards
-3. **Phases 3-13 (App Migrations)**: All depend on Phase 2 completion
+3. **Phases 3-12 (App Migrations)**: All depend on Phase 2 completion
    - Apps can be migrated in parallel if multiple developers
    - Or sequentially following priority order (wake-activation → router)
-4. **Phase 14 (Polish)**: Depends on all app migrations being complete
+4. **Phase 13 (Polish)**: Depends on all app migrations being complete
 
 ### App Migration Independence
 
-Each app migration (Phases 3-13) is **completely independent**:
+Each app migration (Phases 3-12) is **completely independent**:
 - wake-activation (Phase 3): MVP - smallest app, good practice
 - camera-service (Phase 4): Needs most work
 - ui/ui-web (Phase 5): Both can be done in parallel
-- voice (Phase 6): Independent
-- movement-service (Phase 7): Independent
-- mcp-bridge/mcp-server (Phase 8): Both can be done in parallel
-- memory-worker (Phase 9): Independent
-- tts-worker (Phase 10): Independent
-- llm-worker (Phase 11): Independent
-- stt-worker (Phase 12): Independent
-- router (Phase 13): Most critical, do last
+- mcp-bridge/mcp-server (Phase 7): Both can be done in parallel
+- memory-worker (Phase 8): Independent
+- tts-worker (Phase 9): Independent
+- llm-worker (Phase 10): Independent
+- stt-worker (Phase 11): Independent
+- router (Phase 12): Most critical, do last
+
+**Note**: voice (Phase 6) was moved to memory-worker/characters/ as it's configuration data, not a service. movement-service was removed as it's not currently deployed.
 
 ### Within Each App Migration
 
@@ -442,12 +442,12 @@ Standard sequence for each app:
 **During Setup/Foundational (Phases 1-2)**:
 - T003 and T006 can run in parallel with T004-T005
 
-**During App Migrations (Phases 3-13)**:
+**During App Migrations (Phases 3-12)**:
 - With multiple developers, all apps can be migrated in parallel after Phase 2
 - Within Phase 5: T040-T053 (ui) and T054-T067 (ui-web) marked [P]
-- Within Phase 8: T096-T109 (mcp-bridge) and T110-T123 (mcp-server) - mcp-server tasks marked [P]
+- Within Phase 7: T096-T109 (mcp-bridge) and T110-T123 (mcp-server) - mcp-server tasks marked [P]
 
-**During Polish (Phase 14)**:
+**During Polish (Phase 13)**:
 - T197, T198, T199, T200, T201 all marked [P] (different files)
 
 ---
@@ -461,20 +461,20 @@ Migrate one app at a time in priority order:
 1. **Phase 1-2**: Setup + Foundation (1-2 hours)
 2. **Phase 3**: wake-activation (30-60 min) → **TEST & VALIDATE**
 3. **Phase 4**: camera-service (2-3 hours) → **TEST & VALIDATE**
-4. Continue through Phases 5-13 in order
-5. **Phase 14**: Polish and integration
+4. Continue through Phases 5-12 in order
+5. **Phase 13**: Polish and integration
 
-Estimated total time: 15-25 hours
+Estimated total time: 12-20 hours (reduced after removing movement-service)
 
 ### Parallel Team Approach (Multiple Developers)
 
 After Phase 1-2 completion:
 
 - **Developer A**: Phases 3-5 (wake-activation, camera-service, ui services)
-- **Developer B**: Phases 6-9 (voice, movement, MCP, memory)
-- **Developer C**: Phases 10-13 (tts, llm, stt, router)
+- **Developer B**: Phases 7-8 (MCP services, memory)
+- **Developer C**: Phases 9-12 (tts, llm, stt, router)
 
-Estimated time: 5-8 hours with 3 developers
+Estimated time: 4-6 hours with 3 developers
 
 ### Incremental Validation
 
@@ -509,7 +509,7 @@ For each app, verify:
 
 Migration complete when:
 
-1. ✅ All 13 apps follow standard structure
+1. ✅ All 11 deployed apps follow standard structure (movement-service removed, voice moved to memory-worker)
 2. ✅ All apps have functional Makefile with all targets
 3. ✅ All apps have comprehensive README.md
 4. ✅ All apps pass `make check`

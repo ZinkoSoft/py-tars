@@ -8,9 +8,7 @@ import orjson
 def dumps(obj: Any) -> bytes:
     return orjson.dumps(
         obj,
-        option=orjson.OPT_NON_STR_KEYS
-        | orjson.OPT_SERIALIZE_NUMPY
-        | orjson.OPT_SORT_KEYS,
+        option=orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_SORT_KEYS,
     )
 
 

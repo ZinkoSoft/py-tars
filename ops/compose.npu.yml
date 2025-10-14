@@ -110,7 +110,7 @@ services:
       # Base volumes from original service
       - ../data/memory:/data
       - ../data/model_cache:/data/model_cache
-      - ../apps/voice/characters:/config/characters:ro
+      - ../apps/memory-worker/characters:/config/characters:ro
       - ..:/workspace:ro
       # NPU-specific mounts
       - "/dev/dri/renderD129:/dev/dri/renderD129"
