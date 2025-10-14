@@ -15,7 +15,9 @@ if "sentence_transformers" not in sys.modules:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
 
-        def encode(self, texts, show_progress_bar=False, convert_to_numpy=True, normalize_embeddings=True):
+        def encode(
+            self, texts, show_progress_bar=False, convert_to_numpy=True, normalize_embeddings=True
+        ):
             import numpy as np
 
             return np.zeros((len(list(texts)), 4), dtype=np.float32)
@@ -37,7 +39,9 @@ class DummySentenceTransformer:
     def __init__(self, *args: Any, **kwargs: Any) -> None:  # pragma: no cover - init is trivial
         self.calls: list[Any] = []
 
-    def encode(self, texts, show_progress_bar=False, convert_to_numpy=True, normalize_embeddings=True):
+    def encode(
+        self, texts, show_progress_bar=False, convert_to_numpy=True, normalize_embeddings=True
+    ):
         # Return deterministic embeddings without requiring the real model download
         import numpy as np
 
@@ -45,7 +49,9 @@ class DummySentenceTransformer:
 
 
 class StubHyperDB:
-    def __init__(self, *args: Any, **kwargs: Any) -> None:  # pragma: no cover - initialization trivial
+    def __init__(
+        self, *args: Any, **kwargs: Any
+    ) -> None:  # pragma: no cover - initialization trivial
         self.documents: list[Any] = []
         self.vectors = None
 

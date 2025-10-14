@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Iterable
 
 import numpy as np
-import pytest
 
 from memory_worker.hyperdb import HyperConfig, HyperDB  # type: ignore[import]
 
@@ -42,7 +41,9 @@ def test_hyperdb_save_and_load_roundtrip(tmp_path: Path):
     path = tmp_path / "memory.pickle.gz"
     db.save(str(path))
 
-    restored = HyperDB(embedding_fn=embedder, cfg=HyperConfig(rag_strategy="naive", rerank_model=None))
+    restored = HyperDB(
+        embedding_fn=embedder, cfg=HyperConfig(rag_strategy="naive", rerank_model=None)
+    )
     assert restored.load(str(path)) is True
     assert restored.documents == docs
     assert restored.vectors is not None

@@ -84,7 +84,7 @@ logging.getLogger("bm25s").setLevel(logging.WARNING)
 
 class STEmbedder:
     """SentenceTransformer embedding wrapper with async support.
-    
+
     Uses asyncio.to_thread() to offload CPU-bound embedding computation,
     keeping the event loop responsive during memory operations.
     """
@@ -95,11 +95,11 @@ class STEmbedder:
 
     def __call__(self, texts: list[str]) -> np.ndarray:
         """Synchronous embedding (blocks for CPU-bound computation).
-        
+
         For async contexts, prefer embed_async() to avoid blocking the event loop.
         """
         return self._encode_sync(texts)
-    
+
     def _encode_sync(self, texts: list[str]) -> np.ndarray:
         """Internal sync implementation of encoding."""
         embeddings = self.model.encode(
@@ -109,16 +109,16 @@ class STEmbedder:
             normalize_embeddings=True,
         )
         return embeddings.astype(np.float32)
-    
+
     async def embed_async(self, texts: list[str]) -> np.ndarray:
         """Async wrapper for embedding using thread pool.
-        
+
         Offloads CPU-bound SentenceTransformer encoding to avoid blocking
         the event loop during MQTT message processing.
-        
+
         Args:
             texts: List of text strings to embed
-            
+
         Returns:
             numpy array of embeddings (normalized float32)
         """
@@ -131,15 +131,18 @@ class MemoryService:
         self._register_topics()
         os.makedirs(MEMORY_DIR, exist_ok=True)
         self.database_path = os.path.join(MEMORY_DIR, MEMORY_FILE)
-        
+
         # Create embedder with automatic NPU/CPU detection
         from .embedder_factory import create_embedder
+
         self.embedder = create_embedder(EMBED_MODEL)
-        
-        rerank_model = os.getenv("RERANK_MODEL", None)  # None = disabled (faster), "ms-marco-MiniLM-L-12-v2" = enabled (slower but better)
+
+        rerank_model = os.getenv(
+            "RERANK_MODEL", None
+        )  # None = disabled (faster), "ms-marco-MiniLM-L-12-v2" = enabled (slower but better)
         self.db = HyperDB(
             embedding_fn=self.embedder,
-            cfg=HyperConfig(rag_strategy=RAG_STRATEGY, top_k=TOP_K, rerank_model=rerank_model)
+            cfg=HyperConfig(rag_strategy=RAG_STRATEGY, top_k=TOP_K, rerank_model=rerank_model),
         )
         self._load_or_initialize_db()
         self.character = self._load_character()
@@ -206,11 +209,17 @@ class MemoryService:
             async with await self.mqtt_client.connect() as client:
                 await self._publish_health(client, ok=True, event="ready", retain=True)
                 await self._publish_character_current(client)
-                
+
                 # Subscribe to all topics
-                topics = [TOPIC_STT_FINAL, TOPIC_TTS_SAY, TOPIC_QUERY, TOPIC_CHAR_GET, TOPIC_CHAR_UPDATE]
+                topics = [
+                    TOPIC_STT_FINAL,
+                    TOPIC_TTS_SAY,
+                    TOPIC_QUERY,
+                    TOPIC_CHAR_GET,
+                    TOPIC_CHAR_UPDATE,
+                ]
                 await self.mqtt_client.subscribe(client, topics)
-                
+
                 async with client.messages() as stream:
                     async for message in stream:
                         topic = str(getattr(message, "topic", ""))
@@ -290,53 +299,50 @@ class MemoryService:
         return int(len(text.split()) * 1.3)
 
     async def _query_with_token_limit(
-        self, 
-        query: str, 
-        max_tokens: int, 
-        top_k: int = 5
+        self, query: str, max_tokens: int, top_k: int = 5
     ) -> list[MemoryResult]:
         """Token-aware memory retrieval."""
         accumulated_results = []
         accumulated_tokens = 0
-        
+
         # Get base results from hybrid retrieval (fetch more to allow filtering)
         base_results = await self.db.query_async(query, top_k=top_k * 2)
-        
+
         for doc, score in base_results:
             text = self._extract_text_from_doc(doc)
             doc_tokens = self._estimate_tokens(text)
-            
+
             if accumulated_tokens + doc_tokens > max_tokens and accumulated_results:
                 break
-                
+
             # Include timestamp if available
             timestamp = None
             if isinstance(doc, dict) and "timestamp" in doc:
                 timestamp = str(doc["timestamp"])
-                
-            accumulated_results.append(MemoryResult(
-                document=doc if isinstance(doc, dict) else {"text": str(doc)},
-                score=float(score),
-                timestamp=timestamp,
-                context_type="target",
-                token_count=doc_tokens
-            ))
+
+            accumulated_results.append(
+                MemoryResult(
+                    document=doc if isinstance(doc, dict) else {"text": str(doc)},
+                    score=float(score),
+                    timestamp=timestamp,
+                    context_type="target",
+                    token_count=doc_tokens,
+                )
+            )
             accumulated_tokens += doc_tokens
-        
+
         return accumulated_results[:top_k]
 
     async def _get_context_window(
-        self, 
-        target_indices: list[int], 
-        window_size: int = 1
+        self, target_indices: list[int], window_size: int = 1
     ) -> list[MemoryResult]:
         """Get surrounding context for target documents."""
         if not target_indices or window_size <= 0:
             return []
-            
+
         context_results = []
         all_docs = self.db.documents
-        
+
         for idx in target_indices:
             # Add previous context
             for i in range(max(0, idx - window_size), idx):
@@ -346,66 +352,70 @@ class MemoryService:
                     timestamp = None
                     if isinstance(doc, dict) and "timestamp" in doc:
                         timestamp = str(doc["timestamp"])
-                        
-                    context_results.append(MemoryResult(
-                        document=doc if isinstance(doc, dict) else {"text": str(doc)},
-                        score=0.0,
-                        timestamp=timestamp,
-                        context_type="previous",
-                        token_count=self._estimate_tokens(text)
-                    ))
-            
-            # Add next context  
+
+                    context_results.append(
+                        MemoryResult(
+                            document=doc if isinstance(doc, dict) else {"text": str(doc)},
+                            score=0.0,
+                            timestamp=timestamp,
+                            context_type="previous",
+                            token_count=self._estimate_tokens(text),
+                        )
+                    )
+
+            # Add next context
             for i in range(idx + 1, min(len(all_docs), idx + window_size + 1)):
                 doc = all_docs[i]
                 text = self._extract_text_from_doc(doc)
                 timestamp = None
                 if isinstance(doc, dict) and "timestamp" in doc:
                     timestamp = str(doc["timestamp"])
-                    
-                context_results.append(MemoryResult(
-                    document=doc if isinstance(doc, dict) else {"text": str(doc)},
-                    score=0.0,
-                    timestamp=timestamp,
-                    context_type="next", 
-                    token_count=self._estimate_tokens(text)
-                ))
-        
+
+                context_results.append(
+                    MemoryResult(
+                        document=doc if isinstance(doc, dict) else {"text": str(doc)},
+                        score=0.0,
+                        timestamp=timestamp,
+                        context_type="next",
+                        token_count=self._estimate_tokens(text),
+                    )
+                )
+
         return context_results
 
     async def _query_recent_memories(
-        self, 
-        max_tokens: int, 
-        max_entries: int = 20
+        self, max_tokens: int, max_entries: int = 20
     ) -> list[MemoryResult]:
         """Get recent memories within token budget."""
         if not self.db.documents:
             return []
-            
+
         recent_docs = self.db.documents[-max_entries:]
         accumulated_results = []
         accumulated_tokens = 0
-        
+
         for doc in reversed(recent_docs):  # Most recent first
             text = self._extract_text_from_doc(doc)
             doc_tokens = self._estimate_tokens(text)
-            
+
             if accumulated_tokens + doc_tokens > max_tokens and accumulated_results:
                 break
-                
+
             timestamp = None
             if isinstance(doc, dict) and "timestamp" in doc:
                 timestamp = str(doc["timestamp"])
-                
-            accumulated_results.append(MemoryResult(
-                document=doc if isinstance(doc, dict) else {"text": str(doc)},
-                score=1.0,  # Recent = high relevance
-                timestamp=timestamp,
-                context_type="target",
-                token_count=doc_tokens
-            ))
+
+            accumulated_results.append(
+                MemoryResult(
+                    document=doc if isinstance(doc, dict) else {"text": str(doc)},
+                    score=1.0,  # Recent = high relevance
+                    timestamp=timestamp,
+                    context_type="target",
+                    token_count=doc_tokens,
+                )
+            )
             accumulated_tokens += doc_tokens
-        
+
         return list(reversed(accumulated_results))  # Restore chronological order
 
     async def _handle_memory_query(
@@ -420,32 +430,36 @@ class MemoryService:
             query.retrieval_strategy,
             query.max_tokens,
             query.include_context,
-            query.top_k
+            query.top_k,
         )
-        
+
         hits = []
         total_tokens = 0
         strategy_used = query.retrieval_strategy
         truncated = False
-        
+
         # Route to appropriate retrieval strategy
         if query.retrieval_strategy == "recent":
             if query.max_tokens:
                 hits = await self._query_recent_memories(query.max_tokens, query.top_k * 2)
             else:
                 # Fallback to standard recent retrieval
-                recent_docs = self.db.documents[-query.top_k:]
+                recent_docs = self.db.documents[-query.top_k :]
                 hits = [
                     MemoryResult(
                         document=doc if isinstance(doc, dict) else {"text": str(doc)},
                         score=1.0,
-                        timestamp=str(doc.get("timestamp")) if isinstance(doc, dict) and "timestamp" in doc else None,
+                        timestamp=(
+                            str(doc.get("timestamp"))
+                            if isinstance(doc, dict) and "timestamp" in doc
+                            else None
+                        ),
                         context_type="target",
-                        token_count=self._estimate_tokens(self._extract_text_from_doc(doc))
+                        token_count=self._estimate_tokens(self._extract_text_from_doc(doc)),
                     )
                     for doc in reversed(recent_docs)
                 ]
-                
+
         elif query.retrieval_strategy == "similarity":
             # Pure vector similarity without token limits
             results = await self.db.query_async(query.text, top_k=query.top_k)
@@ -453,13 +467,17 @@ class MemoryService:
                 MemoryResult(
                     document=doc if isinstance(doc, dict) else {"text": str(doc)},
                     score=float(score),
-                    timestamp=str(doc.get("timestamp")) if isinstance(doc, dict) and "timestamp" in doc else None,
+                    timestamp=(
+                        str(doc.get("timestamp"))
+                        if isinstance(doc, dict) and "timestamp" in doc
+                        else None
+                    ),
                     context_type="target",
-                    token_count=self._estimate_tokens(self._extract_text_from_doc(doc))
+                    token_count=self._estimate_tokens(self._extract_text_from_doc(doc)),
                 )
                 for doc, score in results
             ]
-            
+
         else:  # "hybrid" - default
             if query.max_tokens:
                 hits = await self._query_with_token_limit(query.text, query.max_tokens, query.top_k)
@@ -470,13 +488,17 @@ class MemoryService:
                     MemoryResult(
                         document=doc if isinstance(doc, dict) else {"text": str(doc)},
                         score=float(score),
-                        timestamp=str(doc.get("timestamp")) if isinstance(doc, dict) and "timestamp" in doc else None,
+                        timestamp=(
+                            str(doc.get("timestamp"))
+                            if isinstance(doc, dict) and "timestamp" in doc
+                            else None
+                        ),
                         context_type="target",
-                        token_count=self._estimate_tokens(self._extract_text_from_doc(doc))
+                        token_count=self._estimate_tokens(self._extract_text_from_doc(doc)),
                     )
                     for doc, score in results
                 ]
-        
+
         # Add context expansion if requested
         if query.include_context and query.context_window > 0 and hits:
             # Find indices of target documents in the database
@@ -488,15 +510,15 @@ class MemoryService:
                         target_indices.append(idx)
                     except (ValueError, AttributeError):
                         pass  # Document not found in original list
-            
+
             if target_indices:
                 context_hits = await self._get_context_window(target_indices, query.context_window)
-                
+
                 # Apply token limit to context if specified
                 if query.max_tokens:
                     current_tokens = sum(hit.token_count or 0 for hit in hits)
                     remaining_tokens = query.max_tokens - current_tokens
-                    
+
                     if remaining_tokens > 0:
                         filtered_context = []
                         context_tokens = 0
@@ -509,34 +531,34 @@ class MemoryService:
                                 truncated = True
                                 break
                         context_hits = filtered_context
-                
+
                 # Merge context with target results (context first, then targets)
                 hits = context_hits + hits
-        
+
         # Calculate total tokens
         total_tokens = sum(hit.token_count or 0 for hit in hits)
-        
+
         # Check if we had to truncate
         if query.max_tokens and total_tokens >= query.max_tokens:
             truncated = True
-        
+
         payload = MemoryResults(
-            query=query.text, 
-            k=len([h for h in hits if h.context_type == "target"]), 
+            query=query.text,
+            k=len([h for h in hits if h.context_type == "target"]),
             results=hits,
             total_tokens=total_tokens,
             strategy_used=strategy_used,
-            truncated=truncated
+            truncated=truncated,
         )
-        
+
         logger.info(
             "Memory results: %d total (%d targets), %d tokens, truncated=%s",
             len(hits),
             len([h for h in hits if h.context_type == "target"]),
             total_tokens,
-            truncated
+            truncated,
         )
-        
+
         await self.mqtt_client.publish_event(
             client,
             event_type=EVENT_TYPE_MEMORY_RESULTS,
@@ -569,7 +591,10 @@ class MemoryService:
         if section in snapshot_dict:
             value: Any = snapshot_dict[section]
         else:
-            value = {"error": f"unknown section '{section}'", "available": list(snapshot_dict.keys())}
+            value = {
+                "error": f"unknown section '{section}'",
+                "available": list(snapshot_dict.keys()),
+            }
         payload = CharacterSection(section=section, value=value)
         await self.mqtt_client.publish_event(
             client,
@@ -583,7 +608,7 @@ class MemoryService:
 
     async def _handle_character_update(self, client: mqtt.Client, payload: bytes) -> None:
         """Handle character/update messages to modify traits dynamically.
-        
+
         Supported operations (typed with Pydantic models):
         1. Trait update: CharacterTraitUpdate(trait="humor", value=50)
         2. Reset all traits: CharacterResetTraits()
@@ -593,11 +618,12 @@ class MemoryService:
             if not data:
                 logger.warning("Empty character/update payload")
                 return
-            
+
             # Try to parse as CharacterResetTraits first
             if "action" in data and data["action"] == "reset_traits":
                 try:
-                    reset_req = CharacterResetTraits.model_validate(data)
+                    # Validate the request format
+                    CharacterResetTraits.model_validate(data)
                     logger.info("Resetting all traits to defaults from character.toml")
                     self.character = self._load_character()
                     await self._publish_character_current(client)
@@ -610,21 +636,21 @@ class MemoryService:
                 except ValidationError as e:
                     logger.warning("Invalid CharacterResetTraits payload: %s", e)
                     return
-            
+
             # Try to parse as CharacterTraitUpdate
             if data.get("section") == "traits" and "trait" in data and "value" in data:
                 try:
                     trait_update = CharacterTraitUpdate.model_validate(data)
-                    
+
                     # Get old value for logging
                     old_value = self.character.traits.get(trait_update.trait, "(not set)")
-                    
+
                     # Update trait
                     self.character.traits[trait_update.trait] = trait_update.value
-                    
+
                     # Publish updated character
                     await self._publish_character_current(client)
-                    
+
                     logger.info(
                         "Updated trait '%s': %s → %d (retained character/current published)",
                         trait_update.trait,
@@ -635,9 +661,9 @@ class MemoryService:
                 except ValidationError as e:
                     logger.warning("Invalid CharacterTraitUpdate payload: %s", e)
                     return
-            
+
             logger.debug("Unhandled character/update format: %s", data)
-        
+
         except Exception as exc:
             logger.exception("Failed to handle character/update: %s", exc)
 
@@ -708,7 +734,10 @@ class MemoryService:
             return CharacterGetRequest.model_validate(data), message_id
         except ValidationError:
             section = data.get("section") if isinstance(data, dict) else None
-            return CharacterGetRequest(section=section if isinstance(section, str) else None), message_id
+            return (
+                CharacterGetRequest(section=section if isinstance(section, str) else None),
+                message_id,
+            )
 
     def _decode_payload(self, payload: bytes) -> tuple[dict[str, Any], str | None]:
         envelope: Envelope | None = None

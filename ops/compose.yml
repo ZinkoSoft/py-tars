@@ -382,7 +382,7 @@ services:
       RKNN_EMBEDDER_PATH: ${RKNN_EMBEDDER_PATH:-/data/model_cache/embedder/all-MiniLM-L6-v2.rknn}
       NPU_CORE_MASK: ${NPU_CORE_MASK:-0}
       NPU_FALLBACK_CPU: ${NPU_FALLBACK_CPU:-1}
-      PYTHONPATH: /workspace/apps/memory-worker
+      PYTHONPATH: /workspace/apps/memory-worker/src:/workspace/packages/tars-core/src
     volumes:
       - ../data/memory:/data
       - ../data/model_cache:/data/model_cache

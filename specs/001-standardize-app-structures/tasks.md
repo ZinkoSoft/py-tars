@@ -252,22 +252,22 @@ Tasks are organized by app migration. Each app migration is treated as an indepe
 
 ### Implementation for memory-worker
 
-- [ ] T124 [memory-worker] Analyze current structure and document in `/apps/memory-worker/structure-before.txt`
-- [ ] T125 [memory-worker] Create `/apps/memory-worker/src/memory_worker/` directory
-- [ ] T126 [memory-worker] Move `memory_worker/*` to `/apps/memory-worker/src/memory_worker/`
-- [ ] T127 [memory-worker] Ensure `/apps/memory-worker/src/memory_worker/__main__.py` exists
-- [ ] T128 [memory-worker] Organize existing tests into `/apps/memory-worker/tests/unit/`, `/apps/memory-worker/tests/integration/`, `/apps/memory-worker/tests/contract/`
-- [ ] T129 [memory-worker] Create `/apps/memory-worker/tests/conftest.py`
-- [ ] T130 [memory-worker] Update `/apps/memory-worker/pyproject.toml` for src/ layout
-- [ ] T131 [memory-worker] Create `/apps/memory-worker/Makefile` with `PACKAGE_NAME := memory_worker`
-- [ ] T132 [memory-worker] Update `/apps/memory-worker/README.md` with MQTT topics
-- [ ] T133 [memory-worker] Update `/apps/memory-worker/.env.example`
-- [ ] T134 [memory-worker] Test installation and `make check`
-- [ ] T135 [memory-worker] Update Dockerfile for src/ layout
-- [ ] T136 [memory-worker] Test Docker build
-- [ ] T137 [memory-worker] Document changes in `/apps/memory-worker/structure-after.txt`
+- [X] T124 [memory-worker] Analyze current structure and document in `/apps/memory-worker/structure-before.txt`
+- [X] T125 [memory-worker] Create `/apps/memory-worker/src/memory_worker/` directory
+- [X] T126 [memory-worker] Move `memory_worker/*` to `/apps/memory-worker/src/memory_worker/`
+- [X] T127 [memory-worker] Ensure `/apps/memory-worker/src/memory_worker/__main__.py` exists
+- [X] T128 [memory-worker] Organize existing tests into `/apps/memory-worker/tests/unit/`, `/apps/memory-worker/tests/integration/`, `/apps/memory-worker/tests/contract/`
+- [X] T129 [memory-worker] Create `/apps/memory-worker/tests/conftest.py`
+- [X] T130 [memory-worker] Update `/apps/memory-worker/pyproject.toml` for src/ layout
+- [X] T131 [memory-worker] Create `/apps/memory-worker/Makefile` with `PACKAGE_NAME := memory_worker`
+- [X] T132 [memory-worker] Update `/apps/memory-worker/README.md` with MQTT topics
+- [X] T133 [memory-worker] Update `/apps/memory-worker/.env.example`
+- [X] T134 [memory-worker] Test installation and `make check`
+- [X] T135 [memory-worker] Update Dockerfile for src/ layout
+- [X] T136 [memory-worker] Test Docker build
+- [X] T137 [memory-worker] Document changes in `/apps/memory-worker/structure-after.txt`
 
-**Checkpoint**: memory-worker standardized and validated
+**Checkpoint**: memory-worker standardized and validated ✅
 
 ---
 

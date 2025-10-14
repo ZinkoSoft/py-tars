@@ -1,4 +1,5 @@
 """MQTT client for memory worker - handles all message broker communication."""
+
 from __future__ import annotations
 
 import logging
@@ -15,10 +16,10 @@ logger = logging.getLogger("memory-worker.mqtt")
 
 def parse_mqtt_url(url: str) -> tuple[str, int, str | None, str | None]:
     """Parse MQTT URL into connection parameters.
-    
+
     Args:
         url: MQTT URL in format mqtt://user:pass@host:port
-        
+
     Returns:
         Tuple of (host, port, username, password)
     """
@@ -33,7 +34,7 @@ def parse_mqtt_url(url: str) -> tuple[str, int, str | None, str | None]:
 
 class MemoryMQTTClient:
     """MQTT client wrapper for memory worker.
-    
+
     Handles connection management, topic subscriptions, and message publishing
     with proper envelope wrapping and correlation IDs.
     """
@@ -46,7 +47,7 @@ class MemoryMQTTClient:
         source_name: str = "memory-worker",
     ):
         """Initialize MQTT client.
-        
+
         Args:
             mqtt_url: MQTT broker URL (mqtt://user:pass@host:port)
             client_id: MQTT client identifier
@@ -59,16 +60,16 @@ class MemoryMQTTClient:
 
     async def connect(self) -> mqtt.Client:
         """Connect to MQTT broker and return client instance.
-        
+
         Returns:
             Connected MQTT client
-            
+
         Raises:
             Exception: If connection fails
         """
         host, port, user, password = parse_mqtt_url(self.mqtt_url)
         logger.info("Connecting to MQTT %s:%s as %s", host, port, self.client_id)
-        
+
         self._client = mqtt.Client(
             hostname=host,
             port=port,
@@ -76,13 +77,13 @@ class MemoryMQTTClient:
             password=password,
             client_id=self.client_id,
         )
-        
+
         logger.info("Connected to MQTT %s:%s", host, port)
         return self._client
 
     async def subscribe(self, client: mqtt.Client, topics: list[str]) -> None:
         """Subscribe to multiple topics.
-        
+
         Args:
             client: Connected MQTT client
             topics: List of topic strings to subscribe to
@@ -103,7 +104,7 @@ class MemoryMQTTClient:
         retain: bool = False,
     ) -> None:
         """Publish event wrapped in Envelope to MQTT topic.
-        
+
         Args:
             client: Connected MQTT client
             event_type: Event type identifier for registry
@@ -119,10 +120,10 @@ class MemoryMQTTClient:
             correlate=correlate,
             source=self.source_name,
         )
-        
+
         message = envelope.model_dump_json().encode()
         await client.publish(topic, message, qos=qos, retain=retain)
-        
+
         logger.debug(
             "Published event type=%s topic=%s qos=%d retain=%s correlate=%s",
             event_type,

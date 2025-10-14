@@ -4,43 +4,47 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Union
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .npu_embedder import NPUEmbedder
+    from .service import STEmbedder
 
 logger = logging.getLogger(__name__)
 
 
 def create_embedder(
     model_name: str,
-) -> Union["STEmbedder", "NPUEmbedder"]:  # type: ignore[name-defined]
+) -> STEmbedder | NPUEmbedder | Any:
     """Create embedder with automatic NPU detection and CPU fallback.
-    
+
     Selection logic:
         1. If NPU_EMBEDDER_ENABLED=1 and NPU available → NPUEmbedder
         2. Otherwise → STEmbedder (CPU)
-    
+
     Args:
         model_name: HuggingFace model name (e.g., "sentence-transformers/all-MiniLM-L6-v2")
-    
+
     Returns:
         NPUEmbedder if NPU available and enabled, otherwise STEmbedder
     """
     from .service import STEmbedder  # Import here to avoid circular dependency
-    
+
     # Check if NPU is enabled via environment
     npu_enabled = os.getenv("NPU_EMBEDDER_ENABLED", "0") == "1"
-    
+
     if not npu_enabled:
         logger.info("NPU embedder disabled (NPU_EMBEDDER_ENABLED=0), using CPU embedder")
         return STEmbedder(model_name)
-    
+
     # NPU is enabled, try to create NPU embedder
     logger.info("NPU embedder enabled, attempting to initialize NPU...")
-    
+
     try:
         from .npu_embedder import create_npu_embedder
-        
+
         npu_embedder = create_npu_embedder(base_model=model_name)
-        
+
         if npu_embedder is not None:
             logger.info("✓ Using NPU embedder for %s", model_name)
             return npu_embedder
@@ -53,16 +57,15 @@ def create_embedder(
         logger.warning(
             "Failed to import NPU embedder (missing dependencies: %s), "
             "falling back to CPU embedder",
-            e
+            e,
         )
     except Exception as e:
         logger.error(
-            "Unexpected error creating NPU embedder: %s, "
-            "falling back to CPU embedder",
+            "Unexpected error creating NPU embedder: %s, " "falling back to CPU embedder",
             e,
-            exc_info=True
+            exc_info=True,
         )
-    
+
     # Fallback to CPU
     fallback_enabled = os.getenv("NPU_FALLBACK_CPU", "1") == "1"
     if fallback_enabled:
