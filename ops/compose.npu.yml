@@ -104,13 +104,13 @@ services:
       EMBED_MODEL: ${EMBED_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
       RAG_STRATEGY: ${RAG_STRATEGY:-hybrid}
       MEMORY_TOP_K: ${MEMORY_TOP_K:-5}
-      PYTHONPATH: /workspace/apps/memory-worker
+      PYTHONPATH: /workspace/apps/memory-worker/src:/workspace/packages/tars-core/src
     # Add NPU-specific volume mounts
     volumes:
       # Base volumes from original service
       - ../data/memory:/data
       - ../data/model_cache:/data/model_cache
-      - ../apps/voice/characters:/config/characters:ro
+      - ../apps/memory-worker/characters:/config/characters:ro
       - ..:/workspace:ro
       # NPU-specific mounts
       - "/dev/dri/renderD129:/dev/dri/renderD129"

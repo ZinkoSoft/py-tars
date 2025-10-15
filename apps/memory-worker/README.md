@@ -2,6 +2,20 @@
 
 Provides hybrid memory and retrieval over MQTT, plus character/persona management.
 
+## Installation
+
+From the repository root:
+
+```bash
+cd apps/memory-worker
+pip install -e .
+```
+
+For development:
+```bash
+pip install -e ".[dev]"
+```
+
 ## Memory Topics
 
 - **memory/query**: `{ text, top_k? }` - Query the memory database
@@ -82,3 +96,65 @@ mosquitto_pub -t character/get -m '{"section": "traits"}'
 ```bash
 mosquitto_sub -t system/character/current -v
 ```
+
+## Development
+
+### Running Tests
+
+```bash
+make test
+```
+
+### Formatting and Linting
+
+```bash
+make check
+```
+
+### Available Make Targets
+
+- `make fmt` - Format code with ruff and black
+- `make lint` - Lint and type-check with ruff and mypy
+- `make test` - Run tests with coverage
+- `make check` - Run all checks (CI gate)
+- `make build` - Build Python package
+- `make clean` - Remove build artifacts
+- `make install` - Install in editable mode
+- `make install-dev` - Install with dev dependencies
+
+### Project Structure
+
+```
+apps/memory-worker/
+├── src/memory_worker/          # Source code
+│   ├── __main__.py             # Entry point
+│   ├── config.py               # Configuration
+│   ├── service.py              # Core service logic
+│   ├── hyperdb.py              # Vector database
+│   ├── embedder_factory.py    # Embedder selection
+│   ├── npu_embedder.py         # NPU-accelerated embeddings
+│   └── mqtt_client.py          # MQTT client
+├── tests/
+│   ├── unit/                   # Unit tests
+│   ├── integration/            # Integration tests
+│   └── contract/               # MQTT contract tests
+├── characters/                 # Character configurations
+├── examples/                   # Usage examples
+└── scripts/                    # Utility scripts
+
+```
+
+## Architecture
+
+The memory worker provides two primary services:
+
+### 1. Hybrid RAG (Retrieval-Augmented Generation)
+
+- **Naive strategy**: Pure vector similarity search using SentenceTransformer embeddings
+- **Hybrid strategy**: Combines BM25 keyword search with vector search, then reranks results
+
+Uses HyperDB for vector storage with configurable retrieval strategies and optional NPU acceleration (rknnlite) for embeddings on supported hardware.
+
+### 2. Character/Persona Management
+
+Loads character configuration from TOML files and publishes to MQTT for other services (LLM workers, UI) to consume. Characters define personality traits, voice settings, and system prompts.

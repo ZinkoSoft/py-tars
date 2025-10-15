@@ -56,6 +56,10 @@ class ServoController:
             print(f"WARNING: Pulse {pulse} out of range [{servo_range['min']}-{servo_range['max']}] for channel {channel}")
             pulse = max(servo_range['min'], min(pulse, servo_range['max']))
         
+        # Apply servo inversion if configured
+        if servo_range.get('invert', False):
+            pulse = config.reverse_servo(pulse, servo_range['min'], servo_range['max'])
+        
         # Use global speed if not specified
         if speed is None:
             speed = config.GLOBAL_SPEED
@@ -228,14 +232,118 @@ class ServoController:
     # MOVEMENT SEQUENCES / POSES
     # ========================================
     
+    def move_servos_parallel(self, movements):
+        """
+        Move multiple servos simultaneously in parallel (simulating multiprocessing)
+        Each servo moves independently at the same speed, finishing at different times
+        
+        Args:
+            movements: List of tuples (channel, target_pulse, speed_factor)
+        """
+        if not movements:
+            return
+        
+        # Track which servos are still moving
+        active_servos = {}
+        for channel, target, speed in movements:
+            servo_range = config.get_servo_range(channel)
+            
+            # Clamp to range
+            target = max(servo_range['min'], min(target, servo_range['max']))
+            
+            # Apply inversion if configured
+            if servo_range.get('invert', False):
+                target = config.reverse_servo(target, servo_range['min'], servo_range['max'])
+            
+            current = self.positions.get(channel, servo_range['default'])
+            
+            if current != target:
+                active_servos[channel] = {
+                    'current': current,
+                    'target': target,
+                    'step': 1 if target > current else -1,
+                    'speed': speed
+                }
+        
+        if not active_servos:
+            return  # All servos already at target
+        
+        # Move all servos step by step until all reach their targets
+        while active_servos:
+            to_remove = []
+            
+            for channel, servo_info in active_servos.items():
+                current = servo_info['current']
+                target = servo_info['target']
+                step = servo_info['step']
+                speed = servo_info['speed']
+                
+                # Move one step
+                new_pos = current + step
+                
+                # Check if we've reached or passed the target
+                if (step > 0 and new_pos >= target) or (step < 0 and new_pos <= target):
+                    new_pos = target
+                    to_remove.append(channel)
+                
+                # Set PWM
+                self.pca.set_pwm(channel, 0, new_pos)
+                self.positions[channel] = new_pos
+                servo_info['current'] = new_pos
+            
+            # Remove completed servos
+            for channel in to_remove:
+                del active_servos[channel]
+            
+            # Delay based on speed (use fastest servo's speed)
+            if active_servos:
+                min_speed = min(s['speed'] for s in active_servos.values())
+                delay_ms = int(20 * (1.0 - min_speed))
+                if delay_ms > 0:
+                    time.sleep_ms(delay_ms)
+    
     def move_legs(self, height_percent, starboard_percent, port_percent, speed_factor=0.5):
-        """Move the three leg servos: 0=height, 1=port rotation, 2=starboard rotation"""
-        if height_percent is not None:
-            self.set_servo_percentage(0, height_percent, speed_factor)
-        if starboard_percent is not None:
-            self.set_servo_percentage(2, starboard_percent, speed_factor)
-        if port_percent is not None:
-            self.set_servo_percentage(1, port_percent, speed_factor)
+        """
+        Move the three leg servos simultaneously: 0=height, 1=port rotation, 2=starboard rotation
+        All three servos move at the same time to prevent tipping (like multiprocessing in original)
+        """
+        def percentage_to_pulse(percent, min_val, max_val):
+            """Convert percentage (1-100) to pulse width"""
+            if percent == 0:
+                return None
+            if percent == 1:
+                return min_val
+            if percent == 100:
+                return max_val
+            if max_val > min_val:
+                value = min_val + ((max_val - min_val) * (percent - 1) / 99)
+            else:
+                value = min_val - ((min_val - max_val) * (percent - 1) / 99)
+            return int(round(value))
+        
+        movements = []
+        
+        # Convert percentages to pulse widths
+        if height_percent is not None and height_percent != 0:
+            servo_range = config.get_servo_range(0)
+            pulse = percentage_to_pulse(height_percent, servo_range['min'], servo_range['max'])
+            if pulse is not None:
+                movements.append((0, pulse, speed_factor))
+        
+        if starboard_percent is not None and starboard_percent != 0:
+            servo_range = config.get_servo_range(2)
+            pulse = percentage_to_pulse(starboard_percent, servo_range['min'], servo_range['max'])
+            if pulse is not None:
+                movements.append((2, pulse, speed_factor))
+        
+        if port_percent is not None and port_percent != 0:
+            servo_range = config.get_servo_range(1)
+            pulse = percentage_to_pulse(port_percent, servo_range['min'], servo_range['max'])
+            if pulse is not None:
+                movements.append((1, pulse, speed_factor))
+        
+        # Move all leg servos simultaneously (simulates multiprocessing behavior)
+        self.move_servos_parallel(movements)
     
     def move_arm(self, port_main, port_forearm, port_hand, star_main, star_forearm, star_hand, speed_factor=0.5):
         """Move the six arm servos"""

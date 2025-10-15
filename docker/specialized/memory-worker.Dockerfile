@@ -53,9 +53,10 @@ RUN chmod +x /app/entrypoint.sh
 
 # Source code will be provided via volume mount at /workspace/apps/memory-worker
 # This enables live code updates without container rebuild
+# Note: memory-worker now uses src/ layout, so PYTHONPATH includes src/ directory
 
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app \
+    PYTHONPATH=/workspace/apps/memory-worker/src:/workspace/packages/tars-core/src:/app \
     HF_HOME=/data/model_cache \
     SENTENCE_TRANSFORMERS_HOME=/data/model_cache \
     TRANSFORMERS_CACHE=/data/model_cache \

@@ -182,6 +182,9 @@ class ServoConfig:
         For legs, uses specific positions (up/neutral/down or forward/neutral/back).
         For arms, uses min/max range.
         
+        Supports servo inversion via "invert": true flag in servo config.
+        When inverted, the pulse values are flipped around the center point.
+        
         Args:
             group: "legs" or "arms"
             servo_name: Servo identifier (e.g., "height", "left", "right_main")
@@ -227,6 +230,10 @@ class ServoConfig:
         
         # Convert percentage to pulse (1 = min, 100 = max)
         pulse = min_val + ((max_val - min_val) * (percentage - 1) / 99.0)
+        
+        # Apply inversion if configured (reverse servo direction)
+        if servo_cfg.get("invert", False):
+            pulse = max_val - (pulse - min_val)
         
         # Clamp to safety range
         safety_min = servo_cfg.get("min", min_val)

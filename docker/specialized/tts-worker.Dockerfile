@@ -27,21 +27,20 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install piper-tts
 
-# Install TTS worker dependencies ONLY (cached unless pyproject.toml changes)
+# Install TTS worker app (with src/ layout)
+# Volume mount provides source at /workspace/apps/tts-worker
+# This enables live code updates without container rebuild
 COPY apps/tts-worker/pyproject.toml /tmp/tts-worker/pyproject.toml
 RUN --mount=type=cache,target=/root/.cache/pip \
     python -c "import tomllib; print('\n'.join(tomllib.load(open('/tmp/tts-worker/pyproject.toml','rb'))['project']['dependencies']))" > /tmp/requirements.txt && \
     pip install --no-cache-dir -r /tmp/requirements.txt && \
     rm -rf /tmp/tts-worker /tmp/requirements.txt
 
-# Source code will be provided via volume mount at /workspace/apps/tts-worker
-# This enables live code updates without container rebuild
-
 # Copy voice models from mounted read-only source to writable container location
 RUN mkdir -p /voices
 
-# Set PYTHONPATH to workspace mount (will be overridden by compose.yml)
-ENV PYTHONPATH=/app
+# Set PYTHONPATH to workspace mount (will be overridden by compose.yml to include /workspace/apps/tts-worker/src)
+ENV PYTHONPATH=/workspace/apps/tts-worker/src
 
 # At runtime, copy voice models with proper permissions
 ENTRYPOINT ["/bin/sh", "-c", "if [ -d /voice-models ] && [ \"$(ls -A /voice-models 2>/dev/null)\" ]; then cp -r /voice-models/* /voices/ && chmod -R 644 /voices/*; else echo 'No voice models mounted at /voice-models'; fi; if [ ! -f /voices/TARS.onnx ]; then echo 'WARNING: /voices/TARS.onnx not found'; fi; exec python -m tts_worker"]

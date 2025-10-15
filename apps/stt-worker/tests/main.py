@@ -62,12 +62,16 @@ class STTWorker:
             if self.audio_capture:
                 self.audio_capture.unmute(f"wake/{reason}")
             if isinstance(ttl_ms, (int, float)) and ttl_ms > 0:
-                self._wake_ttl_task = asyncio.create_task(self._schedule_wake_ttl("mute", ttl_ms, reason))
+                self._wake_ttl_task = asyncio.create_task(
+                    self._schedule_wake_ttl("mute", ttl_ms, reason)
+                )
         else:
             if self.audio_capture:
                 self.audio_capture.mute(f"wake/{reason}")
             if isinstance(ttl_ms, (int, float)) and ttl_ms > 0:
-                self._wake_ttl_task = asyncio.create_task(self._schedule_wake_ttl("unmute", ttl_ms, reason))
+                self._wake_ttl_task = asyncio.create_task(
+                    self._schedule_wake_ttl("unmute", ttl_ms, reason)
+                )
 
     def _cancel_wake_fallback(self) -> None:
         task = getattr(self, "_wake_fallback_task", None)

@@ -227,6 +227,45 @@ py-tars/
 
 **Build System:** Services use modern Python packaging (`pyproject.toml` + `setuptools`) and are installed as wheels in Docker images. Dockerfiles are centralized in `docker/specialized/` for easier maintenance. The generic `docker/app.Dockerfile` template supports wheel-based builds for any service.
 
+### Standard App Structure
+
+All services follow a consistent directory structure (src layout, Python best practices):
+
+```
+apps/<service-name>/
+├── Makefile                    # Standard targets: fmt, lint, test, check
+├── README.md                   # Service-specific documentation
+├── pyproject.toml             # Python packaging (PEP 517/518)
+├── .env.example               # Configuration template
+├── src/                       # Source code (src layout)
+│   └── <package_name>/
+│       ├── __init__.py
+│       ├── __main__.py        # Entry point for CLI
+│       ├── config.py          # Configuration from env
+│       └── service.py         # Core business logic
+└── tests/                     # Test suite
+    ├── conftest.py            # Shared pytest fixtures
+    ├── unit/                  # Fast, isolated tests
+    ├── integration/           # Cross-component tests
+    └── contract/              # MQTT message validation
+```
+
+**Makefile Targets** (consistent across all services):
+- `make fmt` - Format code (ruff + black)
+- `make lint` - Lint and type-check (ruff + mypy)
+- `make test` - Run tests with coverage
+- `make check` - Run all checks (CI gate)
+- `make install` - Install in editable mode
+- `make install-dev` - Install with dev dependencies
+
+**Development Workflow:**
+```bash
+cd apps/<service>
+pip install -e ".[dev]"    # Install service + dev tools
+make check                 # Format, lint, test
+tars-<service>             # Run CLI entry point
+```
+
 ---
 
 ## ⚙️ Requirements
@@ -509,7 +548,7 @@ Extend `apps/llm-worker/llm_worker/providers/` with new provider implementations
 3. Update services to handle new events
 
 ### Memory & Character Customization
-- Place character TOML files in `apps/voice/characters/`
+- Place character TOML files in `apps/memory-worker/characters/`
 - Extend memory worker RAG strategies in `apps/memory-worker/memory_worker/hyperdb.py`
 - Customize embedding models via `EMBED_MODEL` environment variable
 

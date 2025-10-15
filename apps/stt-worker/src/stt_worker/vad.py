@@ -1,0 +1,278 @@
+from __future__ import annotations
+
+"""Voice activity detection utilities.
+
+This module wraps webrtcvad with additional gating via an adaptive noise floor.
+Behavior is unchanged; types and docstrings were added for clarity.
+"""
+
+import logging
+from typing import Optional
+
+import numpy as np
+import webrtcvad
+
+from .config import (
+    CHUNK_DURATION_MS,
+    NOISE_FLOOR_ALPHA,
+    NOISE_FLOOR_INIT,
+    NOISE_GATE_OFFSET,
+    NOISE_MIN_RMS,
+    SILENCE_THRESHOLD_MS,
+    VAD_AGGRESSIVENESS,
+    VAD_ENHANCED_ANALYSIS,
+    NOISE_FLOOR_CALIB_SECS,
+    NOISE_FLOOR_CALIB_ENABLE,
+    NOISE_FLOOR_ADAPTIVE_ENABLE,
+    NOISE_FLOOR_THRESHOLD_MULTIPLIER,
+    NOISE_FLOOR_UPDATE_INTERVAL,
+)
+from .noise_floor_calibrator import NoiseFloorCalibrator
+
+logger = logging.getLogger("stt-worker.vad")
+
+
+class VADProcessor:
+    """Voice Activity Detection processor.
+
+    Args:
+        sample_rate: PCM sample rate in Hz.
+        frame_size: Frame size in samples (16-bit mono) per chunk.
+    """
+
+    def __init__(self, sample_rate: int, frame_size: int):
+        self.vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)
+        self.sample_rate = sample_rate
+        self.frame_size = frame_size
+        self.is_speech = False
+        self.speech_buffer: list[bytes] = []
+        self.silence_count = 0
+        self.max_silence_chunks = SILENCE_THRESHOLD_MS // CHUNK_DURATION_MS
+        # Adaptive noise floor state (RMS units)
+        self.noise_floor = float(NOISE_FLOOR_INIT)
+        self.last_rms = 0.0
+
+        # Initialize noise floor calibrator if enabled
+        self.calibrator = None
+        if NOISE_FLOOR_CALIB_ENABLE:
+            calib_config = {
+                "noise_calib_secs": NOISE_FLOOR_CALIB_SECS,
+                "adaptive_enable": bool(NOISE_FLOOR_ADAPTIVE_ENABLE),
+                "threshold_multiplier": NOISE_FLOOR_THRESHOLD_MULTIPLIER,
+                "update_interval": NOISE_FLOOR_UPDATE_INTERVAL,
+            }
+            self.calibrator = NoiseFloorCalibrator(calib_config)
+            self.calibrator.set_sample_rate(sample_rate)
+            logger.info(
+                "Noise floor calibration enabled (%.1fs calibration)", NOISE_FLOOR_CALIB_SECS
+            )
+
+    def process_chunk(self, audio_chunk: bytes) -> Optional[bytes]:
+        """Process a single PCM16LE chunk and return a completed utterance if detected.
+
+        Returns None if speech has not ended yet or the frame is discarded.
+        """
+        if len(audio_chunk) != self.frame_size * 2:
+            return None
+
+        # Compute RMS
+        try:
+            arr = np.frombuffer(audio_chunk, dtype=np.int16).astype(np.float32)
+            rms = float(np.sqrt(np.mean(arr**2))) if arr.size else 0.0
+        except Exception:
+            return None
+
+        # Handle noise floor calibration if enabled
+        if self.calibrator is not None:
+            # Bootstrap calibration from initial audio
+            if not self.calibrator.is_calibrated():
+                audio_arr = np.frombuffer(audio_chunk, dtype=np.int16)
+                is_calibrated = self.calibrator.bootstrap_calibration(audio_arr)
+                if not is_calibrated:
+                    # Still calibrating, skip this chunk
+                    return None
+
+            # Update adaptive noise floor from non-speech segments
+            if NOISE_FLOOR_ADAPTIVE_ENABLE and not self.is_speech:
+                self.calibrator.update_adaptive_noise_floor(rms)
+
+            # Get adaptive threshold
+            adaptive_gate = self.calibrator.get_adaptive_threshold(NOISE_FLOOR_THRESHOLD_MULTIPLIER)
+            if adaptive_gate is not None:
+                # Use adaptive gate, but respect minimum threshold
+                gate = max(NOISE_MIN_RMS, adaptive_gate)
+            else:
+                # Fallback to original logic during calibration
+                gate = max(NOISE_MIN_RMS, self.noise_floor * NOISE_GATE_OFFSET)
+        else:
+            # Original noise floor logic when calibrator is disabled
+            # Update adaptive noise floor using EMA when not in speech (or during trailing silence)
+            if not self.is_speech:
+                self.noise_floor = (
+                    1.0 - NOISE_FLOOR_ALPHA
+                ) * self.noise_floor + NOISE_FLOOR_ALPHA * rms
+            else:
+                # During speech, avoid training the floor to high levels; decay slowly toward current rms but more conservatively
+                decay_rate = NOISE_FLOOR_ALPHA * 0.1  # Much slower decay during speech
+                self.noise_floor = max(
+                    self.noise_floor * (1.0 - decay_rate),
+                    min(self.noise_floor, rms),
+                )
+            gate = max(NOISE_MIN_RMS, self.noise_floor * NOISE_GATE_OFFSET)
+
+        self.last_rms = rms
+
+        # Adaptive gate: require rms above floor * offset OR above absolute minimum
+        if not self.is_speech and rms < gate:
+            return None
+
+        try:
+            has_speech = self.vad.is_speech(audio_chunk, self.sample_rate)
+        except Exception:
+            return None
+
+        # Additional numpy-based speech analysis for better accuracy
+        if VAD_ENHANCED_ANALYSIS:
+            speech_analysis = self._analyze_speech_characteristics(audio_chunk)
+            speech_like = speech_analysis.get("is_speech_like", False)
+
+            # Combine WebRTC VAD with spectral analysis
+            # Require both VAD and spectral analysis to agree, or VAD alone with strong spectral evidence
+            confident_speech = has_speech and (
+                speech_like or speech_analysis.get("speech_energy_ratio", 0) > 0.5
+            )
+        else:
+            confident_speech = has_speech
+
+        if confident_speech:
+            if not self.is_speech:
+                current_noise_floor = (
+                    self.calibrator.get_noise_floor()
+                    if self.calibrator and self.calibrator.is_calibrated()
+                    else self.noise_floor
+                )
+                logger.info(
+                    "Speech started (VAD: %s, spectral: %s, RMS: %.3f, gate: %.3f, noise_floor: %.6f)",
+                    has_speech,
+                    speech_like if VAD_ENHANCED_ANALYSIS else "disabled",
+                    rms,
+                    gate,
+                    current_noise_floor,
+                )
+                self.is_speech = True
+                self.speech_buffer = []
+            self.speech_buffer.append(audio_chunk)
+            self.silence_count = 0
+        else:
+            if self.is_speech:
+                self.silence_count += 1
+                self.speech_buffer.append(audio_chunk)
+                if self.silence_count >= self.max_silence_chunks:
+                    logger.info("Speech ended, captured %s chunks", len(self.speech_buffer))
+                    utterance = b"".join(self.speech_buffer)
+                    self.is_speech = False
+                    self.speech_buffer = []
+                    self.silence_count = 0
+                    return utterance
+        return None
+
+    def _analyze_speech_characteristics(self, audio_chunk: bytes) -> dict[str, float]:
+        """Analyze audio chunk for speech-like characteristics using numpy.
+
+        Returns dict with various speech detection metrics.
+        """
+        try:
+            arr = np.frombuffer(audio_chunk, dtype=np.int16).astype(np.float32)
+            if arr.size < 256:  # Need minimum samples for analysis
+                return {"is_speech_like": False}
+
+            # Normalize to [-1, 1]
+            arr_norm = arr / 32768.0
+
+            # 1. Zero-crossing rate (speech typically has higher ZCR than noise)
+            zcr = np.sum(np.abs(np.diff(np.sign(arr_norm)))) / (2 * len(arr_norm))
+
+            # 2. Spectral centroid (speech has different frequency distribution than noise)
+            fft = np.fft.rfft(arr_norm)
+            freqs = np.fft.rfftfreq(len(arr_norm), 1.0 / self.sample_rate)
+            magnitude = np.abs(fft)
+            spectral_centroid = np.sum(freqs * magnitude) / np.sum(magnitude)
+
+            # 3. Spectral rolloff (frequency below which 85% of energy lies)
+            cumsum = np.cumsum(magnitude**2)
+            rolloff_idx = np.where(cumsum >= 0.85 * cumsum[-1])[0]
+            spectral_rolloff = freqs[rolloff_idx[0]] if len(rolloff_idx) > 0 else 0
+
+            # 4. Spectral flux (sudden changes in spectrum indicate speech)
+            if hasattr(self, "_prev_magnitude"):
+                spectral_flux = np.sum((magnitude - self._prev_magnitude) ** 2)
+            else:
+                spectral_flux = 0.0
+            self._prev_magnitude = magnitude.copy()
+
+            # 5. Energy in speech bands (300-3400 Hz is main speech range)
+            speech_band_mask = (freqs >= 300) & (freqs <= 3400)
+            speech_energy = np.sum(magnitude[speech_band_mask] ** 2)
+            total_energy = np.sum(magnitude**2)
+            speech_energy_ratio = speech_energy / total_energy if total_energy > 0 else 0
+
+            # 6. RMS in different frequency bands
+            low_freq_mask = freqs < 1000
+            high_freq_mask = freqs > 1000
+            low_rms = (
+                np.sqrt(np.mean(magnitude[low_freq_mask] ** 2)) if np.any(low_freq_mask) else 0
+            )
+            high_rms = (
+                np.sqrt(np.mean(magnitude[high_freq_mask] ** 2)) if np.any(high_freq_mask) else 0
+            )
+
+            # Speech detection heuristics
+            is_speech_like = (
+                zcr > 0.1  # High zero-crossing rate
+                and spectral_centroid > 1000
+                and spectral_centroid < 3000  # Speech frequency range
+                and speech_energy_ratio > 0.3  # Significant energy in speech bands
+                and high_rms > low_rms * 0.5  # Balanced high/low frequency energy
+            )
+
+            return {
+                "is_speech_like": is_speech_like,
+                "zcr": zcr,
+                "spectral_centroid": spectral_centroid,
+                "spectral_rolloff": spectral_rolloff,
+                "spectral_flux": spectral_flux,
+                "speech_energy_ratio": speech_energy_ratio,
+                "low_rms": low_rms,
+                "high_rms": high_rms,
+            }
+
+        except Exception as e:
+            logger.debug(f"Speech analysis failed: {e}")
+            return {"is_speech_like": False}
+
+    def get_active_buffer(self) -> Optional[bytes]:
+        """Get the current active speech buffer for FFT analysis.
+
+        Returns the accumulated speech buffer if currently detecting speech,
+        None otherwise.
+        """
+        if self.is_speech and self.speech_buffer:
+            return b"".join(self.speech_buffer)
+        return None
+
+    def get_noise_floor_info(self) -> dict:
+        """Get noise floor calibration information for debugging.
+
+        Returns:
+            dict: Noise floor state and calibration progress
+        """
+        result = {
+            "legacy_noise_floor": self.noise_floor,
+            "last_rms": self.last_rms,
+            "calibrator_enabled": self.calibrator is not None,
+        }
+
+        if self.calibrator:
+            result.update(self.calibrator.get_calibration_progress())
+
+        return result

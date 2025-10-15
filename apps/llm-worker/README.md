@@ -199,26 +199,51 @@ Configure via `OPENAI_RESPONSES_MODELS` (supports wildcards):
 export OPENAI_RESPONSES_MODELS="gpt-4.1*,gpt-5*,custom-model"
 ```
 
-## Run (Local)
+## Installation
 
-Create a venv, install requirements, export environment variables:
+### Local Development
 
 ```bash
 cd apps/llm-worker
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
 
+# Install package in editable mode
+pip install -e .
+
+# Or install with dev dependencies
+pip install -e ".[dev]"
+```
+
+### Verify Installation
+
+```bash
+# Check CLI entry point
+tars-llm-worker --help
+
+# Or run as module
+python -m llm_worker
+```
+
+## Usage
+
+### Running Locally
+
+Export environment variables and start the service:
+
+```bash
 export MQTT_URL="mqtt://user:pass@127.0.0.1:1883"
 export OPENAI_API_KEY="sk-..."
 export RAG_ENABLED=true
 export TOOL_CALLING_ENABLED=true
 export LLM_TTS_STREAM=true
 
+# Run via CLI entry point
+tars-llm-worker
+
+# Or run as module
 python -m llm_worker
 ```
 
-## Run (Docker)
+### Running with Docker
 
 See `ops/compose.yml` for full stack deployment with MQTT broker, memory-worker, and TTS-worker.
 
@@ -229,18 +254,68 @@ docker compose up llm-worker
 
 ## Development
 
-**Run tests**:
-```bash
-cd apps/llm-worker
-pytest tests/
+### Directory Structure
+
+```
+apps/llm-worker/
+├── src/
+│   └── llm_worker/          # Main package
+│       ├── handlers/        # Handler modules (routing, RAG, tools, character)
+│       ├── providers/       # LLM provider implementations
+│       ├── __main__.py      # Entry point
+│       ├── config.py        # Configuration management
+│       ├── service.py       # Main service class
+│       ├── mcp_client.py    # MCP client implementation
+│       └── mqtt_client.py   # MQTT client wrapper
+├── tests/
+│   ├── unit/               # Unit tests
+│   ├── integration/        # Integration tests
+│   └── contract/           # MQTT contract tests
+├── Makefile                # Build automation
+├── pyproject.toml         # Package configuration
+└── README.md              # This file
 ```
 
-**Code quality**:
+### Available Make Targets
+
 ```bash
-make fmt   # Format with ruff + black
-make lint  # Lint with ruff + mypy
-make test  # Run tests with coverage
-make check # All of the above (CI gate)
+make help        # Show available targets
+make fmt         # Format code with ruff and black
+make lint        # Lint with ruff and type-check with mypy
+make test        # Run tests with coverage
+make check       # Run fmt + lint + test (CI gate)
+make build       # Build Python package
+make clean       # Remove build artifacts and cache
+make install     # Install package in editable mode
+make install-dev # Install with dev dependencies
+```
+
+### Running Tests
+
+```bash
+# Run all tests
+make test
+
+# Run specific test category
+pytest tests/unit
+pytest tests/integration
+pytest tests/contract
+
+# Run with coverage report
+pytest tests/ --cov=src/llm_worker --cov-report=term-missing
+```
+
+### Code Quality
+
+```bash
+# Format code
+make fmt
+
+# Run linters
+make lint
+
+# Run all checks (format, lint, test)
+make check
 ```
 
 ## Async Patterns

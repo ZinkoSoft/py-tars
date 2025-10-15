@@ -1,0 +1,326 @@
+import asyncio
+import signal
+import time
+
+import pytest
+
+from tars.contracts.v1 import TtsSay, TtsStatus  # type: ignore[import]
+from tars.domain.tts import (  # type: ignore[import]
+    PlaybackSession,
+    TTSCallbacks,
+    TTSConfig,
+    TTSControlMessage,
+    TTSDomainService,
+)
+
+
+class DummyProc:
+    def __init__(self) -> None:
+        self.signals: list[int] = []
+        self.terminated = False
+        self.killed = False
+        self._returncode: int | None = None
+
+    def poll(self) -> int | None:
+        return self._returncode
+
+    def send_signal(self, sig: int) -> None:
+        self.signals.append(sig)
+
+    def terminate(self) -> None:
+        self.terminated = True
+        self._returncode = -signal.SIGTERM
+
+    def wait(self, timeout: float | None = None) -> int | None:
+        return self._returncode
+
+    def kill(self) -> None:
+        self.killed = True
+        self._returncode = -signal.SIGKILL
+
+
+class DummySynth:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def synth_and_play(self, text: str, streaming: bool = False, pipeline: bool = True) -> float:
+        self.calls.append({"text": text, "streaming": streaming, "pipeline": pipeline})
+        return 0.0
+
+
+class DummyCachingSynth(DummySynth):
+    def __init__(self) -> None:
+        super().__init__()
+        self.wav_calls: list[tuple[str, str]] = []
+
+    def synth_to_wav(self, text: str, wav_path: str) -> None:
+        self.wav_calls.append((text, wav_path))
+        with open(wav_path, "wb") as f:
+            f.write(b"RIFFTEST")
+
+
+def make_callbacks(collected: list[TtsStatus]) -> TTSCallbacks:
+    async def publish_status(
+        event: str,
+        text: str,
+        utt_id: str | None,
+        reason: str | None,
+        wake_ack: bool | None,
+        system_announce: bool | None = None,
+    ) -> None:
+        collected.append(
+            TtsStatus(
+                event=event,  # type: ignore[arg-type]
+                text=text,
+                utt_id=utt_id,
+                reason=reason,
+                wake_ack=wake_ack,
+            )
+        )
+
+    return TTSCallbacks(publish_status=publish_status)
+
+
+def make_service(
+    *,
+    streaming_enabled: bool = False,
+    pipeline_enabled: bool = True,
+    aggregate_enabled: bool = False,
+    aggregate_debounce_ms: int = 150,
+    aggregate_single_wav: bool = True,
+    wake_ack_synth: DummySynth | None = None,
+    wake_cache_dir: str | None = None,
+    wake_cache_max_entries: int = 8,
+    wake_ack_preload_texts: tuple[str, ...] | None = None,
+) -> tuple[TTSDomainService, DummySynth, list[TtsStatus], TTSCallbacks]:
+    config = TTSConfig(
+        streaming_enabled=streaming_enabled,
+        pipeline_enabled=pipeline_enabled,
+        aggregate_enabled=aggregate_enabled,
+        aggregate_debounce_ms=aggregate_debounce_ms,
+        aggregate_single_wav=aggregate_single_wav,
+        wake_cache_dir=wake_cache_dir,
+        wake_cache_max_entries=wake_cache_max_entries,
+        wake_ack_preload_texts=wake_ack_preload_texts or (),
+    )
+    synth = DummySynth()
+    service = TTSDomainService(synth, config, wake_synth=wake_ack_synth)
+    statuses: list[TtsStatus] = []
+    callbacks = make_callbacks(statuses)
+    return service, synth, statuses, callbacks
+
+
+async def wait_for_condition(predicate, *, timeout: float = 0.5, interval: float = 0.01) -> None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        if predicate():
+            return
+        await asyncio.sleep(interval)
+    raise AssertionError("Timed out waiting for condition")
+
+
+@pytest.mark.asyncio
+async def test_pause_without_player_sets_pending_state() -> None:
+    service, _synth, statuses, callbacks = make_service()
+    session = PlaybackSession(utt_id="utt-1", text="hello", started_at=time.time())
+    service._current_session = session  # type: ignore[attr-defined]
+
+    await service.handle_control(
+        TTSControlMessage(action="pause", reason="wake_interrupt", request_id="utt-1"), callbacks
+    )
+
+    assert session.pause_pending is True
+    assert session.paused is True
+    assert statuses[-1].event == "paused"
+    assert statuses[-1].reason == "wake_interrupt"
+
+
+@pytest.mark.asyncio
+async def test_pause_sends_signal_when_player_exists() -> None:
+    service, _synth, statuses, callbacks = make_service()
+    session = PlaybackSession(utt_id="utt-2", text="hello", started_at=time.time())
+    session.player_proc = DummyProc()
+    service._current_session = session  # type: ignore[attr-defined]
+
+    await service.handle_control(
+        TTSControlMessage(action="pause", reason="wake_interrupt", request_id="utt-2"), callbacks
+    )
+
+    assert session.pause_pending is False
+    assert session.paused is True
+    assert session.player_proc is not None
+    assert session.player_proc.signals == [signal.SIGSTOP]
+    assert statuses[-1].event == "paused"
+
+
+@pytest.mark.asyncio
+async def test_resume_issues_sigcont_and_status() -> None:
+    service, _synth, statuses, callbacks = make_service()
+    session = PlaybackSession(utt_id="utt-3", text="hello", started_at=time.time())
+    proc = DummyProc()
+    session.player_proc = proc
+    session.paused = True
+    service._current_session = session  # type: ignore[attr-defined]
+
+    await service.handle_control(
+        TTSControlMessage(action="resume", reason="wake_resume", request_id="utt-3"), callbacks
+    )
+
+    assert session.paused is False
+    assert proc.signals[-1] == signal.SIGCONT
+    assert statuses[-1].event == "resumed"
+    assert statuses[-1].reason == "wake_resume"
+
+
+@pytest.mark.asyncio
+async def test_stop_terminates_player_and_clears_queue() -> None:
+    service, _synth, statuses, callbacks = make_service()
+    session = PlaybackSession(utt_id="utt-4", text="hello", started_at=time.time())
+    proc = DummyProc()
+    session.player_proc = proc
+    service._current_session = session  # type: ignore[attr-defined]
+    service._agg_id = "utt-4"  # type: ignore[attr-defined]
+    service._agg_texts = ["chunk"]  # type: ignore[attr-defined]
+
+    await service.handle_control(
+        TTSControlMessage(action="stop", reason="wake_cancel", request_id="utt-4"), callbacks
+    )
+
+    assert proc.terminated is True or proc.killed is True
+    assert service._agg_texts == []  # type: ignore[attr-defined]
+    assert service._agg_id is None  # type: ignore[attr-defined]
+    assert statuses[-1].event == "stopped"
+    assert statuses[-1].reason == "wake_cancel"
+
+
+@pytest.mark.asyncio
+async def test_control_message_ignores_mismatched_id() -> None:
+    service, _synth, statuses, callbacks = make_service()
+    session = PlaybackSession(utt_id="utt-5", text="hello", started_at=time.time())
+    service._current_session = session  # type: ignore[attr-defined]
+
+    await service.handle_control(
+        TTSControlMessage(action="pause", reason="wake", request_id="other"), callbacks
+    )
+
+    # No status should be emitted because the ids do not match.
+    assert not statuses
+
+
+@pytest.mark.asyncio
+async def test_handle_say_aggregates_into_single_playback() -> None:
+    service, synth, statuses, callbacks = make_service(
+        aggregate_enabled=True,
+        aggregate_single_wav=True,
+        aggregate_debounce_ms=10,
+    )
+
+    await service.handle_say(TtsSay(text="Hello", utt_id="utt-agg"), callbacks)
+    assert service._agg_id == "utt-agg"  # type: ignore[attr-defined]
+    assert service._agg_texts == ["Hello"]  # type: ignore[attr-defined]
+
+    await service.handle_say(TtsSay(text="world", utt_id="utt-agg"), callbacks)
+
+    await wait_for_condition(lambda: len(statuses) >= 2)
+
+    assert [s.event for s in statuses] == ["speaking_start", "speaking_end"]
+    assert all(s.utt_id == "utt-agg" for s in statuses)
+    assert len(synth.calls) == 1
+    assert synth.calls[0]["text"] == "Hello world"
+    assert synth.calls[0]["streaming"] is False
+    assert synth.calls[0]["pipeline"] is False
+    assert service._agg_texts == []  # type: ignore[attr-defined]
+    assert service._agg_id is None  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_wake_ack_uses_fallback_synth() -> None:
+    fallback = DummySynth()
+    service, primary, statuses, callbacks = make_service(wake_ack_synth=fallback)
+
+    await service.handle_say(TtsSay(text="Ping", utt_id="utt-wake", wake_ack=True), callbacks)
+
+    await wait_for_condition(lambda: len(statuses) >= 2)
+
+    assert len(fallback.calls) == 1
+    assert fallback.calls[0]["text"] == "Ping"
+    assert len(primary.calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_wake_ack_cache_reuses_synth(tmp_path, monkeypatch) -> None:
+    cache_dir = tmp_path / "wake"
+    synth = DummyCachingSynth()
+    config = TTSConfig(
+        streaming_enabled=False,
+        pipeline_enabled=True,
+        aggregate_enabled=False,
+        aggregate_debounce_ms=150,
+        aggregate_single_wav=True,
+        wake_cache_dir=str(cache_dir),
+        wake_cache_max_entries=4,
+        wake_ack_preload_texts=(),
+    )
+    service = TTSDomainService(synth, config)
+    statuses: list[TtsStatus] = []
+    callbacks = make_callbacks(statuses)
+
+    popen_calls: list[list[str]] = []
+
+    class FakeProc:
+        def __init__(self) -> None:
+            self._returncode = 0
+
+        def wait(self, timeout: float | None = None) -> int:
+            return self._returncode
+
+        def poll(self) -> int:
+            return self._returncode
+
+    def fake_popen(args, stdin=None):  # type: ignore[override]
+        popen_calls.append(list(args))
+        return FakeProc()
+
+    monkeypatch.setattr("tars.domain.tts.subprocess.Popen", fake_popen)
+
+    await service.handle_say(TtsSay(text="Huh?", utt_id="wake1", wake_ack=True), callbacks)
+    await wait_for_condition(lambda: len(statuses) >= 2)
+
+    assert len(synth.wav_calls) == 1
+    assert synth.wav_calls[0][0] == "Huh?"
+    assert cache_dir.exists()
+    wav_files = list(cache_dir.glob("*.wav"))
+    assert len(wav_files) == 1
+    first_call_count = len(popen_calls)
+
+    await service.handle_say(TtsSay(text="Huh?", utt_id="wake2", wake_ack=True), callbacks)
+    await wait_for_condition(lambda: len(statuses) >= 4)
+
+    assert len(synth.wav_calls) == 1
+    assert len(popen_calls) == first_call_count + 1
+
+
+@pytest.mark.asyncio
+async def test_preload_wake_cache_generates_wavs(tmp_path) -> None:
+    cache_dir = tmp_path / "preload"
+    synth = DummyCachingSynth()
+    config = TTSConfig(
+        streaming_enabled=False,
+        pipeline_enabled=True,
+        aggregate_enabled=False,
+        aggregate_debounce_ms=150,
+        aggregate_single_wav=True,
+        wake_cache_dir=str(cache_dir),
+        wake_cache_max_entries=4,
+        wake_ack_preload_texts=("Huh?", "Hmm?"),
+    )
+    service = TTSDomainService(synth, config)
+
+    await service.preload_wake_cache()
+
+    assert cache_dir.exists()
+    wav_files = sorted(cache_dir.glob("*.wav"))
+    assert len(wav_files) == 2
+    texts = [call[0] for call in synth.wav_calls]
+    assert texts == ["Huh?", "Hmm?"]

@@ -1,0 +1,31 @@
+.
+├── Makefile
+├── README.md
+├── pyproject.toml
+├── requirements.txt
+├── src
+│   ├── external_services
+│   │   ├── __init__.py
+│   │   ├── base.py
+│   │   └── eleven_labs.py
+│   └── tts_worker
+│       ├── __init__.py
+│       ├── __main__.py
+│       ├── config.py
+│       ├── models.py
+│       ├── piper_synth.py
+│       └── service.py
+├── structure-after.txt
+├── structure-before.txt
+├── tests
+│   ├── conftest.py
+│   ├── contract
+│   ├── integration
+│   │   └── test_service_controls.py
+│   └── unit
+├── voice
+└── voices
+    ├── TARS.onnx
+    └── TARS.onnx.json
+
+10 directories, 19 files

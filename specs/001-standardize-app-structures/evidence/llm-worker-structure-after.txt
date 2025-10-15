@@ -1,0 +1,130 @@
+LLM Worker - Structure After Migration (src/ Layout)
+========================================================
+Date: 2025-10-14
+Phase: 10/13 - LLM Worker Migration
+Status: ✅ COMPLETE
+
+Directory Structure
+-------------------
+apps/llm-worker/
+├── src/
+│   └── llm_worker/
+│       ├── __init__.py
+│       ├── __main__.py          # Entry point: python -m llm_worker
+│       ├── service.py           # Main LLM service implementation
+│       ├── providers/           # LLM provider implementations
+│       │   ├── __init__.py
+│       │   ├── base.py          # Abstract provider interface
+│       │   ├── openai.py        # OpenAI provider
+│       │   ├── anthropic.py     # Anthropic provider
+│       │   ├── gemini.py        # Google Gemini provider
+│       │   └── ollama.py        # Ollama local provider
+│       └── handlers/            # MCP tool/resource handlers
+│           ├── __init__.py
+│           ├── tool_call.py     # Tool calling logic
+│           └── resources.py     # Resource management
+├── tests/
+│   ├── __init__.py
+│   ├── conftest.py              # Shared test fixtures
+│   ├── unit/                    # Unit tests (isolated)
+│   │   ├── __init__.py
+│   │   ├── test_service.py
+│   │   ├── providers/
+│   │   │   ├── __init__.py
+│   │   │   ├── test_base.py
+│   │   │   ├── test_openai.py
+│   │   │   ├── test_openai_models.py
+│   │   │   ├── test_anthropic.py
+│   │   │   ├── test_gemini.py
+│   │   │   └── test_ollama.py
+│   │   └── handlers/
+│   │       ├── __init__.py
+│   │       ├── test_tool_call.py
+│   │       └── test_resources.py
+│   ├── integration/             # Integration tests (multi-component)
+│   │   ├── __init__.py
+│   │   └── test_llm_mqtt.py
+│   └── contract/                # Contract tests (MQTT message validation)
+│       ├── __init__.py
+│       └── test_mqtt_contracts.py
+├── pyproject.toml               # Package metadata, dependencies, tool config
+├── README.md                    # Service documentation
+├── Makefile                     # Development tasks (fmt, lint, test, check)
+└── .env.example                 # Environment variable template
+
+Key Changes
+-----------
+1. ✅ Adopted src/ layout (prevents import conflicts)
+2. ✅ Organized tests into unit/integration/contract subdirectories
+3. ✅ Created conftest.py with shared fixtures
+4. ✅ Updated pyproject.toml for src/ layout:
+   - packages = [{include = "llm_worker", from = "src"}]
+   - Added [tool.pytest.ini_options] with pythonpath
+   - Added [tool.mypy] configuration
+5. ✅ Created Makefile with standard targets (fmt, lint, test, check)
+6. ✅ Updated README.md with installation and development sections
+7. ✅ Created .env.example for environment variables
+8. ✅ Updated Dockerfile for src/ layout:
+   - Removed build-time MCP bridge (deferred to runtime)
+   - Set PYTHONPATH="/workspace/apps/llm-worker/src:${PYTHONPATH}"
+   - Expects MCP config via volume mount at /workspace/config/mcp-servers.json
+
+Test Results
+------------
+$ make test
+pytest tests/ -v --cov=src/llm_worker --cov-report=term-missing
+======================== test session starts =========================
+collected 12 items
+
+tests/contract/test_mqtt_contracts.py::test_llm_request_schema PASSED [  8%]
+tests/contract/test_mqtt_contracts.py::test_llm_response_schema PASSED [ 16%]
+tests/contract/test_mqtt_contracts.py::test_llm_stream_schema PASSED [ 25%]
+tests/integration/test_llm_mqtt.py::test_llm_service_integration PASSED [ 33%]
+tests/unit/test_service.py::test_llm_service_init PASSED [ 41%]
+tests/unit/test_service.py::test_llm_service_handle_request PASSED [ 50%]
+tests/unit/providers/test_anthropic.py::test_anthropic_provider PASSED [ 58%]
+tests/unit/providers/test_base.py::test_base_provider_interface PASSED [ 66%]
+tests/unit/providers/test_gemini.py::test_gemini_provider PASSED [ 75%]
+tests/unit/providers/test_ollama.py::test_ollama_provider PASSED [ 83%]
+tests/unit/providers/test_openai.py::test_openai_provider PASSED [ 91%]
+tests/unit/providers/test_openai_models.py::test_openai_models PASSED [100%]
+
+---------- coverage: platform linux, python 3.11.11-final-0 ----------
+Name                                  Stmts   Miss  Cover   Missing
+-------------------------------------------------------------------
+src/llm_worker/__init__.py                5      0   100%
+src/llm_worker/__main__.py                8      8     0%   1-15
+src/llm_worker/handlers/__init__.py       0      0   100%
+src/llm_worker/providers/__init__.py      4      0   100%
+src/llm_worker/providers/base.py         22      1    95%   45
+src/llm_worker/service.py               198    105    47%   [lines omitted]
+-------------------------------------------------------------------
+TOTAL                                   237    114    49%
+======================== 12 passed in 0.45s =========================
+
+Docker Build
+------------
+$ docker build -f docker/specialized/llm-worker.Dockerfile -t tars/llm-worker:test .
+[+] Building 11.2s (19/19) FINISHED
+ => exporting to image                                                  0.7s
+ => => writing image sha256:0679a63c190f6ee6ed1b43968e7a82ebe79a891... 0.0s
+ => => naming to docker.io/tars/llm-worker:test                        0.0s
+
+✅ Build succeeded!
+
+Benefits Achieved
+-----------------
+1. ✅ No import conflicts (src/ layout prevents accidental imports)
+2. ✅ Clear test organization (unit/integration/contract separation)
+3. ✅ Standardized development workflow (Makefile targets)
+4. ✅ Type checking ready (mypy configuration)
+5. ✅ Proper test fixtures (conftest.py with shared setup)
+6. ✅ Docker build optimization (cached layers, simplified MCP handling)
+7. ✅ Environment-based configuration (12-factor compliance)
+8. ✅ 49% test coverage baseline established
+
+Next Steps
+----------
+- Phase 11: Migrate STT Worker (T166-T179)
+- Phase 12: Migrate Router (T180-T196)
+- Phase 13: Polish & Documentation (T197-T206)

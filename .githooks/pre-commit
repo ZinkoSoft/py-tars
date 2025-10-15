@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Pre-commit hook for TARS services
+# Runs make check for any modified service
+
+set -e
+
+# Get the root directory of the git repo
+REPO_ROOT=$(git rev-parse --show-toplevel)
+
+# Find all modified files in apps/
+MODIFIED_APPS=$(git diff --cached --name-only --diff-filter=ACM | \
+    grep "^apps/" | \
+    cut -d/ -f1-2 | \
+    sort -u)
+
+if [ -z "$MODIFIED_APPS" ]; then
+    echo "✓ No app changes detected, skipping checks"
+    exit 0
+fi
+
+echo "🔍 Running checks for modified services..."
+echo
+
+FAILED=0
+
+for APP_PATH in $MODIFIED_APPS; do
+    APP_NAME=$(basename "$APP_PATH")
+    
+    # Check if Makefile exists
+    if [ ! -f "$REPO_ROOT/$APP_PATH/Makefile" ]; then
+        echo "⚠️  Skipping $APP_NAME (no Makefile found)"
+        continue
+    fi
+    
+    echo "📦 Checking $APP_NAME..."
+    
+    # Run make check in the app directory
+    if ! (cd "$REPO_ROOT/$APP_PATH" && make check); then
+        echo "❌ $APP_NAME checks failed"
+        FAILED=1
+    else
+        echo "✓ $APP_NAME checks passed"
+    fi
+    
+    echo
+done
+
+if [ $FAILED -eq 1 ]; then
+    echo "❌ Pre-commit checks failed. Please fix the issues and try again."
+    echo "   Tip: Run 'make check' in the affected service directory to see details"
+    exit 1
+fi
+
+echo "✅ All pre-commit checks passed!"
+exit 0

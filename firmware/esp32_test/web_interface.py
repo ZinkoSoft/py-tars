@@ -379,14 +379,14 @@ class WebInterface:
     <script>
         const servoNames = [
             'Main Legs (Height)',
-            'Left Leg Rotation',
+            'Left Leg Rotation ⮀',
             'Right Leg Rotation',
             'Right Arm Main',
             'Right Arm Forearm',
             'Right Arm Hand',
-            'Left Arm Main',
-            'Left Arm Forearm',
-            'Left Arm Hand'
+            'Left Arm Main ⮀',
+            'Left Arm Forearm ⮀',
+            'Left Arm Hand ⮀'
         ];
         
         const servoRanges = SERVO_RANGES_PLACEHOLDER;

@@ -45,7 +45,7 @@ services:
         PY_VERSION: "3.11"
         APP_PATH: apps/router
         CONTRACTS_PATH: packages/tars-core
-        APP_MODULE: main
+        APP_MODULE: router.__main__
     env_file: ../.env
     image: tars/router:dev
     container_name: tars-router
@@ -92,7 +92,7 @@ services:
       TTS_WAKE_CACHE_ENABLE: ${TTS_WAKE_CACHE_ENABLE:-1}
       TTS_WAKE_CACHE_DIR: ${TTS_WAKE_CACHE_DIR:-/data/tts-cache}
       TTS_WAKE_CACHE_MAX: ${TTS_WAKE_CACHE_MAX:-16}
-      PYTHONPATH: /workspace/apps/tts-worker
+      PYTHONPATH: /workspace/apps/tts-worker/src:/workspace/packages/tars-core/src
 
     depends_on:
       mqtt:
@@ -147,9 +147,9 @@ services:
       NOISE_FLOOR_ADAPTIVE_ENABLE: ${NOISE_FLOOR_ADAPTIVE_ENABLE:-1}
       NOISE_FLOOR_THRESHOLD_MULTIPLIER: ${NOISE_FLOOR_THRESHOLD_MULTIPLIER:-3.0}
       NOISE_FLOOR_UPDATE_INTERVAL: ${NOISE_FLOOR_UPDATE_INTERVAL:-50}
-      PYTHONPATH: /workspace/apps/stt-worker
+      PYTHONPATH: /workspace/apps/stt-worker/src:/workspace/packages/tars-core/src
     entrypoint: ["/bin/sh", "-c"]
-    command: ["if [ -d /host-models ] && [ -n \"$(ls -A /host-models 2>/dev/null)\" ]; then echo 'Copying models from host...'; cp -r /host-models/* /app/models/ 2>/dev/null || true; fi; exec python /workspace/apps/stt-worker/main.py"]
+    command: ["if [ -d /host-models ] && [ -n \"$(ls -A /host-models 2>/dev/null)\" ]; then echo 'Copying models from host...'; cp -r /host-models/* /app/models/ 2>/dev/null || true; fi; exec python -m stt_worker"]
     depends_on:
       mqtt:
         condition: service_started
@@ -206,7 +206,7 @@ services:
       WAKE_STT_HEALTH_TIMEOUT_SEC: ${WAKE_STT_HEALTH_TIMEOUT_SEC:-30}
       # NPU-specific environment
       RKNN_LOG_LEVEL: ${RKNN_LOG_LEVEL:-3}
-      PYTHONPATH: /workspace/apps/wake-activation
+      PYTHONPATH: /workspace/apps/wake-activation/src
     entrypoint: ["/bin/sh", "-c"]
     command: ["echo 'Wake activation: Waiting for STT service to stabilize...'; sleep 3; echo 'Wake activation: Starting wake word detection'; exec python -m wake_activation"]
     depends_on:
@@ -262,8 +262,8 @@ services:
       CAMERA_HTTP_HOST: 0.0.0.0
       CAMERA_HTTP_PORT: ${CAMERA_HTTP_PORT:-8080}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      PYTHONPATH: /workspace/apps/camera-service
-    command: ["python", "/workspace/apps/camera-service/main.py"]
+      PYTHONPATH: /workspace/apps/camera-service/src
+    command: ["python", "-m", "camera_service"]
     ports:
       - "${CAMERA_HTTP_PORT:-8080}:${CAMERA_HTTP_PORT:-8080}"
     volumes:
@@ -348,7 +348,8 @@ services:
       OPENAI_RESPONSES_MODELS: ${OPENAI_RESPONSES_MODELS:-gpt-5*,gpt-5-mini,gpt-5-nano}
       TOPIC_TOOLS_REGISTRY: ${TOPIC_TOOLS_REGISTRY:-llm/tools/registry}
       TOPIC_TOOL_CALL_RESULT: ${TOPIC_TOOL_CALL_RESULT:-llm/tools/result}
-      PYTHONPATH: /workspace/apps/llm-worker
+      PYTHONPATH: /workspace/apps/llm-worker/src:/workspace/packages/tars-core/src
+    command: ["python", "-m", "llm_worker"]
     volumes:
       - ..:/workspace:ro
     depends_on:
@@ -382,16 +383,44 @@ services:
       RKNN_EMBEDDER_PATH: ${RKNN_EMBEDDER_PATH:-/data/model_cache/embedder/all-MiniLM-L6-v2.rknn}
       NPU_CORE_MASK: ${NPU_CORE_MASK:-0}
       NPU_FALLBACK_CPU: ${NPU_FALLBACK_CPU:-1}
-      PYTHONPATH: /workspace/apps/memory-worker
+      PYTHONPATH: /workspace/apps/memory-worker/src:/workspace/packages/tars-core/src
     volumes:
       - ../data/memory:/data
       - ../data/model_cache:/data/model_cache
-      - ../apps/voice/characters:/config/characters:ro
+      - ../apps/memory-worker/characters:/config/characters:ro
       - ..:/workspace:ro
       - /proc/device-tree/compatible:/proc/device-tree/compatible:ro
       - /lib/librknnrt.so:/usr/lib/aarch64-linux-gnu/librknnrt.so:ro
     devices:
       - /dev/dri/renderD129:/dev/dri/renderD129
+    depends_on:
+      mqtt:
+        condition: service_started
+    restart: unless-stopped
+
+  movement:
+    build:
+      context: ..
+      dockerfile: docker/app.Dockerfile
+      args:
+        PY_VERSION: "3.11"
+        APP_PATH: apps/movement-service
+        CONTRACTS_PATH: packages/tars-core
+        APP_MODULE: movement_service
+    image: tars/movement:dev
+    container_name: tars-movement
+    env_file: ../.env
+    environment:
+      MQTT_URL: mqtt://mqtt:1883
+      MQTT_HOST: mqtt
+      MQTT_PORT: "1883"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      MOVEMENT_TEST_TOPIC: ${MOVEMENT_TEST_TOPIC:-movement/test}
+      MOVEMENT_HEALTH_TOPIC: ${MOVEMENT_HEALTH_TOPIC:-system/health/movement}
+      MOVEMENT_PUBLISH_QOS: ${MOVEMENT_PUBLISH_QOS:-1}
+      PYTHONPATH: /workspace/apps/movement-service/src
+    volumes:
+      - ..:/workspace:ro
     depends_on:
       mqtt:
         condition: service_started

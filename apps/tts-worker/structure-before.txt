@@ -1,0 +1,28 @@
+.
+├── README.md
+├── dist
+│   ├── tars_tts_worker-0.1.0-py3-none-any.whl
+│   └── tars_tts_worker-0.1.0.tar.gz
+├── external_services
+│   ├── __init__.py
+│   ├── base.py
+│   └── eleven_labs.py
+├── main.py
+├── pyproject.toml
+├── requirements.txt
+├── structure-before.txt
+├── tests
+│   └── test_service_controls.py
+├── tts_worker
+│   ├── __init__.py
+│   ├── __main__.py
+│   ├── config.py
+│   ├── models.py
+│   ├── piper_synth.py
+│   └── service.py
+├── voice
+└── voices
+    ├── TARS.onnx
+    └── TARS.onnx.json
+
+7 directories, 19 files

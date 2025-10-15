@@ -22,16 +22,18 @@ WORKDIR /app
 # Copy tars-core package first (needed for contracts)
 COPY packages/tars-core /tmp/tars-core
 
-# Copy requirements first for layer caching
-COPY apps/ui/requirements.txt ./requirements.txt
+# Copy pyproject.toml for dependency installation
+COPY apps/ui/pyproject.toml ./pyproject.toml
+COPY apps/ui/src ./src
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir /tmp/tars-core && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -e .
 
-# Copy source code - Docker automatically detects changes
-COPY apps/ui/ /app/
+# Copy configuration files (layout.json, ui.toml) - stay at root
+COPY apps/ui/layout.json ./layout.json
+COPY apps/ui/ui.toml ./ui.toml
 
 ENV UI_CONFIG="/config/ui.toml"
 
-CMD ["python", "-u", "main.py"]
+CMD ["python", "-m", "ui"]
