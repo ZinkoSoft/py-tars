@@ -31,11 +31,11 @@ SERVO_CHANNELS = {
 }
 
 # Servo Ranges (calibrate these for your servos)
-# Format: (min_pulse, max_pulse, default_pulse)
+# Format: (min_pulse, max_pulse, default_pulse, invert)
 SERVO_RANGES = {
     # Leg servos
     0: {'min': 220, 'max': 350, 'default': 300},  # Main legs (upHeight=220, downHeight=350)
-    1: {'min': 220, 'max': 380, 'default': 300},  # Left leg rotation (starboard)
+    1: {'min': 220, 'max': 380, 'default': 300, 'invert': True},  # Left leg rotation (starboard) - REVERSED
     2: {'min': 220, 'max': 380, 'default': 300},  # Right leg rotation (port)
     
     # Right arm
@@ -43,10 +43,10 @@ SERVO_RANGES = {
     4: {'min': 200, 'max': 500, 'default': 200},  # Right forearm
     5: {'min': 200, 'max': 500, 'default': 200},  # Right hand
     
-    # Left arm
-    6: {'min': 200, 'max': 500, 'default': 440},  # Left main
-    7: {'min': 200, 'max': 500, 'default': 380},  # Left forearm
-    8: {'min': 200, 'max': 500, 'default': 380},  # Left hand
+    # Left arm (inverted to mirror right arm movement)
+    6: {'min': 200, 'max': 500, 'default': 440, 'invert': False},  # Left main - REVERSED
+    7: {'min': 200, 'max': 500, 'default': 380, 'invert': False},  # Left forearm - REVERSED
+    8: {'min': 200, 'max': 500, 'default': 380, 'invert': False},  # Left hand - REVERSED
 }
 
 # Preset positions for testing
@@ -110,6 +110,13 @@ MOVEMENT_CONFIG = {
     'star_hand_min': 200,
     'star_hand_max': 500,
 }
+
+def reverse_servo(pulse, min_pulse, max_pulse):
+    """
+    Reverse servo direction by flipping pulse value within range
+    Formula: reversed_pulse = max - (pulse - min)
+    """
+    return max_pulse - (pulse - min_pulse)
 
 def get_servo_range(channel):
     """Get the min/max/default for a servo channel"""
