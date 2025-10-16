@@ -5,8 +5,13 @@ import uuid
 
 from pydantic import BaseModel, Field
 
+# Event types (legacy - prefer topic constants)
 EVENT_TYPE_STT_FINAL = "stt.final"
 EVENT_TYPE_STT_PARTIAL = "stt.partial"
+
+# MQTT Topic constants
+TOPIC_STT_FINAL = "stt/final"
+TOPIC_STT_PARTIAL = "stt/partial"
 
 
 class FinalTranscript(BaseModel):
