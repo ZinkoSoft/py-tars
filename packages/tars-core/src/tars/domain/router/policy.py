@@ -5,7 +5,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from tars.contracts.v1 import (
     EVENT_TYPE_LLM_REQUEST,
@@ -17,6 +17,8 @@ from tars.contracts.v1 import (
     LLMRequest,
     LLMResponse,
     LLMStreamDelta,
+    TestMovementCommand,
+    TestMovementRequest,
     TtsSay,
     TtsStatus,
     WakeEvent,
@@ -153,6 +155,27 @@ class RouterPolicy:
             self._open_response_window()
             ctx.logger.debug("router.response_window.opened", extra={"until": self.response_window_until})
 
+    async def handle_movement_status(self, event: Any, ctx: Ctx) -> None:
+        """
+        Handle movement status updates from ESP32.
+        
+        This is primarily for logging and monitoring. Future enhancements could:
+        - Trigger voice feedback on movement completion
+        - Update UI with movement status
+        - Track movement metrics
+        """
+        event_type = getattr(event, "event", None)
+        command = getattr(event, "command", None)
+        ctx.logger.debug(
+            "router.movement.status",
+            extra={
+                "event": event_type,
+                "command": command,
+                "request_id": getattr(event, "request_id", None)
+            }
+        )
+
+
     async def handle_stt_final(self, event: FinalTranscript, ctx: Ctx) -> None:
         text = (event.text or "").strip()
         if not text:
@@ -234,6 +257,23 @@ class RouterPolicy:
             self._close_response_window()
 
         ctx.logger.debug("router.stt.route", extra={"gating": gating_reason or "wake"})
+
+        # Check for movement commands first
+        movement_cmd = self._detect_movement_command(candidate_text)
+        if movement_cmd is not None:
+            req = TestMovementRequest(
+                command=movement_cmd,
+                speed=1.0,
+                request_id=event.utt_id or f"mv-{uuid.uuid4().hex[:8]}"
+            )
+            await ctx.publish(
+                self.settings.topic_movement_test,
+                req,
+                correlate=ctx.id_from(event),
+                qos=1
+            )
+            ctx.logger.info("router.movement.command", extra={"command": movement_cmd.value})
+            return
 
         resp = self._rule_route(candidate_text)
         if resp is not None:
@@ -466,6 +506,44 @@ class RouterPolicy:
     def _normalize_command(text: str) -> str:
         cleaned = re.sub(r"[^a-z0-9\s]", "", text.lower())
         return re.sub(r"\s+", " ", cleaned).strip()
+
+    def _detect_movement_command(self, text: str) -> Optional[TestMovementCommand]:
+        """
+        Detect movement commands from user input.
+        
+        Returns TestMovementCommand if a movement is detected, None otherwise.
+        """
+        t = text.lower().strip()
+        
+        # Map common phrases to movement commands
+        movement_patterns = {
+            TestMovementCommand.WAVE: ["wave", "wave your hand", "wave hello"],
+            TestMovementCommand.LAUGH: ["laugh", "do a laugh", "laugh animation"],
+            TestMovementCommand.BOW: ["bow", "take a bow", "bow down"],
+            TestMovementCommand.SWING_LEGS: ["swing legs", "swing your legs", "leg swing"],
+            TestMovementCommand.BALANCE: ["balance", "stand up", "balance yourself"],
+            TestMovementCommand.POSE: ["pose", "strike a pose", "do a pose"],
+            TestMovementCommand.STEP_FORWARD: ["step forward", "walk forward", "move forward"],
+            TestMovementCommand.STEP_BACKWARD: ["step backward", "step back", "walk backward", "move back"],
+            TestMovementCommand.TURN_LEFT: ["turn left", "rotate left"],
+            TestMovementCommand.TURN_RIGHT: ["turn right", "rotate right"],
+            TestMovementCommand.RESET: ["reset", "reset position", "go to reset"],
+            TestMovementCommand.DISABLE: ["disable", "turn off", "power down"],
+            TestMovementCommand.STOP: ["stop", "stop moving", "halt"],
+            TestMovementCommand.MIC_DROP: ["mic drop", "drop the mic"],
+            TestMovementCommand.MONSTER: ["monster", "monster pose"],
+            TestMovementCommand.PEZZ_DISPENSER: ["pez", "pez dispenser", "pezz"],
+            TestMovementCommand.NOW: ["now", "now pose"],
+        }
+        
+        # Check for exact or substring matches
+        for cmd, patterns in movement_patterns.items():
+            for pattern in patterns:
+                if pattern in t or t == pattern:
+                    return cmd
+        
+        return None
+
 
     def _strip_wake_phrase(self, text: str) -> Optional[str]:
         match = self._wake_regex.match(text)

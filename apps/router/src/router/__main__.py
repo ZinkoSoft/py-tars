@@ -16,6 +16,7 @@ from tars.contracts.v1 import (  # type: ignore[import]
     LLMCancel,
     LLMResponse,
     LLMStreamDelta,
+    MovementStatusUpdate,
     TtsStatus,
     WakeEvent,
 )
@@ -59,6 +60,9 @@ def _build_subscriptions(settings: RouterSettings, policy: RouterPolicy) -> Iter
     async def handle_tts_status(event: TtsStatus, ctx: Ctx) -> None:
         await policy.handle_tts_status(event, ctx)
 
+    async def handle_movement_status(event: MovementStatusUpdate, ctx: Ctx) -> None:
+        await policy.handle_movement_status(event, ctx)
+
     return (
         Sub(
             settings.topic_health_tts,
@@ -78,6 +82,7 @@ def _build_subscriptions(settings: RouterSettings, policy: RouterPolicy) -> Iter
         Sub(settings.topic_llm_cancel, LLMCancel, handle_llm_cancel, qos=1),
         Sub(settings.topic_wake_event, WakeEvent, handle_wake, qos=1),
         Sub(settings.topic_tts_status, TtsStatus, handle_tts_status, qos=1),
+        Sub(settings.topic_movement_status, MovementStatusUpdate, handle_movement_status, qos=0),
     )
 
 
