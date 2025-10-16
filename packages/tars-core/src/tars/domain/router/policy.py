@@ -5,7 +5,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from tars.contracts.v1 import (
     EVENT_TYPE_LLM_REQUEST,
@@ -154,6 +154,27 @@ class RouterPolicy:
             # Start a response window for conversational follow-ups
             self._open_response_window()
             ctx.logger.debug("router.response_window.opened", extra={"until": self.response_window_until})
+
+    async def handle_movement_status(self, event: Any, ctx: Ctx) -> None:
+        """
+        Handle movement status updates from ESP32.
+        
+        This is primarily for logging and monitoring. Future enhancements could:
+        - Trigger voice feedback on movement completion
+        - Update UI with movement status
+        - Track movement metrics
+        """
+        event_type = getattr(event, "event", None)
+        command = getattr(event, "command", None)
+        ctx.logger.debug(
+            "router.movement.status",
+            extra={
+                "event": event_type,
+                "command": command,
+                "request_id": getattr(event, "request_id", None)
+            }
+        )
+
 
     async def handle_stt_final(self, event: FinalTranscript, ctx: Ctx) -> None:
         text = (event.text or "").strip()
