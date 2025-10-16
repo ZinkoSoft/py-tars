@@ -6,6 +6,7 @@ Basic setup and configuration
 import gc
 import esp
 import machine
+import time
 
 # Disable ESP32 debug output
 esp.osdebug(None)
@@ -16,8 +17,15 @@ gc.enable()
 # Optional: Set frequency (240MHz is max for ESP32)
 machine.freq(240000000)
 
+# Initial garbage collection
+gc.collect()
+
+# Boot timestamp
+boot_time = time.time()
+
 print("\n" + "="*50)
 print("ESP32 Booting - TARS Servo Controller")
 print(f"CPU Freq: {machine.freq()/1000000:.0f}MHz")
 print(f"Free Memory: {gc.mem_free()} bytes")
+print(f"Boot Timestamp: {boot_time}")
 print("="*50 + "\n")
