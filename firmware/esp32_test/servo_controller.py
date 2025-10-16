@@ -63,10 +63,17 @@ class ServoController:
                 target = SERVO_CALIBRATION[channel]["neutral"]
                 pos_desc = "neutral"
             
+            # Get reverse status for logging
+            is_reversed = SERVO_CALIBRATION[channel].get("reverse", False)
+            reverse_status = "REVERSED" if is_reversed else "normal"
+            
+            # Apply reverse transformation if needed (must match move_servo_smooth behavior)
+            actual_target = apply_reverse_if_needed(channel, target)
+            
             try:
-                self.pca9685.set_pwm(channel, 0, target)
-                self.positions[channel] = target
-                print(f"  Channel {channel} ({SERVO_CALIBRATION[channel]['label']}): {target} ({pos_desc})")
+                self.pca9685.set_pwm(channel, 0, actual_target)
+                self.positions[channel] = actual_target
+                print(f"  Channel {channel} ({SERVO_CALIBRATION[channel]['label']}): {target} -> {actual_target} ({pos_desc}) [{reverse_status}]")
             except Exception as e:
                 print(f"  ✗ Channel {channel} failed: {e}")
         

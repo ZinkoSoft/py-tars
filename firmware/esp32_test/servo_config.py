@@ -13,7 +13,7 @@ SERVO_CALIBRATION = {
     # Leg Servos (LDX-227) - Channels 0-2
     0: {
         "min": 220,        # upHeight (raised position)
-        "max": 350,        # downHeight (lowered position)
+        "max": 360,        # downHeight (lowered position)
         "neutral": 300,    # neutralHeight
         "label": "Main Legs Lift",
         "servo_type": "LDX-227",
@@ -25,7 +25,7 @@ SERVO_CALIBRATION = {
         "neutral": 300,    # neutralStarboard
         "label": "Left Leg Rotation",
         "servo_type": "LDX-227",
-        "reverse": True    # Reverse direction for left leg
+        "reverse": False    # Reverse direction for left leg
     },
     2: {
         "min": 192,        # backPort (right leg back)
@@ -33,14 +33,14 @@ SERVO_CALIBRATION = {
         "neutral": 300,    # neutralPort
         "label": "Right Leg Rotation",
         "servo_type": "LDX-227",
-        "reverse": False
+        "reverse": True
     },
     
     # Right Arm (MG996R shoulder, MG90S forearm/hand) - Channels 3-5
     3: {
         "min": 135,        # portMainMin
         "max": 440,        # portMainMax
-        "neutral": 287,    # Calculated midpoint
+        "neutral": 135,    # Calculated midpoint
         "label": "Right Shoulder",
         "servo_type": "MG996R",
         "reverse": True
@@ -48,7 +48,7 @@ SERVO_CALIBRATION = {
     4: {
         "min": 200,        # portForarmMin
         "max": 380,        # portForarmMax
-        "neutral": 290,    # Calculated midpoint
+        "neutral": 200,    # Calculated midpoint
         "label": "Right Elbow",
         "servo_type": "MG90S",
         "reverse": True
@@ -56,7 +56,7 @@ SERVO_CALIBRATION = {
     5: {
         "min": 200,        # portHandMin
         "max": 280,        # portHandMax (NOT 380 - prevents over-extension)
-        "neutral": 240,    # Calculated midpoint
+        "neutral": 200,    # Calculated midpoint
         "label": "Right Hand",
         "servo_type": "MG90S",
         "reverse": True
@@ -67,23 +67,23 @@ SERVO_CALIBRATION = {
     6: {
         "min": 135,        # starMainMax (inverted)
         "max": 440,        # starMainMin (inverted)
-        "neutral": 287,    # Calculated midpoint
+        "neutral": 135,    # Calculated midpoint
         "label": "Left Shoulder",
         "servo_type": "MG996R",
-        "reverse": True
+        "reverse": False
     },
     7: {
-        "min": 200,        # starForarmMax (inverted)
+        "min": 190,        # starForarmMax (inverted)
         "max": 380,        # starForarmMin (inverted)
-        "neutral": 290,    # Calculated midpoint
+        "neutral": 190,    # Calculated midpoint
         "label": "Left Elbow",
         "servo_type": "MG90S",
-        "reverse": True
+        "reverse": False
     },
     8: {
         "min": 280,        # starHandMax (inverted)
         "max": 380,        # starHandMin (inverted)
-        "neutral": 330,    # Calculated midpoint
+        "neutral": 280,    # Calculated midpoint
         "label": "Left Hand",
         "servo_type": "MG90S",
         "reverse": False

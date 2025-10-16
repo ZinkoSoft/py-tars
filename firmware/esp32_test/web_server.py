@@ -77,14 +77,14 @@ h1{text-align:center;color:#4CAF50}
 </div>
 <script>
 const servos=[
-{ch:0,label:"Main Legs Lift",min:220,max:350},
+{ch:0,label:"Main Legs Lift",min:220,max:360},
 {ch:1,label:"Left Leg Rotation",min:192,max:408},
 {ch:2,label:"Right Leg Rotation",min:192,max:408},
 {ch:3,label:"Right Shoulder",min:135,max:440},
 {ch:4,label:"Right Elbow",min:200,max:380},
 {ch:5,label:"Right Hand",min:200,max:280},
 {ch:6,label:"Left Shoulder",min:135,max:440},
-{ch:7,label:"Left Elbow",min:200,max:380},
+{ch:7,label:"Left Elbow",min:190,max:380},
 {ch:8,label:"Left Hand",min:280,max:380}
 ];
 const presets=[
