@@ -22,12 +22,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Set up workspace
 WORKDIR /workspace
 
+# Install tars-core first (required for contracts)
+COPY packages/tars-core/pyproject.toml packages/tars-core/README.md /tmp/tars-core/
+COPY packages/tars-core/src /tmp/tars-core/src
+RUN pip install --upgrade pip && \
+    pip install /tmp/tars-core && \
+    rm -rf /tmp/tars-core
+
 # Copy application with src/ layout
 COPY apps/camera-service/ /workspace/apps/camera-service/
 
 # Install package in editable mode
-RUN pip install --upgrade pip && \
-    pip install -e /workspace/apps/camera-service
+RUN pip install -e /workspace/apps/camera-service
 
 # Set environment
 ENV PYTHONUNBUFFERED=1
