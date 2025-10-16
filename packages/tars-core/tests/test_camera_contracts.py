@@ -5,10 +5,12 @@ from pydantic import ValidationError
 
 from tars.contracts.v1.camera import (
     CameraCaptureRequest,
+    CameraFrame,
     CameraImageResponse,
     CameraStatusUpdate,
     TOPIC_CAMERA_CAPTURE,
     TOPIC_CAMERA_IMAGE,
+    TOPIC_CAMERA_FRAME,
 )
 
 
@@ -19,6 +21,7 @@ class TestCameraTopicConstants:
         """Test all topic constants are defined."""
         assert TOPIC_CAMERA_CAPTURE == "camera/capture"
         assert TOPIC_CAMERA_IMAGE == "camera/image"
+        assert TOPIC_CAMERA_FRAME == "camera/frame"
 
 
 class TestCameraCaptureRequest:
@@ -290,3 +293,97 @@ class TestCameraIntegration:
         assert status_started.request_id == request.request_id
         assert response.request_id == request.request_id
         assert status_completed.request_id == request.request_id
+
+
+class TestCameraFrame:
+    """Test CameraFrame contract."""
+
+    def test_valid_minimal(self):
+        """Test valid frame with minimal fields."""
+        msg = CameraFrame(
+            frame_data="base64encodeddata",
+            width=640,
+            height=480,
+            frame_number=1,
+        )
+        assert msg.frame_data == "base64encodeddata"
+        assert msg.format == "jpeg"  # Default
+        assert msg.width == 640
+        assert msg.height == 480
+        assert msg.frame_number == 1
+        assert msg.message_id is not None
+        assert msg.timestamp > 0
+
+    def test_valid_full(self):
+        """Test valid frame with all fields."""
+        msg = CameraFrame(
+            frame_data="base64encodeddata",
+            format="png",
+            width=1920,
+            height=1080,
+            frame_number=42,
+            fps=30.0,
+        )
+        assert msg.format == "png"
+        assert msg.width == 1920
+        assert msg.height == 1080
+        assert msg.frame_number == 42
+        assert msg.fps == 30.0
+
+    def test_invalid_format(self):
+        """Test invalid format is rejected."""
+        with pytest.raises(ValidationError):
+            CameraFrame(
+                frame_data="data",
+                format="bmp",
+                width=640,
+                height=480,
+                frame_number=1,
+            )
+
+    def test_invalid_dimensions(self):
+        """Test invalid dimensions are rejected."""
+        with pytest.raises(ValidationError):
+            CameraFrame(
+                frame_data="data",
+                width=0,
+                height=480,
+                frame_number=1,
+            )
+
+    def test_invalid_frame_number(self):
+        """Test negative frame number is rejected."""
+        with pytest.raises(ValidationError):
+            CameraFrame(
+                frame_data="data",
+                width=640,
+                height=480,
+                frame_number=-1,
+            )
+
+    def test_extra_fields_forbidden(self):
+        """Test extra fields are rejected."""
+        with pytest.raises(ValidationError):
+            CameraFrame(
+                frame_data="data",
+                width=640,
+                height=480,
+                frame_number=1,
+                extra_field="not allowed",
+            )
+
+    def test_json_round_trip(self):
+        """Test JSON serialization round trip."""
+        msg = CameraFrame(
+            frame_data="base64data",
+            width=640,
+            height=480,
+            frame_number=10,
+            fps=15.0,
+        )
+        json_str = msg.model_dump_json()
+        msg2 = CameraFrame.model_validate_json(json_str)
+        assert msg.frame_data == msg2.frame_data
+        assert msg.width == msg2.width
+        assert msg.height == msg2.height
+        assert msg.frame_number == msg2.frame_number

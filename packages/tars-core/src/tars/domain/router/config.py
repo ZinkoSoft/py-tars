@@ -3,6 +3,20 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Mapping, Tuple
 
+from tars.contracts.v1 import (
+    TOPIC_LLM_CANCEL,
+    TOPIC_LLM_REQUEST,
+    TOPIC_LLM_RESPONSE,
+    TOPIC_LLM_STREAM,
+    TOPIC_MOVEMENT_STATE,
+    TOPIC_MOVEMENT_STATUS,
+    TOPIC_MOVEMENT_STOP,
+    TOPIC_MOVEMENT_TEST,
+    TOPIC_STT_FINAL,
+    TOPIC_TTS_SAY,
+    TOPIC_TTS_STATUS,
+    TOPIC_WAKE_EVENT,
+)
 from tars.runtime import env as runtime_env
 
 
@@ -22,17 +36,17 @@ class RouterSettings:
     topic_health_tts: str = "system/health/tts"
     topic_health_stt: str = "system/health/stt"
     topic_health_router: str = "system/health/router"
-    topic_stt_final: str = "stt/final"
-    topic_tts_say: str = "tts/say"
-    topic_tts_status: str = "tts/status"
-    topic_llm_req: str = "llm/request"
-    topic_llm_resp: str = "llm/response"
-    topic_llm_stream: str = "llm/stream"
-    topic_llm_cancel: str = "llm/cancel"
-    topic_wake_event: str = "wake/event"
-    topic_movement_test: str = "movement/test"
-    topic_movement_stop: str = "movement/stop"
-    topic_movement_status: str = "movement/status"
+    topic_stt_final: str = TOPIC_STT_FINAL
+    topic_tts_say: str = TOPIC_TTS_SAY
+    topic_tts_status: str = TOPIC_TTS_STATUS
+    topic_llm_req: str = TOPIC_LLM_REQUEST
+    topic_llm_resp: str = TOPIC_LLM_RESPONSE
+    topic_llm_stream: str = TOPIC_LLM_STREAM
+    topic_llm_cancel: str = TOPIC_LLM_CANCEL
+    topic_wake_event: str = TOPIC_WAKE_EVENT
+    topic_movement_test: str = TOPIC_MOVEMENT_TEST
+    topic_movement_stop: str = TOPIC_MOVEMENT_STOP
+    topic_movement_status: str = TOPIC_MOVEMENT_STATUS
     router_llm_tts_stream: bool = True
     stream_min_chars: int = 60
     stream_max_chars: int = 240

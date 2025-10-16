@@ -6,8 +6,10 @@ from .camera import (
 	EVENT_TYPE_CAMERA_IMAGE,
 	TOPIC_CAMERA_CAPTURE,
 	TOPIC_CAMERA_IMAGE,
+	TOPIC_CAMERA_FRAME,
 	BaseCameraMessage,
 	CameraCaptureRequest,
+	CameraFrame,
 	CameraImageResponse,
 	CameraStatusUpdate,
 )
@@ -108,6 +110,8 @@ from .stt import (
 	EVENT_TYPE_STT_PARTIAL,
 	TOPIC_STT_FINAL,
 	TOPIC_STT_PARTIAL,
+	TOPIC_STT_AUDIO_FFT,
+	AudioFFTData,
 	FinalTranscript,
 	PartialTranscript,
 )
@@ -118,6 +122,8 @@ from .tts import (
 	EVENT_TYPE_TTS_STATUS,
 	TOPIC_TTS_SAY,
 	TOPIC_TTS_STATUS,
+	TOPIC_TTS_CONTROL,
+	TtsControlCommand,
 	TtsSay,
 	TtsStatus,
 )
@@ -138,8 +144,10 @@ __all__ = [
 	"EVENT_TYPE_CAMERA_IMAGE",
 	"TOPIC_CAMERA_CAPTURE",
 	"TOPIC_CAMERA_IMAGE",
+	"TOPIC_CAMERA_FRAME",
 	"BaseCameraMessage",
 	"CameraCaptureRequest",
+	"CameraFrame",
 	"CameraImageResponse",
 	"CameraStatusUpdate",
 	# Health
@@ -222,6 +230,8 @@ __all__ = [
 	"EVENT_TYPE_STT_PARTIAL",
 	"TOPIC_STT_FINAL",
 	"TOPIC_STT_PARTIAL",
+	"TOPIC_STT_AUDIO_FFT",
+	"AudioFFTData",
 	"FinalTranscript",
 	"PartialTranscript",
 	# TTS
@@ -229,6 +239,8 @@ __all__ = [
 	"EVENT_TYPE_TTS_STATUS",
 	"TOPIC_TTS_SAY",
 	"TOPIC_TTS_STATUS",
+	"TOPIC_TTS_CONTROL",
+	"TtsControlCommand",
 	"TtsSay",
 	"TtsStatus",
 	# Wake

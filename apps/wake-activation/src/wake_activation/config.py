@@ -5,6 +5,14 @@ from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from tars.contracts.v1 import (  # type: ignore[import]
+    TOPIC_STT_FINAL,
+    TOPIC_TTS_CONTROL,
+    TOPIC_TTS_STATUS,
+    TOPIC_WAKE_EVENT,
+    TOPIC_WAKE_MIC,
+)
+
 
 @dataclass(slots=True)
 class WakeActivationConfig:
@@ -35,17 +43,19 @@ class WakeActivationConfig:
     )
     health_topic: str = field(default_factory=lambda: os.getenv("WAKE_HEALTH_TOPIC", "wake/health"))
     wake_event_topic: str = field(
-        default_factory=lambda: os.getenv("WAKE_EVENT_TOPIC", "wake/event")
+        default_factory=lambda: os.getenv("WAKE_EVENT_TOPIC", TOPIC_WAKE_EVENT)
     )
-    mic_control_topic: str = field(default_factory=lambda: os.getenv("WAKE_MIC_TOPIC", "wake/mic"))
+    mic_control_topic: str = field(
+        default_factory=lambda: os.getenv("WAKE_MIC_TOPIC", TOPIC_WAKE_MIC)
+    )
     tts_control_topic: str = field(
-        default_factory=lambda: os.getenv("WAKE_TTS_TOPIC", "tts/control")
+        default_factory=lambda: os.getenv("WAKE_TTS_TOPIC", TOPIC_TTS_CONTROL)
     )
     tts_status_topic: str = field(
-        default_factory=lambda: os.getenv("WAKE_TTS_STATUS_TOPIC", "tts/status")
+        default_factory=lambda: os.getenv("WAKE_TTS_STATUS_TOPIC", TOPIC_TTS_STATUS)
     )
     stt_final_topic: str = field(
-        default_factory=lambda: os.getenv("WAKE_STT_FINAL_TOPIC", "stt/final")
+        default_factory=lambda: os.getenv("WAKE_STT_FINAL_TOPIC", TOPIC_STT_FINAL)
     )
     detection_window_ms: int = field(
         default_factory=lambda: int(os.getenv("WAKE_DETECTION_WINDOW_MS", "750"))

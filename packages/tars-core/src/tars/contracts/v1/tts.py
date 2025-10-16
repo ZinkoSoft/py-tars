@@ -13,6 +13,7 @@ EVENT_TYPE_TTS_STATUS = "tts.status"
 # MQTT Topic constants
 TOPIC_TTS_SAY = "tts/say"
 TOPIC_TTS_STATUS = "tts/status"
+TOPIC_TTS_CONTROL = "tts/control"
 
 
 class TtsSay(BaseModel):
@@ -48,5 +49,16 @@ class TtsStatus(BaseModel):
     reason: Optional[str] = None
     wake_ack: Optional[bool] = None
     system_announce: Optional[bool] = None  # System announcements don't open response windows
+
+    model_config = {"extra": "forbid"}
+
+
+class TtsControlCommand(BaseModel):
+    """Control command for TTS worker (pause, resume, stop)."""
+
+    message_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    action: Literal["pause", "resume", "stop", "mute", "unmute"]
+    reason: str | None = None
+    ts: float = Field(default_factory=time.time)
 
     model_config = {"extra": "forbid"}

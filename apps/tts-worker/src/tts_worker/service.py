@@ -27,10 +27,12 @@ from .piper_synth import set_player_observer, set_stop_checker
 
 from tars.adapters.mqtt_asyncio import AsyncioMQTTPublisher  # type: ignore[import]
 from tars.contracts.envelope import Envelope  # type: ignore[import]
-from tars.contracts.registry import resolve_topic  # type: ignore[import]
 from tars.contracts.v1 import (  # type: ignore[import]
     EVENT_TYPE_SAY,
     EVENT_TYPE_TTS_STATUS,
+    TOPIC_TTS_CONTROL,
+    TOPIC_TTS_SAY,
+    TOPIC_TTS_STATUS,
     HealthPing,
     TtsSay,
     TtsStatus,
@@ -47,9 +49,9 @@ from tars.runtime.publisher import publish_event  # type: ignore[import]
 
 logger = logging.getLogger("tts-worker")
 SOURCE_NAME = "tts"
-STATUS_TOPIC = resolve_topic(EVENT_TYPE_TTS_STATUS)
-SAY_TOPIC = resolve_topic(EVENT_TYPE_SAY)
-CONTROL_TOPIC = "tts/control"
+STATUS_TOPIC = TOPIC_TTS_STATUS
+SAY_TOPIC = TOPIC_TTS_SAY
+CONTROL_TOPIC = TOPIC_TTS_CONTROL
 EVENT_TYPE_HEALTH_TTS = "system.health.tts"
 
 
@@ -180,12 +182,12 @@ class TTSService:
             wake_ack=wake_ack,
             system_announce=system_announce,
         )
-        message_id = await self._publish_event(EVENT_TYPE_TTS_STATUS, status, qos=1)
+        message_id = await self._publish_event(EVENT_TYPE_TTS_STATUS, status, qos=0)
         if message_id is None:
             envelope = Envelope.new(
                 event_type=EVENT_TYPE_TTS_STATUS, data=status, source=SOURCE_NAME
             )
-            await mqtt_client.publish(STATUS_TOPIC, envelope.model_dump_json().encode(), qos=1)
+            await mqtt_client.publish(STATUS_TOPIC, envelope.model_dump_json().encode(), qos=0)
             message_id = envelope.id
         logger.log(
             log_level,
@@ -206,7 +208,7 @@ class TTSService:
                 await self._publish_event(
                     EVENT_TYPE_HEALTH_TTS, HealthPing(ok=True, event="ready"), retain=True
                 )
-                await client.subscribe([(SAY_TOPIC, 0), (CONTROL_TOPIC, 0)])
+                await client.subscribe([(SAY_TOPIC, 1), (CONTROL_TOPIC, 1)])
                 logger.info(
                     "Subscribed to %s and %s, ready to process messages", SAY_TOPIC, CONTROL_TOPIC
                 )

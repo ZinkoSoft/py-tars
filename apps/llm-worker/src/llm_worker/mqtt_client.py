@@ -124,8 +124,15 @@ class MQTTClient:
             arguments: Tool arguments dict
         """
         payload = {"call_id": call_id, "tool_name": tool_name, "arguments": arguments}
-        await client.publish("llm/tools/call", json.dumps(payload), qos=1, retain=False)
-        logger.info("Published tool call to llm/tools/call: %s (call_id=%s)", tool_name, call_id)
+        from .config import TOPIC_TOOL_CALL_REQUEST
+
+        await client.publish(TOPIC_TOOL_CALL_REQUEST, json.dumps(payload), qos=1, retain=False)
+        logger.info(
+            "Published tool call to %s: %s (call_id=%s)",
+            TOPIC_TOOL_CALL_REQUEST,
+            tool_name,
+            call_id,
+        )
 
     async def message_stream(self, client: mqtt.Client) -> AsyncIterator:
         """Get async iterator for MQTT messages."""

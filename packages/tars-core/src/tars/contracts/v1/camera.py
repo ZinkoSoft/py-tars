@@ -15,6 +15,7 @@ EVENT_TYPE_CAMERA_IMAGE = "camera.image"
 # MQTT Topic constants
 TOPIC_CAMERA_CAPTURE = "camera/capture"
 TOPIC_CAMERA_IMAGE = "camera/image"
+TOPIC_CAMERA_FRAME = "camera/frame"
 
 
 class BaseCameraMessage(BaseModel):
@@ -85,3 +86,18 @@ class CameraStatusUpdate(BaseCameraMessage):
     ]
     request_id: Optional[str] = None
     detail: Optional[str] = None
+
+
+class CameraFrame(BaseCameraMessage):
+    """
+    Real-time camera frame for visualization/streaming.
+    
+    Published to: camera/frame
+    Consumed by: UI services, visualization
+    """
+    frame_data: str = Field(description="Base64-encoded frame data")
+    format: Literal["jpeg", "png"] = "jpeg"
+    width: int = Field(ge=1, description="Frame width in pixels")
+    height: int = Field(ge=1, description="Frame height in pixels")
+    frame_number: int = Field(ge=0, description="Sequential frame number")
+    fps: Optional[float] = Field(default=None, ge=0, description="Frames per second")

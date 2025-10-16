@@ -64,6 +64,10 @@ from tars.contracts.v1 import (  # type: ignore[import]
     EVENT_TYPE_TTS_STATUS,
     EVENT_TYPE_WAKE_EVENT,
     EVENT_TYPE_WAKE_MIC,
+    TOPIC_TTS_SAY,
+    TOPIC_TTS_STATUS,
+    TOPIC_WAKE_EVENT,
+    TOPIC_WAKE_MIC,
     FinalTranscript,
     HealthPing,
     TtsSay,
@@ -125,10 +129,10 @@ class STTWorker:
             raise RuntimeError("MQTT client unavailable after connect")
         self._publisher = AsyncioMQTTPublisher(self.mqtt.client)
         await self.publish_health(True, "STT service ready")
-        await self.mqtt.subscribe_stream("tts/status", self._handle_tts_status)
-        await self.mqtt.subscribe_stream("tts/say", self._handle_tts_say)
-        await self.mqtt.subscribe_stream("wake/mic", self._handle_wake_mic)
-        await self.mqtt.subscribe_stream("wake/event", self._handle_wake_event)
+        await self.mqtt.subscribe_stream(TOPIC_TTS_STATUS, self._handle_tts_status)
+        await self.mqtt.subscribe_stream(TOPIC_TTS_SAY, self._handle_tts_say)
+        await self.mqtt.subscribe_stream(TOPIC_WAKE_MIC, self._handle_wake_mic)
+        await self.mqtt.subscribe_stream(TOPIC_WAKE_EVENT, self._handle_wake_event)
         self.audio_fanout = AudioFanoutPublisher(
             AUDIO_FANOUT_PATH,
             target_sample_rate=AUDIO_FANOUT_RATE,
