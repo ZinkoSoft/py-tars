@@ -1,691 +1,278 @@
 """
-Servo Controller for TARS Robot - MicroPython ESP32
-Handles 9 servos via PCA9685 I2C servo driver
+Servo Controller for ESP32 MicroPython
+Manages servo movements with async control, speed adjustment, and safety features
 """
 
-import time
-from pca9685 import PCA9685
-import servo_config as config
+import uasyncio as asyncio
+import gc
+from servo_config import (
+    SERVO_CALIBRATION, 
+    validate_channel, 
+    validate_pulse_width, 
+    validate_speed,
+    apply_reverse_if_needed
+)
 
 
 class ServoController:
-    """Main servo controller class"""
+    """
+    Async servo controller for coordinated multi-servo movements
+    """
     
-    def __init__(self):
-        """Initialize the servo controller"""
-        print("Initializing ServoController...")
-        
-        # Initialize PCA9685
-        try:
-            self.pca = PCA9685(
-                address=config.PCA9685_ADDRESS,
-                sda_pin=config.I2C_SDA_PIN,
-                scl_pin=config.I2C_SCL_PIN
-            )
-            self.pca.set_pwm_freq(config.PWM_FREQ)
-            print("PCA9685 initialized successfully")
-        except Exception as e:
-            print(f"ERROR: Failed to initialize PCA9685: {e}")
-            raise
-        
-        # Track current positions
-        self.positions = {}
-        for ch in range(9):
-            servo_range = config.get_servo_range(ch)
-            self.positions[ch] = servo_range['default']
-        
-        print("ServoController ready")
-    
-    def set_servo_pulse(self, channel, pulse, speed=None):
+    def __init__(self, pca9685):
         """
-        Set servo to a specific pulse width with smooth movement
+        Initialize servo controller
         
         Args:
-            channel: Servo channel (0-8)
-            pulse: Target pulse width (150-600)
-            speed: Movement speed factor (0.1-1.0), None uses global speed
+            pca9685: PCA9685 instance for PWM control
         """
-        if channel < 0 or channel > 8:
-            print(f"ERROR: Invalid channel {channel}, must be 0-8")
-            return False
+        self.pca9685 = pca9685
         
-        servo_range = config.get_servo_range(channel)
+        # Current positions for all 9 servos (initialized to neutral)
+        self.positions = [SERVO_CALIBRATION[i]["neutral"] for i in range(9)]
         
-        # Validate pulse range
-        if pulse < servo_range['min'] or pulse > servo_range['max']:
-            print(f"WARNING: Pulse {pulse} out of range [{servo_range['min']}-{servo_range['max']}] for channel {channel}")
-            pulse = max(servo_range['min'], min(pulse, servo_range['max']))
+        # Locks for thread-safe servo access (one per channel)
+        self.locks = [asyncio.Lock() for _ in range(9)]
         
-        # Apply servo inversion if configured
-        if servo_range.get('invert', False):
-            pulse = config.reverse_servo(pulse, servo_range['min'], servo_range['max'])
+        # Emergency stop flag
+        self.emergency_stop = False
         
-        # Use global speed if not specified
-        if speed is None:
-            speed = config.GLOBAL_SPEED
+        # Global speed multiplier (0.1 to 1.0)
+        self.global_speed = 1.0
         
-        # Get current position
-        current = self.positions.get(channel, servo_range['default'])
+        # Active sequence name (None if no sequence running)
+        self.active_sequence = None
         
-        # Smooth movement
-        if current != pulse:
-            step = 1 if pulse > current else -1
-            delay_ms = int(20 * (1.0 - speed))
-            
-            for p in range(current, pulse + step, step):
-                self.pca.set_pwm(channel, 0, p)
-                if delay_ms > 0:
-                    time.sleep_ms(delay_ms)
-        else:
-            # Already at position
-            self.pca.set_pwm(channel, 0, pulse)
-        
-        # Update position
-        self.positions[channel] = pulse
-        return True
+        print("ServoController initialized")
     
-    def set_servo_percentage(self, channel, percentage, speed=None):
+    def initialize_servos(self):
         """
-        Set servo position using percentage (1-100)
-        
-        Args:
-            channel: Servo channel (0-8)
-            percentage: Position as percentage (1=min, 100=max, 50=middle)
-            speed: Movement speed factor
+        Initialize all servos to safe starting positions
+        - Legs (0-2): neutral (center) positions
+        - Arms (3-8): minimum (closed/retracted) positions
+        Synchronous function called during startup
         """
-        if percentage == 0:
-            return False
+        print("Initializing servos to safe positions...")
         
-        servo_range = config.get_servo_range(channel)
-        min_val = servo_range['min']
-        max_val = servo_range['max']
-        
-        if percentage == 1:
-            pulse = min_val
-        elif percentage == 100:
-            pulse = max_val
-        else:
-            # Linear interpolation
-            if max_val > min_val:
-                pulse = min_val + int((max_val - min_val) * (percentage - 1) / 99)
+        for channel in range(9):
+            # Arms (channels 3-8) start at minimum (closed), legs (0-2) at neutral
+            if channel >= 3:
+                target = SERVO_CALIBRATION[channel]["min"]
+                pos_desc = "min (closed)"
             else:
-                pulse = min_val - int((min_val - max_val) * (percentage - 1) / 99)
+                target = SERVO_CALIBRATION[channel]["neutral"]
+                pos_desc = "neutral"
+            
+            try:
+                self.pca9685.set_pwm(channel, 0, target)
+                self.positions[channel] = target
+                print(f"  Channel {channel} ({SERVO_CALIBRATION[channel]['label']}): {target} ({pos_desc})")
+            except Exception as e:
+                print(f"  ✗ Channel {channel} failed: {e}")
         
-        return self.set_servo_pulse(channel, pulse, speed)
+        print("Servo initialization complete")
     
-    def set_preset(self, preset_name):
+    async def move_servo_smooth(self, channel, target, speed=None):
         """
-        Move all servos to a preset position
+        Move a single servo smoothly from current position to target
         
         Args:
-            preset_name: Name of preset in config.PRESET_POSITIONS
+            channel: Servo channel (0-8)
+            target: Target pulse width (will be reversed if channel has reverse flag)
+            speed: Movement speed (0.1-1.0), uses global_speed if None
+        
+        Raises:
+            ValueError: If channel or target is invalid
+            asyncio.CancelledError: If emergency stop is triggered
         """
-        if preset_name not in config.PRESET_POSITIONS:
-            print(f"ERROR: Unknown preset '{preset_name}'")
-            return False
+        # Validate inputs
+        validate_channel(channel)
+        validate_pulse_width(channel, target)
         
-        preset = config.PRESET_POSITIONS[preset_name]
-        print(f"Moving to preset: {preset_name}")
+        # Apply reverse transformation if needed for this channel
+        actual_target = apply_reverse_if_needed(channel, target)
         
-        for channel, pulse in preset.items():
-            self.set_servo_pulse(channel, pulse, speed=0.5)
-            time.sleep_ms(50)  # Small delay between servos
+        # Calculate effective speed: use provided speed, default to 1.0, then multiply by global_speed
+        if speed is None:
+            speed = 1.0
+        else:
+            validate_speed(speed)
         
-        print(f"Preset '{preset_name}' complete")
-        return True
-    
-    def disable_all_servos(self):
-        """Disable all servos (set PWM to 0)"""
-        self.pca.disable_all_servos()
-        print("All servos disabled")
-    
-    def test_servo(self, channel, delay_ms=1000):
-        """
-        Test a single servo by moving it through its range
+        # Apply global speed multiplier
+        effective_speed = speed * self.global_speed
+        # Ensure result is still within valid range
+        effective_speed = max(0.1, min(1.0, effective_speed))
         
-        Args:
-            channel: Servo channel to test
-            delay_ms: Delay at each position
-        """
-        if channel < 0 or channel > 8:
-            print(f"ERROR: Invalid channel {channel}")
-            return False
-        
-        servo_range = config.get_servo_range(channel)
-        print(f"\nTesting servo {channel}")
-        print(f"Range: {servo_range['min']} - {servo_range['max']}")
-        
-        # Move to min
-        print(f"Moving to MIN ({servo_range['min']})")
-        self.set_servo_pulse(channel, servo_range['min'], speed=0.5)
-        time.sleep_ms(delay_ms)
-        
-        # Move to middle
-        mid = (servo_range['min'] + servo_range['max']) // 2
-        print(f"Moving to MID ({mid})")
-        self.set_servo_pulse(channel, mid, speed=0.5)
-        time.sleep_ms(delay_ms)
-        
-        # Move to max
-        print(f"Moving to MAX ({servo_range['max']})")
-        self.set_servo_pulse(channel, servo_range['max'], speed=0.5)
-        time.sleep_ms(delay_ms)
-        
-        # Return to default
-        print(f"Returning to DEFAULT ({servo_range['default']})")
-        self.set_servo_pulse(channel, servo_range['default'], speed=0.5)
-        
-        print(f"Servo {channel} test complete\n")
-        return True
-    
-    def test_all_servos(self, delay_ms=1000):
-        """Test all 9 servos sequentially"""
-        print("\n=== Testing All Servos ===")
-        for ch in range(9):
-            self.test_servo(ch, delay_ms)
-            time.sleep_ms(500)
-        print("All servo tests complete")
-    
-    def sweep_servo(self, channel, duration_ms=2000):
-        """
-        Sweep a servo back and forth
-        
-        Args:
-            channel: Servo channel
-            duration_ms: Duration of one sweep direction
-        """
-        servo_range = config.get_servo_range(channel)
-        steps = 50
-        
-        print(f"Sweeping servo {channel}...")
-        
-        # Forward sweep
-        for i in range(steps + 1):
-            pulse = servo_range['min'] + int((servo_range['max'] - servo_range['min']) * i / steps)
-            self.pca.set_pwm(channel, 0, pulse)
-            time.sleep_ms(duration_ms // steps)
-        
-        # Backward sweep
-        for i in range(steps, -1, -1):
-            pulse = servo_range['min'] + int((servo_range['max'] - servo_range['min']) * i / steps)
-            self.pca.set_pwm(channel, 0, pulse)
-            time.sleep_ms(duration_ms // steps)
-        
-        # Return to default
-        self.set_servo_pulse(channel, servo_range['default'])
-        print(f"Sweep complete")
-    
-    def get_position(self, channel):
-        """Get current position of a servo"""
-        return self.positions.get(channel, 0)
-    
-    def print_positions(self):
-        """Print current positions of all servos"""
-        print("\n=== Current Servo Positions ===")
-        for ch in range(9):
-            pos = self.positions.get(ch, 0)
-            servo_range = config.get_servo_range(ch)
-            print(f"Servo {ch}: {pos} (range: {servo_range['min']}-{servo_range['max']})")
-        print()
-    
-    # ========================================
-    # MOVEMENT SEQUENCES / POSES
-    # ========================================
-    
-    def move_servos_parallel(self, movements):
-        """
-        Move multiple servos simultaneously in parallel (simulating multiprocessing)
-        Each servo moves independently at the same speed, finishing at different times
-        
-        Args:
-            movements: List of tuples (channel, target_pulse, speed_factor)
-        """
-        if not movements:
-            return
-        
-        # Track which servos are still moving
-        active_servos = {}
-        for channel, target, speed in movements:
-            servo_range = config.get_servo_range(channel)
+        # Acquire lock for this channel
+        async with self.locks[channel]:
+            current = self.positions[channel]
             
-            # Clamp to range
-            target = max(servo_range['min'], min(target, servo_range['max']))
+            # Calculate step direction
+            if current == actual_target:
+                return  # Already at target
             
-            # Apply inversion if configured
-            if servo_range.get('invert', False):
-                target = config.reverse_servo(target, servo_range['min'], servo_range['max'])
+            step = 1 if actual_target > current else -1
             
-            current = self.positions.get(channel, servo_range['default'])
-            
-            if current != target:
-                active_servos[channel] = {
-                    'current': current,
-                    'target': target,
-                    'step': 1 if target > current else -1,
-                    'speed': speed
-                }
-        
-        if not active_servos:
-            return  # All servos already at target
-        
-        # Move all servos step by step until all reach their targets
-        while active_servos:
-            to_remove = []
-            
-            for channel, servo_info in active_servos.items():
-                current = servo_info['current']
-                target = servo_info['target']
-                step = servo_info['step']
-                speed = servo_info['speed']
+            # Movement loop
+            position = current
+            while position != actual_target:
+                # Check emergency stop
+                if self.emergency_stop:
+                    raise asyncio.CancelledError("Emergency stop activated")
                 
                 # Move one step
-                new_pos = current + step
-                
-                # Check if we've reached or passed the target
-                if (step > 0 and new_pos >= target) or (step < 0 and new_pos <= target):
-                    new_pos = target
-                    to_remove.append(channel)
+                position += step
                 
                 # Set PWM
-                self.pca.set_pwm(channel, 0, new_pos)
-                self.positions[channel] = new_pos
-                servo_info['current'] = new_pos
-            
-            # Remove completed servos
-            for channel in to_remove:
-                del active_servos[channel]
-            
-            # Delay based on speed (use fastest servo's speed)
-            if active_servos:
-                min_speed = min(s['speed'] for s in active_servos.values())
-                delay_ms = int(20 * (1.0 - min_speed))
-                if delay_ms > 0:
-                    time.sleep_ms(delay_ms)
+                try:
+                    self.pca9685.set_pwm(channel, 0, position)
+                    self.positions[channel] = position
+                except Exception as e:
+                    print(f"Error moving servo {channel}: {e}")
+                    raise
+                
+                # Delay based on effective speed (0.02s base, adjusted by speed)
+                # speed=1.0: 0.02s per step (fast)
+                # speed=0.1: 0.18s per step (slow)
+                delay = 0.02 * (1.1 - effective_speed)
+                await asyncio.sleep(delay)
     
-    def move_legs(self, height_percent, starboard_percent, port_percent, speed_factor=0.5):
+    async def move_multiple(self, targets, speed=None):
         """
-        Move the three leg servos simultaneously: 0=height, 1=port rotation, 2=starboard rotation
-        All three servos move at the same time to prevent tipping (like multiprocessing in original)
+        Move multiple servos simultaneously
+        
+        Args:
+            targets: Dictionary of {channel: target_pulse_width}
+            speed: Movement speed (0.1-1.0), uses global_speed if None
+        
+        Raises:
+            ValueError: If any channel or target is invalid
         """
-        def percentage_to_pulse(percent, min_val, max_val):
-            """Convert percentage (1-100) to pulse width"""
-            if percent == 0:
-                return None
-            if percent == 1:
-                return min_val
-            if percent == 100:
-                return max_val
-            if max_val > min_val:
-                value = min_val + ((max_val - min_val) * (percent - 1) / 99)
-            else:
-                value = min_val - ((min_val - max_val) * (percent - 1) / 99)
-            return int(round(value))
+        # Create tasks for all servo movements
+        tasks = []
+        for channel, target in targets.items():
+            task = asyncio.create_task(
+                self.move_servo_smooth(channel, target, speed)
+            )
+            tasks.append(task)
         
-        movements = []
+        # Wait for all movements to complete
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # Convert percentages to pulse widths
-        if height_percent is not None and height_percent != 0:
-            servo_range = config.get_servo_range(0)
-            pulse = percentage_to_pulse(height_percent, servo_range['min'], servo_range['max'])
-            if pulse is not None:
-                movements.append((0, pulse, speed_factor))
+        # Check for errors
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                print(f"Movement error in task {i}: {result}")
+    
+    async def emergency_stop_all(self):
+        """
+        Emergency stop - immediately disable all servos
+        Response time: <100ms
+        """
+        print("🚨 EMERGENCY STOP ACTIVATED")
         
-        if starboard_percent is not None and starboard_percent != 0:
-            servo_range = config.get_servo_range(2)
-            pulse = percentage_to_pulse(starboard_percent, servo_range['min'], servo_range['max'])
-            if pulse is not None:
-                movements.append((2, pulse, speed_factor))
+        # Set flag to cancel ongoing movements
+        self.emergency_stop = True
         
-        if port_percent is not None and port_percent != 0:
-            servo_range = config.get_servo_range(1)
-            pulse = percentage_to_pulse(port_percent, servo_range['min'], servo_range['max'])
-            if pulse is not None:
-                movements.append((1, pulse, speed_factor))
+        # Wait for tasks to detect flag and cancel
+        await asyncio.sleep(0.1)
         
-        # Move all leg servos simultaneously (simulates multiprocessing behavior)
-        self.move_servos_parallel(movements)
+        # Disable all servos (set PWM to 0 = floating state)
+        print("Disabling all servos...")
+        for channel in range(9):
+            try:
+                self.pca9685.set_pwm(channel, 0, 0)
+                print(f"  Channel {channel} disabled")
+            except Exception as e:
+                print(f"  ✗ Channel {channel} disable failed: {e}")
+        
+        # Reset emergency stop flag
+        self.emergency_stop = False
+        
+        print("Emergency stop complete - all servos in floating state")
     
-    def move_arm(self, port_main, port_forearm, port_hand, star_main, star_forearm, star_hand, speed_factor=0.5):
-        """Move the six arm servos"""
-        servos = [
-            (3, port_main),      # Port main arm
-            (4, port_forearm),   # Port forearm
-            (5, port_hand),      # Port hand
-            (6, star_main),      # Starboard main arm
-            (7, star_forearm),   # Starboard forearm
-            (8, star_hand),      # Starboard hand
-        ]
-        for channel, percent in servos:
-            if percent is not None and percent != 0:
-                self.set_servo_percentage(channel, percent, speed_factor)
+    async def execute_preset(self, preset_name, presets):
+        """
+        Execute a preset movement sequence
+        
+        Args:
+            preset_name: Name of preset to execute
+            presets: Dictionary of all available presets
+        
+        Raises:
+            ValueError: If preset not found
+            RuntimeError: If another sequence is already running
+        """
+        # Check if sequence already running
+        if self.active_sequence is not None:
+            raise RuntimeError(f"Sequence already running: {self.active_sequence}")
+        
+        # Get preset
+        if preset_name not in presets:
+            raise ValueError(f"Unknown preset: {preset_name}")
+        
+        preset = presets[preset_name]
+        
+        try:
+            self.active_sequence = preset_name
+            print(f"Executing preset: {preset_name}")
+            
+            # Execute each step
+            for i, step in enumerate(preset["steps"]):
+                # Check emergency stop
+                if self.emergency_stop:
+                    print(f"Preset {preset_name} cancelled by emergency stop")
+                    raise asyncio.CancelledError("Emergency stop during preset")
+                
+                print(f"  Step {i+1}/{len(preset['steps'])}: {step.get('description', 'Moving')}")
+                
+                # Move servos
+                await self.move_multiple(step["targets"], step.get("speed", self.global_speed))
+                
+                # Delay after step
+                delay = step.get("delay_after", 0.5)
+                await asyncio.sleep(delay)
+            
+            # Disable servos after sequence
+            print(f"Preset {preset_name} complete - disabling servos")
+            self.disable_all_servos()
+            
+        finally:
+            self.active_sequence = None
+            gc.collect()
     
-    def reset_positions(self):
-        """Reset to neutral position"""
-        print("Resetting to neutral position...")
-        self.move_legs(20, 50, 50, 0.2)
-        time.sleep_ms(200)
-        self.move_legs(30, 50, 50, 0.2)
-        time.sleep_ms(200)
-        self.move_legs(50, 50, 50, 0.2)
-        time.sleep_ms(500)
-        self.move_arm(1, 1, 1, 1, 1, 1, 0.3)
-        time.sleep_ms(500)
-        self.disable_all_servos()
-        print("Reset complete")
+    def disable_all_servos(self):
+        """
+        Disable all servos (set to floating state)
+        Removes holding torque to save power and reduce heat
+        """
+        for channel in range(9):
+            try:
+                self.pca9685.set_pwm(channel, 0, 0)
+            except Exception as e:
+                print(f"Error disabling channel {channel}: {e}")
     
-    def step_forward(self):
-        """Move forward one step"""
-        print("Stepping forward...")
-        self.move_legs(50, 50, 50, 0.4)
-        time.sleep_ms(200)
-        self.move_legs(22, 50, 50, 0.6)
-        time.sleep_ms(200)
-        self.move_legs(40, 17, 17, 0.65)
-        time.sleep_ms(200)
-        self.move_legs(85, 50, 50, 0.8)
-        time.sleep_ms(200)
-        self.move_legs(50, 50, 50, 1)
-        time.sleep_ms(500)
-        self.disable_all_servos()
-        print("Step forward complete")
-    
-    def step_backward(self):
-        """Move backward one step"""
-        print("Stepping backward...")
-        self.move_legs(50, 50, 50, 0.4)
-        time.sleep_ms(200)
-        self.move_legs(28, 0, 0, 0.6)
-        time.sleep_ms(200)
-        self.move_legs(35, 70, 70, 0.6)
-        time.sleep_ms(200)
-        self.move_legs(55, 40, 40, 0.2)
-        time.sleep_ms(200)
-        self.move_legs(50, 50, 50, 0.8)
-        time.sleep_ms(200)
-        self.disable_all_servos()
-        print("Step backward complete")
-    
-    def turn_right(self):
-        """Turn right"""
-        print("Turning right...")
-        self.move_legs(50, 50, 50, 0.4)
-        time.sleep_ms(200)
-        self.move_legs(100, 0, 0, 0.8)
-        time.sleep_ms(300)
-        self.move_legs(0, 70, 30, 0.6)
-        time.sleep_ms(200)
-        self.move_legs(50, 0, 0, 0.6)
-        time.sleep_ms(200)
-        self.move_legs(0, 50, 50, 0.3)
-        time.sleep_ms(200)
-        self.move_legs(50, 50, 50, 0.4)
-        time.sleep_ms(200)
-        self.disable_all_servos()
-        print("Turn right complete")
-    
-    def turn_left(self):
-        """Turn left"""
-        print("Turning left...")
-        self.move_legs(50, 50, 50, 0.4)
-        time.sleep_ms(200)
-        self.move_legs(100, 0, 0, 0.8)
-        time.sleep_ms(300)
-        self.move_legs(0, 30, 70, 0.3)
-        time.sleep_ms(200)
-        self.move_legs(50, 0, 0, 0.6)
-        time.sleep_ms(200)
-        self.move_legs(0, 50, 50, 0.3)
-        time.sleep_ms(200)
-        self.move_legs(50, 50, 50, 0.4)
-        time.sleep_ms(200)
-        self.disable_all_servos()
-        print("Turn left complete")
-    
-    def greet(self):
-        """Wave hello with right arm"""
-        print("Greeting (wave)...")
-        self.move_legs(50, 50, 50, 0.4)
-        time.sleep_ms(200)
-        self.move_legs(80, 50, 50, 0.8)
-        time.sleep_ms(200)
-        self.move_legs(80, 50, 70, 0.8)
-        time.sleep_ms(200)
-        self.move_legs(50, 50, 70, 0.8)
-        time.sleep_ms(200)
-        self.move_arm(1, 1, 1, 0, 0, 0, 0.5)
-        time.sleep_ms(200)
-        self.move_arm(1, 1, 1, 100, 1, 1, 0.8)
-        time.sleep_ms(200)
-        self.move_arm(1, 1, 1, 100, 100, 1, 1)
-        time.sleep_ms(200)
-        # Wave motion
-        for _ in range(3):
-            self.move_arm(1, 1, 1, 100, 50, 1, 1)
-            time.sleep_ms(200)
-            self.move_arm(1, 1, 1, 100, 100, 1, 1)
-            time.sleep_ms(200)
-        self.move_arm(1, 1, 1, 100, 1, 1, 1)
-        time.sleep_ms(200)
-        self.move_arm(1, 1, 1, 1, 1, 1, 0.6)
-        time.sleep_ms(200)
-        self.move_legs(80, 50, 70, 0.8)
-        time.sleep_ms(200)
-        self.move_legs(80, 50, 50, 0.8)
-        time.sleep_ms(200)
-        self.move_legs(50, 50, 50, 0.4)
-        time.sleep_ms(200)
-        self.disable_all_servos()
-        print("Greet complete")
-    
-    def laugh(self):
-        """Simulate laughter with bouncing"""
-        print("Laughing...")
-        for _ in range(5):
-            self.move_legs(50, 50, 50, 1)
-            time.sleep_ms(100)
-            self.move_legs(1, 50, 50, 1)
-            time.sleep_ms(100)
-        self.move_legs(50, 50, 50, 1)
-        time.sleep_ms(200)
-        self.disable_all_servos()
-        print("Laugh complete")
-    
-    def swing_legs(self):
-        """Dynamic leg swinging motion"""
-        print("Swinging legs...")
-        self.move_legs(50, 50, 50, 1)
-        time.sleep_ms(100)
-        self.move_legs(100, 50, 50, 1)
-        time.sleep_ms(100)
-        for _ in range(3):
-            self.move_legs(0, 20, 80, 0.6)
-            time.sleep_ms(100)
-            self.move_legs(0, 80, 20, 0.6)
-            time.sleep_ms(100)
-        self.move_legs(0, 50, 50, 0.6)
-        time.sleep_ms(100)
-        self.move_legs(50, 50, 50, 0.7)
-        time.sleep_ms(200)
-        self.disable_all_servos()
-        print("Swing legs complete")
-    
-    def pezz_dispenser(self):
-        """PEZZ dispenser pose"""
-        print("PEZZ dispenser...")
-        self.move_legs(50, 50, 50, 0.4)
-        time.sleep_ms(200)
-        self.move_legs(80, 50, 70, 0.6)
-        self.move_arm(1, 1, 1, 1, 1, 1, 0.6)
-        time.sleep_ms(200)
-        self.move_legs(50, 50, 70, 0.6)
-        time.sleep_ms(200)
-        self.move_arm(1, 1, 1, 100, 1, 1, 0.8)
-        time.sleep_ms(200)
-        self.move_arm(1, 1, 1, 100, 100, 1, 0.8)
-        time.sleep_ms(200)
-        self.move_arm(1, 1, 1, 100, 100, 100, 0.8)
-        time.sleep_ms(3000)  # Hold pose
-        self.move_arm(1, 1, 1, 100, 100, 1, 0.8)
-        time.sleep_ms(200)
-        self.move_arm(1, 1, 1, 100, 1, 1, 0.8)
-        time.sleep_ms(200)
-        self.move_legs(80, 50, 70, 0.6)
-        time.sleep_ms(200)
-        self.move_arm(1, 1, 1, 1, 1, 1, 0.8)
-        time.sleep_ms(200)
-        self.move_legs(50, 50, 50, 0.4)
-        time.sleep_ms(200)
-        self.disable_all_servos()
-        print("PEZZ dispenser complete")
-    
-    def now(self):
-        """'Now!' pointing gesture"""
-        print("Now! gesture...")
-        self.move_legs(50, 50, 50, 0.4)
-        time.sleep_ms(200)
-        self.move_legs(80, 50, 50, 0.8)
-        time.sleep_ms(200)
-        self.move_legs(80, 50, 70, 0.8)
-        time.sleep_ms(200)
-        self.move_arm(1, 1, 1, 75, 1, 1, 1)
-        time.sleep_ms(200)
-        self.move_legs(50, 50, 65, 0.8)
-        time.sleep_ms(200)
-        self.move_arm(1, 1, 1, 75, 80, 1, 0.9)
-        time.sleep_ms(200)
-        self.move_arm(1, 1, 1, 60, 80, 0, 0.9)
-        time.sleep_ms(200)
-        # Point motion
-        for _ in range(3):
-            self.move_arm(1, 1, 1, 75, 80, 0, 0.9)
-            time.sleep_ms(200)
-            self.move_arm(1, 1, 1, 60, 80, 0, 0.9)
-            time.sleep_ms(200)
-        self.move_arm(1, 1, 1, 75, 1, 1, 1)
-        time.sleep_ms(200)
-        self.move_legs(50, 50, 80, 0.8)
-        time.sleep_ms(200)
-        self.move_arm(1, 1, 1, 1, 1, 1, 1)
-        time.sleep_ms(200)
-        self.move_legs(80, 50, 70, 0.8)
-        time.sleep_ms(200)
-        self.move_legs(80, 50, 50, 0.8)
-        time.sleep_ms(200)
-        self.move_legs(50, 50, 50, 0.4)
-        time.sleep_ms(200)
-        self.disable_all_servos()
-        print("Now! complete")
-    
-    def balance(self):
-        """Balance on one leg"""
-        print("Balancing...")
-        self.move_legs(50, 50, 50, 0.4)
-        time.sleep_ms(200)
-        self.move_legs(30, 50, 50, 0.8)
-        time.sleep_ms(200)
-        # Balance motion
-        for _ in range(3):
-            self.move_legs(30, 60, 60, 0.5)
-            time.sleep_ms(200)
-            self.move_legs(30, 40, 40, 0.5)
-            time.sleep_ms(200)
-        self.move_legs(30, 50, 50, 0.8)
-        time.sleep_ms(200)
-        self.move_legs(50, 50, 50, 0.8)
-        time.sleep_ms(500)
-        self.disable_all_servos()
-        print("Balance complete")
-    
-    def mic_drop(self):
-        """Mic drop gesture"""
-        print("Mic drop...")
-        self.move_legs(50, 50, 50, 0.4)
-        time.sleep_ms(200)
-        self.move_legs(80, 50, 50, 0.8)
-        time.sleep_ms(200)
-        self.move_legs(80, 50, 100, 0.8)
-        time.sleep_ms(200)
-        self.move_arm(1, 1, 1, 1, 1, 1, 1)
-        time.sleep_ms(200)
-        self.move_arm(1, 1, 1, 60, 50, 1, 1)
-        time.sleep_ms(200)
-        self.move_arm(1, 1, 1, 60, 70, 1, 1)
-        time.sleep_ms(1000)
-        self.move_arm(1, 1, 1, 60, 70, 100, 1)
-        time.sleep_ms(2000)
-        self.move_arm(1, 1, 1, 1, 1, 1, 1)
-        time.sleep_ms(200)
-        self.move_legs(80, 50, 50, 0.8)
-        time.sleep_ms(200)
-        self.move_legs(50, 50, 50, 0.8)
-        time.sleep_ms(500)
-        self.disable_all_servos()
-        print("Mic drop complete")
-    
-    def defensive_posture(self):
-        """Monster/defensive posture"""
-        print("Defensive posture...")
-        self.move_legs(50, 50, 50, 0.4)
-        time.sleep_ms(200)
-        self.move_legs(80, 50, 50, 0.4)
-        time.sleep_ms(200)
-        self.move_legs(80, 70, 70, 0.4)
-        self.move_arm(1, 1, 1, 1, 1, 1, 0.8)
-        time.sleep_ms(200)
-        self.move_arm(100, 1, 1, 100, 1, 1, 0.8)
-        time.sleep_ms(200)
-        self.move_legs(50, 70, 70, 0.4)
-        time.sleep_ms(200)
-        self.move_arm(100, 100, 1, 100, 100, 1, 1)
-        time.sleep_ms(200)
-        self.move_arm(100, 100, 100, 100, 100, 100, 1)
-        time.sleep_ms(200)
-        # Claw motion
-        for _ in range(3):
-            self.move_arm(100, 50, 100, 100, 100, 100, 1)
-            time.sleep_ms(200)
-            self.move_arm(100, 100, 50, 100, 50, 50, 1)
-            time.sleep_ms(200)
-        self.move_arm(100, 100, 100, 100, 100, 100, 1)
-        time.sleep_ms(200)
-        self.move_arm(100, 100, 1, 100, 100, 1, 1)
-        time.sleep_ms(200)
-        self.move_arm(100, 1, 1, 100, 1, 1, 1)
-        self.move_legs(50, 70, 70, 0.4)
-        time.sleep_ms(200)
-        self.move_arm(1, 1, 1, 1, 1, 1, 0.8)
-        time.sleep_ms(200)
-        self.move_legs(80, 50, 50, 0.4)
-        time.sleep_ms(200)
-        self.move_legs(50, 50, 50, 0.4)
-        time.sleep_ms(200)
-        self.disable_all_servos()
-        print("Defensive posture complete")
-    
-    def pose(self):
-        """Strike a pose"""
-        print("Posing...")
-        self.move_legs(50, 50, 50, 0.4)
-        self.move_legs(30, 40, 40, 0.4)
-        self.move_legs(100, 30, 30, 0.4)
-        time.sleep_ms(3000)
-        self.move_legs(100, 30, 30, 0.4)
-        self.move_legs(30, 30, 30, 0.4)
-        self.move_legs(30, 40, 40, 0.4)
-        self.move_legs(50, 50, 50, 0.4)
-        self.disable_all_servos()
-        print("Pose complete")
-    
-    def bow(self):
-        """Take a bow"""
-        print("Bowing...")
-        self.move_legs(50, 50, 50, 0.4)
-        self.move_legs(15, 50, 50, 0.7)
-        self.move_legs(15, 70, 70, 0.7)
-        self.move_legs(60, 70, 70, 0.7)
-        self.move_legs(95, 65, 65, 0.7)
-        time.sleep_ms(3000)
-        self.move_legs(15, 65, 65, 0.7)
-        self.move_legs(50, 50, 50, 0.4)
-        self.disable_all_servos()
-        print("Bow complete")
+    def get_status(self):
+        """
+        Get current servo controller status
+        
+        Returns:
+            dict: Status information
+        """
+        return {
+            "positions": self.positions.copy(),
+            "emergency_stop": self.emergency_stop,
+            "global_speed": self.global_speed,
+            "active_sequence": self.active_sequence,
+            "servos": [
+                {
+                    "channel": i,
+                    "label": SERVO_CALIBRATION[i]["label"],
+                    "position": self.positions[i],
+                    "min": SERVO_CALIBRATION[i]["min"],
+                    "max": SERVO_CALIBRATION[i]["max"],
+                    "neutral": SERVO_CALIBRATION[i]["neutral"]
+                }
+                for i in range(9)
+            ]
+        }

@@ -1,275 +1,272 @@
-# ESP32 Servo Tester for TARS - Web Interface
+# TARS Servo Controller - ESP32 MicroPython Firmware
 
-MicroPython servo control system for ESP32 with beautiful web-based UI. Control 9 servos using PCA9685 I2C servo driver from any device with a web browser.
+Complete servo control system for ESP32-S3 with PCA9685 PWM driver.
 
-## Features
+## Quick Start
 
-- 🌐 **Web-Based Interface** - Control servos from any device (phone, tablet, PC)
-- 🎨 **Modern UI** - Beautiful, responsive design with real-time updates
-- 📱 **Mobile Friendly** - Works perfectly on smartphones
-- 🔄 **Real-Time Control** - Instant servo position updates
-- 🔧 **Individual Control** - Fine-tune each servo with sliders
-- 🧪 **Testing Tools** - Test individual servos or all at once
-- ⚡ **Fast & Responsive** - Optimized for ESP32's capabilities
+### 1. Prerequisites
 
-## Hardware Requirements
+- ESP32-S3 with MicroPython v1.20+ installed
+- mpremote installed: `pip install mpremote`
+- PCA9685 connected via I2C (SDA=GPIO8, SCL=GPIO9)
+- 9 servos connected to PCA9685 channels 0-8
 
-- ESP32 development board (with WiFi)
-- PCA9685 16-channel servo driver board
-- 9 servos connected to channels 0-8
-- Power supply for servos (5-6V, adequate amperage)
-- WiFi network (or use built-in Access Point mode)
+### 2. Configure WiFi
 
-## Wiring
-
-### I2C Connection (ESP32 to PCA9685):
-- **SDA**: GPIO 21 (ESP32 I2C SDA)
-- **SCL**: GPIO 20 (ESP32 I2C SCL)
-- **VCC**: 3.3V (logic level)
-- **GND**: GND
-
-### Servo Channels:
-- **Channel 0**: Main Legs (height control)
-- **Channel 1**: Left Leg Rotation
-- **Channel 2**: Right Leg Rotation
-- **Channel 3**: Right Leg Main Arm
-- **Channel 4**: Right Leg Forearm
-- **Channel 5**: Right Leg Hand
-- **Channel 6**: Left Leg Main Arm
-- **Channel 7**: Left Leg Forearm
-- **Channel 8**: Left Leg Hand
-
-## Installation
-
-### 1. Flash MicroPython to ESP32:
 ```bash
-esptool.py --port /dev/ttyUSB0 erase_flash
-esptool.py --port /dev/ttyUSB0 write_flash -z 0x1000 esp32-*.bin
-```
-
-### 2. Configure WiFi:
-Edit `wifi_config.py` with your WiFi credentials:
-```python
-WIFI_SSID = "YourWiFiName"
-WIFI_PASSWORD = "YourPassword"
-```
-
-### 3. Upload Files:
-
-**Easy way (using provided scripts):**
-```bash
-# Make scripts executable
-chmod +x *.sh
-
-# Upload all files
-./upload.sh
-
-# Configure WiFi credentials
 ./configure_wifi.sh
-
-# Start the web server
-./start_server.sh
 ```
 
-**Manual way (using mpremote):**
+This will prompt for your WiFi credentials and create `wifi_config.py`.
+
+### 3. Upload Firmware
+
 ```bash
-DEVICE="/dev/ttyACM0"
-
-mpremote connect "$DEVICE" fs cp pca9685.py :
-mpremote connect "$DEVICE" fs cp servo_config.py :
-mpremote connect "$DEVICE" fs cp servo_controller.py :
-mpremote connect "$DEVICE" fs cp wifi_config.py :
-mpremote connect "$DEVICE" fs cp web_interface.py :
-mpremote connect "$DEVICE" fs cp boot.py :
-mpremote connect "$DEVICE" fs cp main.py :
-```
-
-## Usage
-
-### Quick Start (Automated):
-```bash
-# 1. Upload all files
 ./upload.sh
-
-# 2. Configure WiFi
-./configure_wifi.sh
-
-# 3. Start web server
-./start_server.sh
 ```
 
-### Start the Web Server:
+Uploads all required Python files to the ESP32.
 
-**Option 1: Using script**
+### 4. Start the System
+
 ```bash
 ./start_server.sh
 ```
 
-**Option 2: Manual via mpremote**
+This connects to the ESP32 serial console and starts the main program. The web interface URL will be displayed.
+
+### 5. Access Web Interface
+
+Open your browser to `http://<ESP32-IP>/` to control servos.
+
+## Files
+
+### Core Modules
+
+- **`boot.py`** - Runs on ESP32 boot, initializes system
+- **`main.py`** - Main entry point, starts web server
+- **`pca9685.py`** - I2C PWM driver for PCA9685
+- **`servo_config.py`** - Servo calibration and validation
+- **`servo_controller.py`** - Async servo movement control
+- **`wifi_manager.py`** - WiFi connection with retry logic
+- **`web_server.py`** - Async HTTP server with embedded HTML interface
+- **`movement_presets.py`** - 13 preset movement sequences
+
+### Configuration
+
+- **`wifi_config.py`** - WiFi credentials (created by configure_wifi.sh)
+
+### Utility Scripts
+
+- **`upload.sh`** - Upload all files to ESP32
+- **`configure_wifi.sh`** - Configure WiFi credentials
+- **`start_server.sh`** - Connect to serial console and start system
+- **`diagnose.sh`** - Run system diagnostics
+- **`test_servos.sh`** - Test all servos (min/neutral/max)
+- **`status.sh`** - Display system status
+- **`list_files.sh`** - List files on ESP32
+- **`clean.sh`** - Remove files from ESP32
+- **`connect.sh`** - Connect to REPL
+
+## Common Commands
+
+### Upload specific file
+
 ```bash
-mpremote connect /dev/ttyACM0 exec "import main"
+mpremote connect /dev/ttyACM0 fs cp <filename.py> :
 ```
 
-**Option 3: Auto-start on boot**
-- Just power on the ESP32
-- Wait 10-15 seconds for startup
-- Look for the IP address on serial console
+### Run diagnostics
 
-### Connect to Web Interface:
+```bash
+./diagnose.sh
+```
 
-1. **WiFi Mode** (default):
-   - ESP32 connects to your WiFi network
-   - Serial console shows: `URL: http://192.168.x.x`
-   - Open that URL in any web browser
+### Test all servos
 
-2. **Access Point Mode** (fallback):
-   - If WiFi fails, ESP32 creates its own network
-   - Network name: `TARS-Servo`
-   - Password: `tars1234`
-   - Connect to this network
-   - Open browser to: `http://192.168.4.1`
+```bash
+./test_servos.sh
+```
 
-### Web Interface Controls:
+### Check system status
 
-- **Sliders**: Adjust servo positions (150-600 pulse width)
-- **Set Button**: Apply the slider value to servo
-- **Test Button**: Run full range test on individual servo
-- **Neutral Position**: Move all servos to safe default positions
-- **Test All Servos**: Sequential test of all 9 servos
-- **Refresh Positions**: Update sliders with current servo positions
-- **Disable All**: Turn off all servo PWM signals
+```bash
+./status.sh
+```
 
-## Configuration
+### Connect to REPL
 
-### WiFi Settings (`wifi_config.py`):
+```bash
+./connect.sh
+```
+
+or
+
+```bash
+mpremote connect /dev/ttyACM0
+```
+
+### Restart system
+
+In REPL:
 ```python
-WIFI_SSID = "YourNetwork"        # Your WiFi name
-WIFI_PASSWORD = "YourPassword"   # Your WiFi password
-WEB_PORT = 80                    # Web server port
-AP_SSID = "TARS-Servo"          # Access Point name
-AP_PASSWORD = "tars1234"         # Access Point password
+import machine
+machine.reset()
 ```
 
-### Servo Calibration (`servo_config.py`):
-```python
-SERVO_RANGES = {
-    0: {'min': 200, 'max': 500, 'default': 300},  # Adjust per servo
-    # ... etc
-}
+Or soft reset:
+```
+Ctrl+D
 ```
 
-**Calibration Process:**
-1. Access web interface
-2. Use sliders to find safe min/max values
-3. Test each servo's full range
-4. Update `servo_config.py` with actual values
-5. Re-upload the file
+## Web Interface Features
+
+- **Individual Servo Control** - Control each of 9 servos independently
+- **Speed Control** - Adjust movement speed (0.1 = slow, 1.0 = fast)
+- **Preset Movements** - 13 preset sequences (walk, turn, wave, etc.)
+- **Emergency Stop** - Immediately disable all servos
+- **System Status** - View WiFi, memory, and servo information
+
+## Preset Movements
+
+1. **Reset** - All servos to neutral position
+2. **Step Forward** - Walk forward one step
+3. **Step Backward** - Walk backward one step
+4. **Turn Right** - Turn 90° right
+5. **Turn Left** - Turn 90° left
+6. **Wave/Greet** - Right arm wave
+7. **Laugh** - Bouncing motion
+8. **Swing Legs** - Side-to-side swinging
+9. **Balance** - Balance on legs
+10. **Mic Drop** - Dramatic arm drop
+11. **Monster** - Defensive posture
+12. **Pose** - Strike a pose
+13. **Bow** - Bow forward
+
+## Servo Mapping
+
+| Channel | Function | Servo Type | Range |
+|---------|----------|------------|-------|
+| 0 | Main Legs Lift | LDX-227 | 220-350 |
+| 1 | Left Leg Rotation | LDX-227 | 192-408 |
+| 2 | Right Leg Rotation | LDX-227 | 192-408 |
+| 3 | Right Shoulder | MG996R | 135-440 |
+| 4 | Right Elbow | MG90S | 200-380 |
+| 5 | Right Hand | MG90S | 200-280 |
+| 6 | Left Shoulder | MG996R | 135-440 |
+| 7 | Left Elbow | MG90S | 200-380 |
+| 8 | Left Hand | MG90S | 280-380 |
 
 ## Troubleshooting
 
-### Can't connect to WiFi:
-- Check `wifi_config.py` credentials
-- Verify WiFi network is 2.4GHz (ESP32 doesn't support 5GHz)
-- Try Access Point mode as fallback
+### PCA9685 not detected
 
-### Servos not responding:
-- Check I2C connections (SDA/SCL)
-- Verify PCA9685 power (separate 5V for servos)
-- Check servo power supply amperage
-- Look for errors in serial console
+```bash
+./diagnose.sh
+```
 
-### Web page won't load:
-- Verify IP address from serial console
-- Try `http://192.168.4.1` if in AP mode
-- Clear browser cache
-- Check firewall settings
+Check:
+- PCA9685 is powered
+- I2C wiring: SDA=GPIO8, SCL=GPIO9
+- I2C address is 0x40
 
-### ESP32 crashes/reboots:
-- Insufficient power supply
-- Servo power feedback (use separate supplies)
-- Memory issue (reduce servo movements)
+### WiFi connection failed
 
-## API Endpoints
+```bash
+./configure_wifi.sh
+```
 
-The web interface uses JSON API:
+Check:
+- Network is 2.4GHz (ESP32 doesn't support 5GHz)
+- WPA2 security
+- Correct SSID and password
 
-- `POST /servo` - Set servo position
-  ```json
-  {"channel": 0, "pulse": 300}
-  ```
+### Memory errors
 
-- `POST /test` - Test single servo
-  ```json
-  {"channel": 0}
-  ```
+Check memory status:
+```bash
+./status.sh
+```
 
-- `POST /testall` - Test all servos
-- `POST /preset` - Load preset position
-  ```json
-  {"name": "neutral"}
-  ```
+If low memory:
+1. Reduce number of concurrent movements
+2. Avoid long-running sequences
+3. Restart ESP32: `machine.reset()`
 
-- `POST /positions` - Get current positions
-- `POST /disable` - Disable all servos
+### Servo not moving
 
-## Safety Notes
+1. Check calibration in `servo_config.py`
+2. Test individual servo with `test_servos.sh`
+3. Verify servo power supply (5-6V, adequate current)
+4. Check PCA9685 connections
 
-1. **Always connect servo power supply before testing**
-2. **Start with neutral position to verify safe defaults**
-3. **Test individual servos before running complex movements**
-4. **Keep emergency power disconnect accessible**
-5. **Ensure servos have proper current rating power supply**
-6. **Monitor servo temperatures during extended testing**
-7. **Use web interface's "Disable All" button in emergencies**
+### Upload failed
 
-## Advanced Usage
+Check:
+- USB cable connected
+- Correct device: `/dev/ttyACM0` or `/dev/ttyUSB0`
+- Device permissions: `sudo chmod 666 /dev/ttyACM0`
+- mpremote installed: `pip install mpremote`
 
-### Auto-start on boot:
-The system automatically starts when powered on. To disable:
-- Comment out auto-start in `boot.py`
+## Development
 
-### Custom Presets:
-Add custom positions in `servo_config.py`:
+### Testing changes
+
+1. Edit file locally
+2. Upload: `mpremote connect /dev/ttyACM0 fs cp <file.py> :`
+3. Restart: `Ctrl+D` in REPL or `machine.reset()`
+
+### Viewing logs
+
+```bash
+./start_server.sh
+```
+
+or
+
+```bash
+mpremote connect /dev/ttyACM0
+```
+
+### Memory management
+
+The system automatically calls `gc.collect()` after:
+- Each HTTP request
+- Each preset sequence
+- On errors
+
+### Adding new presets
+
+Edit `movement_presets.py` and add to `PRESETS` dictionary:
+
 ```python
-PRESET_POSITIONS = {
-    'neutral': {...},
-    'custom': {
-        0: 350,
-        1: 400,
-        # ... etc
-    }
+"my_preset": {
+    "description": "My custom movement",
+    "steps": [
+        {"targets": make_leg_targets(50, 50, 50), "speed": 0.8, "delay_after": 0.2},
+        # Add more steps...
+    ]
 }
 ```
 
-### Integration:
-Use the API endpoints to control servos from other systems:
-```python
-import urequests
-urequests.post('http://192.168.x.x/servo', 
-               json={'channel': 0, 'pulse': 300})
-```
+## Safety
 
-## Helper Scripts
+⚠️ **IMPORTANT**:
 
-- **`upload.sh`** - Upload all Python files to ESP32
-- **`configure_wifi.sh`** - Configure WiFi credentials interactively
-- **`start_server.sh`** - Start the web server on ESP32
-- **`connect.sh`** - Connect to ESP32 REPL
-- **`list_files.sh`** - List files on ESP32
-- **`clean.sh`** - Remove all files from ESP32
+1. Always test new movements at slow speed first
+2. Emergency stop button is available in web interface
+3. Never exceed calibrated min/max values
+4. External power supply required for servos (NOT from ESP32)
+5. Servo binding or unusual noise = STOP IMMEDIATELY
 
-Make executable: `chmod +x *.sh`
+## API Endpoints
 
-## Files Overview
+- `GET /` - Web interface (HTML)
+- `POST /control` - Send servo commands
+- `GET /status` - Get system status
+- `POST /emergency` - Emergency stop
+- `POST /resume` - Resume after emergency stop
 
-- **`pca9685.py`** - Low-level PCA9685 I2C driver
-- **`servo_config.py`** - Servo ranges and presets
-- **`servo_controller.py`** - High-level servo control logic
-- **`wifi_config.py`** - Network configuration
-- **`web_interface.py`** - HTTP server and web UI
-- **`boot.py`** - ESP32 boot configuration
-- **`main.py`** - Entry point (starts web server)
+## License
 
-## Credits
-
-Based on TARS-AI community modules. Converted to MicroPython web interface for ESP32 by GitHub Copilot.
+Part of the TARS project. See repository root for license information.

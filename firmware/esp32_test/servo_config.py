@@ -1,125 +1,242 @@
 """
-Servo Configuration for TARS Robot
-Defines pulse width ranges and positions for 9 servos
+Servo Configuration and Calibration
+V2 Configuration from tars-community-movement-original/config.ini
 """
 
-# I2C Configuration - YD-ESP32-S3 board
-I2C_SDA_PIN = 8   # GPIO pin for SDA (data) - YD-ESP32-S3 labeled SDA pin
-I2C_SCL_PIN = 9   # GPIO pin for SCL (clock) - YD-ESP32-S3 labeled SCL pin
-I2C_FREQ = 100000  # I2C frequency in Hz (100kHz - confirmed working by scanner)
-PCA9685_ADDRESS = 0x40
+# Servo calibration data per channel
+# Format: {channel: {"min": pulse_width, "max": pulse_width, "neutral": pulse_width, "label": name}}
+# Pulse widths are in microseconds * 4.096 (for PCA9685 12-bit resolution at 50Hz)
+# Example: 1.5ms pulse = 1500us = 307.2 ≈ 307 in 12-bit units
+# For servos: typically 1ms (204) to 2ms (409) range
 
-# PWM Configuration
-PWM_FREQ = 50  # 50Hz for servos
-
-# Global speed settings
-GLOBAL_SPEED = 1.0  # 1.0 = fastest, 0.1 = slowest
-MIN_PULSE = 150    # Minimum safe pulse width
-MAX_PULSE = 600    # Maximum safe pulse width
-
-# Servo Channel Assignments
-SERVO_CHANNELS = {
-    'MAIN_LEGS': 0,      # Raises/lowers legs
-    'LEFT_LEG_ROT': 1,   # Left leg rotation
-    'RIGHT_LEG_ROT': 2,  # Right leg rotation
-    'RIGHT_MAIN': 3,     # Right arm main
-    'RIGHT_FOREARM': 4,  # Right arm forearm
-    'RIGHT_HAND': 5,     # Right arm hand
-    'LEFT_MAIN': 6,      # Left arm main
-    'LEFT_FOREARM': 7,   # Left arm forearm
-    'LEFT_HAND': 8,      # Left arm hand
-}
-
-# Servo Ranges (calibrate these for your servos)
-# Format: (min_pulse, max_pulse, default_pulse, invert)
-SERVO_RANGES = {
-    # Leg servos
-    0: {'min': 220, 'max': 350, 'default': 300},  # Main legs (upHeight=220, downHeight=350)
-    1: {'min': 220, 'max': 380, 'default': 300, 'invert': True},  # Left leg rotation (starboard) - REVERSED
-    2: {'min': 220, 'max': 380, 'default': 300},  # Right leg rotation (port)
-    
-    # Right arm
-    3: {'min': 135, 'max': 500, 'default': 135},  # Right main
-    4: {'min': 200, 'max': 500, 'default': 200},  # Right forearm
-    5: {'min': 200, 'max': 500, 'default': 200},  # Right hand
-    
-    # Left arm (inverted to mirror right arm movement)
-    6: {'min': 200, 'max': 500, 'default': 440, 'invert': False},  # Left main - REVERSED
-    7: {'min': 200, 'max': 500, 'default': 380, 'invert': False},  # Left forearm - REVERSED
-    8: {'min': 200, 'max': 500, 'default': 380, 'invert': False},  # Left hand - REVERSED
-}
-
-# Preset positions for testing
-PRESET_POSITIONS = {
-    'neutral': {
-        0: 300,
-        1: 300,
-        2: 300,
-        3: 135,
-        4: 200,
-        5: 200,
-        6: 440,
-        7: 380,
-        8: 380,
+SERVO_CALIBRATION = {
+    # Leg Servos (LDX-227) - Channels 0-2
+    0: {
+        "min": 220,        # upHeight (raised position)
+        "max": 350,        # downHeight (lowered position)
+        "neutral": 300,    # neutralHeight
+        "label": "Main Legs Lift",
+        "servo_type": "LDX-227",
+        "reverse": False
     },
-    'test_1': {
-        0: 350,
-        1: 350,
-        2: 350,
-        3: 200,
-        4: 300,
-        5: 300,
-        6: 400,
-        7: 350,
-        8: 350,
+    1: {
+        "min": 192,        # forwardStarboard (left leg forward)
+        "max": 408,        # backStarboard (left leg back)
+        "neutral": 300,    # neutralStarboard
+        "label": "Left Leg Rotation",
+        "servo_type": "LDX-227",
+        "reverse": True    # Reverse direction for left leg
+    },
+    2: {
+        "min": 192,        # backPort (right leg back)
+        "max": 408,        # forwardPort (right leg forward)
+        "neutral": 300,    # neutralPort
+        "label": "Right Leg Rotation",
+        "servo_type": "LDX-227",
+        "reverse": False
+    },
+    
+    # Right Arm (MG996R shoulder, MG90S forearm/hand) - Channels 3-5
+    3: {
+        "min": 135,        # portMainMin
+        "max": 440,        # portMainMax
+        "neutral": 287,    # Calculated midpoint
+        "label": "Right Shoulder",
+        "servo_type": "MG996R",
+        "reverse": True
+    },
+    4: {
+        "min": 200,        # portForarmMin
+        "max": 380,        # portForarmMax
+        "neutral": 290,    # Calculated midpoint
+        "label": "Right Elbow",
+        "servo_type": "MG90S",
+        "reverse": True
+    },
+    5: {
+        "min": 200,        # portHandMin
+        "max": 280,        # portHandMax (NOT 380 - prevents over-extension)
+        "neutral": 240,    # Calculated midpoint
+        "label": "Right Hand",
+        "servo_type": "MG90S",
+        "reverse": True
+    },
+    
+    # Left Arm (MG996R shoulder, MG90S forearm/hand) - Channels 6-8
+    # Note: Left arm values are INVERTED from right arm due to mirrored mounting
+    6: {
+        "min": 135,        # starMainMax (inverted)
+        "max": 440,        # starMainMin (inverted)
+        "neutral": 287,    # Calculated midpoint
+        "label": "Left Shoulder",
+        "servo_type": "MG996R",
+        "reverse": True
+    },
+    7: {
+        "min": 200,        # starForarmMax (inverted)
+        "max": 380,        # starForarmMin (inverted)
+        "neutral": 290,    # Calculated midpoint
+        "label": "Left Elbow",
+        "servo_type": "MG90S",
+        "reverse": True
+    },
+    8: {
+        "min": 280,        # starHandMax (inverted)
+        "max": 380,        # starHandMin (inverted)
+        "neutral": 330,    # Calculated midpoint
+        "label": "Left Hand",
+        "servo_type": "MG90S",
+        "reverse": False
     }
 }
 
-# Movement configuration (from original V2 config)
-# These values should be calibrated for your robot
-MOVEMENT_CONFIG = {
-    # Main legs height control (servo 0)
-    'up_height': 220,
-    'neutral_height': 300,
-    'down_height': 350,
-    
-    # Left leg rotation (servo 1) - Port (right leg in code)
-    'forward_port': 380,
-    'neutral_port': 300,
-    'back_port': 220,
-    'perfect_port_offset': 0,
-    
-    # Right leg rotation (servo 2) - Starboard (left leg in code)
-    'forward_starboard': 220,
-    'neutral_starboard': 300,
-    'back_starboard': 380,
-    'perfect_star_offset': 0,
-    
-    # Arm ranges
-    'port_main_min': 135,
-    'port_main_max': 500,
-    'port_forearm_min': 200,
-    'port_forearm_max': 500,
-    'port_hand_min': 200,
-    'port_hand_max': 500,
-    
-    'star_main_min': 200,
-    'star_main_max': 500,
-    'star_forearm_min': 200,
-    'star_forearm_max': 500,
-    'star_hand_min': 200,
-    'star_hand_max': 500,
-}
+# Servo labels for quick reference
+SERVO_LABELS = [
+    "Main Legs Lift",      # Channel 0
+    "Left Leg Rotation",   # Channel 1
+    "Right Leg Rotation",  # Channel 2
+    "Right Shoulder",      # Channel 3
+    "Right Elbow",         # Channel 4
+    "Right Hand",          # Channel 5
+    "Left Shoulder",       # Channel 6
+    "Left Elbow",          # Channel 7
+    "Left Hand"            # Channel 8
+]
+
 
 def reverse_servo(pulse, min_pulse, max_pulse):
     """
-    Reverse servo direction by flipping pulse value within range
-    Formula: reversed_pulse = max - (pulse - min)
+    Reverse servo direction by inverting the pulse width within the range.
+    
+    Args:
+        pulse: Current pulse width value
+        min_pulse: Minimum pulse width for this servo
+        max_pulse: Maximum pulse width for this servo
+    
+    Returns:
+        int: Reversed pulse width value
+    
+    Example:
+        If range is 192-408 (min-max):
+        - Input 192 (min) -> Output 408 (max)
+        - Input 300 (middle) -> Output 300 (middle)
+        - Input 408 (max) -> Output 192 (min)
     """
     return max_pulse - (pulse - min_pulse)
 
-def get_servo_range(channel):
-    """Get the min/max/default for a servo channel"""
-    if channel in SERVO_RANGES:
-        return SERVO_RANGES[channel]
-    return {'min': MIN_PULSE, 'max': MAX_PULSE, 'default': (MIN_PULSE + MAX_PULSE) // 2}
+
+def apply_reverse_if_needed(channel, pulse):
+    """
+    Apply reverse transformation if configured for this channel.
+    
+    Args:
+        channel: Servo channel (0-8)
+        pulse: Target pulse width
+    
+    Returns:
+        int: Pulse width (reversed if needed)
+    """
+    calibration = SERVO_CALIBRATION[channel]
+    
+    if calibration.get("reverse", False):
+        min_pulse = calibration["min"]
+        max_pulse = calibration["max"]
+        return reverse_servo(pulse, min_pulse, max_pulse)
+    
+    return pulse
+
+
+def validate_channel(channel):
+    """
+    Validate servo channel number
+    
+    Args:
+        channel: Channel number to validate
+    
+    Raises:
+        ValueError: If channel is invalid
+    """
+    if not isinstance(channel, int):
+        raise ValueError(f"Channel must be an integer, got {type(channel).__name__}")
+    if not 0 <= channel <= 8:
+        raise ValueError(f"Invalid channel {channel}. Must be 0-8.")
+    return True
+
+
+def validate_pulse_width(channel, pulse):
+    """
+    Validate pulse width for a specific channel
+    
+    Args:
+        channel: Channel number (0-8)
+        pulse: Pulse width value to validate
+    
+    Raises:
+        ValueError: If pulse width is out of range for the channel
+    """
+    validate_channel(channel)
+    
+    if not isinstance(pulse, (int, float)):
+        raise ValueError(f"Pulse width must be numeric, got {type(pulse).__name__}")
+    
+    pulse = int(pulse)
+    calibration = SERVO_CALIBRATION[channel]
+    min_pulse = calibration["min"]
+    max_pulse = calibration["max"]
+    
+    if not min_pulse <= pulse <= max_pulse:
+        raise ValueError(
+            f"Pulse width {pulse} out of range for channel {channel} "
+            f"({calibration['label']}). Valid range: {min_pulse}-{max_pulse}"
+        )
+    
+    return True
+
+
+def validate_speed(speed):
+    """
+    Validate movement speed
+    
+    Args:
+        speed: Speed value to validate (0.1 to 1.0)
+    
+    Raises:
+        ValueError: If speed is out of range
+    """
+    if not isinstance(speed, (int, float)):
+        raise ValueError(f"Speed must be numeric, got {type(speed).__name__}")
+    
+    if not 0.1 <= speed <= 1.0:
+        raise ValueError(f"Speed {speed} out of range. Must be 0.1-1.0 (0.1=slowest, 1.0=fastest)")
+    
+    return True
+
+
+def validate_targets(targets):
+    """
+    Validate a dictionary of target positions
+    
+    Args:
+        targets: Dictionary of {channel: pulse_width}
+    
+    Raises:
+        ValueError: If any channel or pulse width is invalid
+    """
+    if not isinstance(targets, dict):
+        raise ValueError(f"Targets must be a dictionary, got {type(targets).__name__}")
+    
+    for channel, pulse in targets.items():
+        validate_channel(channel)
+        validate_pulse_width(channel, pulse)
+    
+    return True
+
+
+def get_neutral_positions():
+    """
+    Get all neutral positions as a dictionary
+    
+    Returns:
+        dict: {channel: neutral_pulse_width}
+    """
+    return {ch: cal["neutral"] for ch, cal in SERVO_CALIBRATION.items()}

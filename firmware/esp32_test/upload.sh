@@ -32,12 +32,14 @@ echo ""
 
 # Array of files to upload
 FILES=(
+    "boot.py"
     "pca9685.py"
     "servo_config.py"
     "servo_controller.py"
     "wifi_config.py"
-    "web_interface.py"
-    "boot.py"
+    "wifi_manager.py"
+    "web_server.py"
+    "movement_presets.py"
     "main.py"
 )
 

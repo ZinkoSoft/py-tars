@@ -1,151 +1,123 @@
 """
-PCA9685 PWM Servo Driver for MicroPython
-Adapted for ESP32 from Adafruit CircuitPython library
+PCA9685 PWM Driver for ESP32 MicroPython
+16-channel 12-bit PWM driver via I2C
+Used for servo control with 50Hz frequency
 """
 
-from machine import I2C, Pin
 import time
 
-# Registers
-PCA9685_ADDRESS = 0x40
+
+# PCA9685 Register Definitions
 MODE1 = 0x00
 MODE2 = 0x01
-SUBADR1 = 0x02
-SUBADR2 = 0x03
-SUBADR3 = 0x04
 PRESCALE = 0xFE
 LED0_ON_L = 0x06
 LED0_ON_H = 0x07
 LED0_OFF_L = 0x08
 LED0_OFF_H = 0x09
-ALL_LED_ON_L = 0xFA
-ALL_LED_ON_H = 0xFB
-ALL_LED_OFF_L = 0xFC
-ALL_LED_OFF_H = 0xFD
-
-# Bits
-RESTART = 0x80
-SLEEP = 0x10
-ALLCALL = 0x01
-INVRT = 0x10
-OUTDRV = 0x04
 
 
 class PCA9685:
-    """PCA9685 PWM LED/Servo controller for MicroPython on ESP32"""
+    """PCA9685 PWM driver class for servo control"""
     
-    def __init__(self, i2c=None, address=PCA9685_ADDRESS, sda_pin=8, scl_pin=9):
+    def __init__(self, i2c, address=0x40):
         """
-        Initialize PCA9685
+        Initialize PCA9685 controller
         
         Args:
-            i2c: Pre-configured I2C object (optional)
+            i2c: I2C bus instance (machine.I2C)
             address: I2C address of PCA9685 (default 0x40)
-            sda_pin: GPIO pin for SDA (default 8 for YD-ESP32-S3)
-            scl_pin: GPIO pin for SCL (default 9 for YD-ESP32-S3)
+        
+        Raises:
+            OSError: If PCA9685 not detected at specified address
         """
-        if i2c is None:
-            # 100kHz confirmed working by I2C scanner
-            self.i2c = I2C(0, sda=Pin(sda_pin), scl=Pin(scl_pin), freq=100000)
-        else:
-            self.i2c = i2c
-            
+        self.i2c = i2c
         self.address = address
         
-        # Scan for device
-        devices = self.i2c.scan()
-        if self.address not in devices:
-            raise OSError(f"PCA9685 not found at address 0x{self.address:02X}")
-        
-        print(f"PCA9685 found at address 0x{self.address:02X}")
+        # Verify device is present
+        try:
+            devices = self.i2c.scan()
+            if self.address not in devices:
+                raise OSError(f"PCA9685 not detected at address 0x{self.address:02X}")
+        except Exception as e:
+            raise OSError(f"PCA9685 not detected at address 0x{self.address:02X}") from e
         
         # Reset device
-        self._write_register(MODE1, 0x00)
+        self._write_reg(MODE1, 0x00)
         time.sleep_ms(5)
-    
-    def _write_register(self, register, value):
-        """Write a byte to a register"""
-        self.i2c.writeto_mem(self.address, register, bytes([value]))
-    
-    def _read_register(self, register):
-        """Read a byte from a register"""
-        return self.i2c.readfrom_mem(self.address, register, 1)[0]
+        
+        print(f"PCA9685 initialized at address 0x{self.address:02X}")
     
     def set_pwm_freq(self, freq_hz):
         """
-        Set the PWM frequency
+        Set PWM frequency for all channels
         
         Args:
             freq_hz: Frequency in Hz (typically 50Hz for servos)
         """
-        prescaleval = 25000000.0    # 25MHz
-        prescaleval /= 4096.0       # 12-bit
-        prescaleval /= float(freq_hz)
-        prescaleval -= 1.0
+        # Calculate prescale value
+        # prescale = round(25MHz / (4096 * freq)) - 1
+        prescale_val = int(25000000.0 / (4096.0 * freq_hz) - 0.5)
         
-        prescale = int(prescaleval + 0.5)
+        # Read old mode
+        old_mode = self._read_reg(MODE1)
         
-        oldmode = self._read_register(MODE1)
-        newmode = (oldmode & 0x7F) | SLEEP  # sleep
-        self._write_register(MODE1, newmode)  # go to sleep
-        self._write_register(PRESCALE, prescale)
-        self._write_register(MODE1, oldmode)
+        # Sleep mode to change prescale
+        new_mode = (old_mode & 0x7F) | 0x10  # Set sleep bit
+        self._write_reg(MODE1, new_mode)
+        
+        # Set prescale
+        self._write_reg(PRESCALE, prescale_val)
+        
+        # Restore old mode
+        self._write_reg(MODE1, old_mode)
         time.sleep_ms(5)
-        self._write_register(MODE1, oldmode | RESTART)
         
-        print(f"PWM frequency set to {freq_hz}Hz")
+        # Auto-increment mode
+        self._write_reg(MODE1, old_mode | 0xA0)
+        
+        print(f"PCA9685 frequency set to {freq_hz}Hz (prescale={prescale_val})")
     
     def set_pwm(self, channel, on, off):
         """
-        Set PWM values for a channel
+        Set PWM values for a specific channel
         
         Args:
             channel: Channel number (0-15)
-            on: 12-bit value for when to turn on (0-4095)
-            off: 12-bit value for when to turn off (0-4095)
+            on: 12-bit value (0-4095) when signal turns on
+            off: 12-bit value (0-4095) when signal turns off
         """
-        if channel < 0 or channel > 15:
-            raise ValueError("Channel must be 0-15")
+        if not 0 <= channel <= 15:
+            raise ValueError(f"Channel must be 0-15, got {channel}")
+        if not 0 <= on <= 4095:
+            raise ValueError(f"On value must be 0-4095, got {on}")
+        if not 0 <= off <= 4095:
+            raise ValueError(f"Off value must be 0-4095, got {off}")
         
-        self.i2c.writeto_mem(self.address, LED0_ON_L + 4 * channel, 
-                            bytes([on & 0xFF]))
-        self.i2c.writeto_mem(self.address, LED0_ON_H + 4 * channel, 
-                            bytes([on >> 8]))
-        self.i2c.writeto_mem(self.address, LED0_OFF_L + 4 * channel, 
-                            bytes([off & 0xFF]))
-        self.i2c.writeto_mem(self.address, LED0_OFF_H + 4 * channel, 
-                            bytes([off >> 8]))
+        # Calculate register address for this channel
+        reg_base = LED0_ON_L + (4 * channel)
+        
+        # Write 4 bytes: ON_L, ON_H, OFF_L, OFF_H
+        try:
+            self._write_reg(reg_base, on & 0xFF)
+            self._write_reg(reg_base + 1, (on >> 8) & 0xFF)
+            self._write_reg(reg_base + 2, off & 0xFF)
+            self._write_reg(reg_base + 3, (off >> 8) & 0xFF)
+        except OSError as e:
+            # Retry once on I2C error
+            time.sleep_ms(100)
+            try:
+                self._write_reg(reg_base, on & 0xFF)
+                self._write_reg(reg_base + 1, (on >> 8) & 0xFF)
+                self._write_reg(reg_base + 2, off & 0xFF)
+                self._write_reg(reg_base + 3, (off >> 8) & 0xFF)
+            except OSError:
+                raise OSError(f"I2C communication error on channel {channel}") from e
     
-    def set_all_pwm(self, on, off):
-        """
-        Set PWM for all channels at once
-        
-        Args:
-            on: 12-bit value for when to turn on (0-4095)
-            off: 12-bit value for when to turn off (0-4095)
-        """
-        self.i2c.writeto_mem(self.address, ALL_LED_ON_L, bytes([on & 0xFF]))
-        self.i2c.writeto_mem(self.address, ALL_LED_ON_H, bytes([on >> 8]))
-        self.i2c.writeto_mem(self.address, ALL_LED_OFF_L, bytes([off & 0xFF]))
-        self.i2c.writeto_mem(self.address, ALL_LED_OFF_H, bytes([off >> 8]))
+    def _write_reg(self, reg, value):
+        """Write a byte to a register"""
+        self.i2c.writeto_mem(self.address, reg, bytes([value]))
     
-    def set_servo_pulse(self, channel, pulse_us):
-        """
-        Set servo position using pulse width in microseconds
-        
-        Args:
-            channel: Servo channel (0-15)
-            pulse_us: Pulse width in microseconds (typically 500-2500)
-        """
-        # Calculate pulse length for 50Hz (20ms period)
-        pulse_length = 1000000    # 1,000,000 us per second
-        pulse_length //= 50       # 50 Hz
-        pulse_length //= 4096     # 12 bits of resolution
-        
-        pulse = int((pulse_us * 4096) / 20000)
-        self.set_pwm(channel, 0, pulse)
-    
-    def disable_all_servos(self):
-        """Disable all servos (set PWM to 0)"""
-        self.set_all_pwm(0, 0)
-        print("All servos disabled")
+    def _read_reg(self, reg):
+        """Read a byte from a register"""
+        return self.i2c.readfrom_mem(self.address, reg, 1)[0]
