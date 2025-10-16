@@ -5,6 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+# Event types (legacy - prefer topic constants)
 EVENT_TYPE_MEMORY_QUERY = "memory.query"
 EVENT_TYPE_MEMORY_RESULTS = "memory.results"
 EVENT_TYPE_CHARACTER_GET = "character.get"
@@ -12,6 +13,14 @@ EVENT_TYPE_CHARACTER_RESULT = "character.result"
 EVENT_TYPE_CHARACTER_CURRENT = "system.character.current"
 EVENT_TYPE_CHARACTER_UPDATE = "character.update"
 EVENT_TYPE_MEMORY_HEALTH = "system.health.memory"
+
+# MQTT Topic constants
+TOPIC_MEMORY_QUERY = "memory/query"
+TOPIC_MEMORY_RESULTS = "memory/results"
+TOPIC_CHARACTER_GET = "character/get"
+TOPIC_CHARACTER_RESULT = "character/result"
+TOPIC_CHARACTER_UPDATE = "character/update"
+TOPIC_SYSTEM_CHARACTER_CURRENT = "system/character/current"
 
 
 class BaseMemoryMessage(BaseModel):

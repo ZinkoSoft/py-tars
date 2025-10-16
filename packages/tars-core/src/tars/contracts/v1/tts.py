@@ -6,9 +6,13 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-
+# Event types (legacy - prefer topic constants)
 EVENT_TYPE_SAY = "tts.say"
 EVENT_TYPE_TTS_STATUS = "tts.status"
+
+# MQTT Topic constants
+TOPIC_TTS_SAY = "tts/say"
+TOPIC_TTS_STATUS = "tts/status"
 
 
 class TtsSay(BaseModel):
