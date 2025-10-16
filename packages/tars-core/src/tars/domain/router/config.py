@@ -30,6 +30,9 @@ class RouterSettings:
     topic_llm_stream: str = "llm/stream"
     topic_llm_cancel: str = "llm/cancel"
     topic_wake_event: str = "wake/event"
+    topic_movement_test: str = "movement/test"
+    topic_movement_stop: str = "movement/stop"
+    topic_movement_status: str = "movement/status"
     router_llm_tts_stream: bool = True
     stream_min_chars: int = 60
     stream_max_chars: int = 240
@@ -95,6 +98,9 @@ class RouterSettings:
             "llm.stream": self.topic_llm_stream,
             "llm.cancel": self.topic_llm_cancel,
             "wake.event": self.topic_wake_event,
+            "movement.test": self.topic_movement_test,
+            "movement.stop": self.topic_movement_stop,
+            "movement.status": self.topic_movement_status,
             "system.health.tts": self.topic_health_tts,
             "system.health.stt": self.topic_health_stt,
             "system.health.router": self.topic_health_router,
@@ -145,6 +151,9 @@ class RouterSettings:
             topic_llm_stream=get_str("TOPIC_LLM_STREAM", defaults.topic_llm_stream, env=env),
             topic_llm_cancel=get_str("TOPIC_LLM_CANCEL", defaults.topic_llm_cancel, env=env),
             topic_wake_event=get_str("TOPIC_WAKE_EVENT", defaults.topic_wake_event, env=env),
+            topic_movement_test=get_str("TOPIC_MOVEMENT_TEST", defaults.topic_movement_test, env=env),
+            topic_movement_stop=get_str("TOPIC_MOVEMENT_STOP", defaults.topic_movement_stop, env=env),
+            topic_movement_status=get_str("TOPIC_MOVEMENT_STATUS", defaults.topic_movement_status, env=env),
             tts_voice=get_str(
                 "ROUTER_TTS_VOICE",
                 defaults.tts_voice,
