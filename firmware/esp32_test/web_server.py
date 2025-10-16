@@ -27,11 +27,13 @@ h1{text-align:center;color:#4CAF50}
 .section{background:#2d2d2d;padding:20px;margin:20px 0;border-radius:8px}
 .servo-control{margin:15px 0;padding:15px;background:#383838;border-radius:5px}
 .servo-label{font-weight:bold;margin-bottom:10px;color:#4CAF50}
-.input-group{display:flex;gap:10px;margin:10px 0;flex-wrap:wrap}
+.input-group{display:flex;gap:10px;margin:10px 0;flex-wrap:wrap;align-items:center}
 .input-group input,.input-group button{padding:8px;border-radius:4px;border:1px solid #555;background:#2d2d2d;color:#fff}
-.input-group input{flex:1;min-width:100px}
+.input-group input[type="number"]{width:80px}
 .input-group button{background:#4CAF50;border:none;cursor:pointer;min-width:100px}
 .input-group button:hover{background:#45a049}
+.servo-slider{flex:1;min-width:200px;margin:0 10px}
+.slider-value{min-width:50px;text-align:right;color:#4CAF50;font-weight:bold}
 .speed-control{margin:20px 0}
 .speed-slider{width:100%;margin:10px 0}
 .presets{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin:20px 0}
@@ -105,14 +107,21 @@ const container=document.getElementById("servos");
 servos.forEach(s=>{
 const div=document.createElement("div");
 div.className="servo-control";
+const initialValue=s.ch<=2?(s.min+(s.max-s.min)/2):s.min;
 div.innerHTML=`<div class="servo-label">CH${s.ch}: ${s.label}</div>
 <div class="input-group">
-<input type="number" id="target${s.ch}" min="${s.min}" max="${s.max}" value="${s.min+(s.max-s.min)/2}" placeholder="Target (${s.min}-${s.max})">
-<input type="number" id="speed${s.ch}" min="0.1" max="1.0" step="0.1" value="0.8" placeholder="Speed">
+<input type="range" class="servo-slider" id="slider${s.ch}" min="${s.min}" max="${s.max}" value="${initialValue}" oninput="updateServoValue(${s.ch})">
+<span class="slider-value" id="value${s.ch}">${initialValue}</span>
+<input type="number" id="speed${s.ch}" min="0.1" max="1.0" step="0.1" value="0.8" placeholder="Speed" style="width:60px">
 <button onclick="moveServo(${s.ch})">Move</button>
 </div>`;
 container.appendChild(div);
 });
+}
+function updateServoValue(ch){
+const slider=document.getElementById("slider"+ch);
+const display=document.getElementById("value"+ch);
+display.textContent=slider.value;
 }
 function initPresets(){
 const container=document.getElementById("presets");
@@ -133,7 +142,7 @@ msgEl.style.display="block";
 setTimeout(()=>msgEl.style.display="none",3000);
 }
 async function moveServo(ch){
-const target=parseInt(document.getElementById("target"+ch).value);
+const target=parseInt(document.getElementById("slider"+ch).value);
 const speed=parseFloat(document.getElementById("speed"+ch).value);
 try{
 const res=await fetch("/control",{

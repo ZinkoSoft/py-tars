@@ -36,6 +36,7 @@ FILES=(
     "pca9685.py"
     "servo_config.py"
     "servo_controller.py"
+    "wifi_config.py"
     "wifi_manager.py"
     "web_server.py"
     "movement_presets.py"

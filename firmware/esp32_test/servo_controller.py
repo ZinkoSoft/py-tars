@@ -5,7 +5,13 @@ Manages servo movements with async control, speed adjustment, and safety feature
 
 import uasyncio as asyncio
 import gc
-from servo_config import SERVO_CALIBRATION, validate_channel, validate_pulse_width, validate_speed
+from servo_config import (
+    SERVO_CALIBRATION, 
+    validate_channel, 
+    validate_pulse_width, 
+    validate_speed,
+    apply_reverse_if_needed
+)
 
 
 class ServoController:
@@ -41,17 +47,26 @@ class ServoController:
     
     def initialize_servos(self):
         """
-        Initialize all servos to neutral positions
+        Initialize all servos to safe starting positions
+        - Legs (0-2): neutral (center) positions
+        - Arms (3-8): minimum (closed/retracted) positions
         Synchronous function called during startup
         """
-        print("Initializing servos to neutral positions...")
+        print("Initializing servos to safe positions...")
         
         for channel in range(9):
-            neutral = SERVO_CALIBRATION[channel]["neutral"]
+            # Arms (channels 3-8) start at minimum (closed), legs (0-2) at neutral
+            if channel >= 3:
+                target = SERVO_CALIBRATION[channel]["min"]
+                pos_desc = "min (closed)"
+            else:
+                target = SERVO_CALIBRATION[channel]["neutral"]
+                pos_desc = "neutral"
+            
             try:
-                self.pca9685.set_pwm(channel, 0, neutral)
-                self.positions[channel] = neutral
-                print(f"  Channel {channel} ({SERVO_CALIBRATION[channel]['label']}): {neutral}")
+                self.pca9685.set_pwm(channel, 0, target)
+                self.positions[channel] = target
+                print(f"  Channel {channel} ({SERVO_CALIBRATION[channel]['label']}): {target} ({pos_desc})")
             except Exception as e:
                 print(f"  ✗ Channel {channel} failed: {e}")
         
@@ -63,7 +78,7 @@ class ServoController:
         
         Args:
             channel: Servo channel (0-8)
-            target: Target pulse width
+            target: Target pulse width (will be reversed if channel has reverse flag)
             speed: Movement speed (0.1-1.0), uses global_speed if None
         
         Raises:
@@ -74,25 +89,33 @@ class ServoController:
         validate_channel(channel)
         validate_pulse_width(channel, target)
         
-        # Use global speed if not specified
+        # Apply reverse transformation if needed for this channel
+        actual_target = apply_reverse_if_needed(channel, target)
+        
+        # Calculate effective speed: use provided speed, default to 1.0, then multiply by global_speed
         if speed is None:
-            speed = self.global_speed
+            speed = 1.0
         else:
             validate_speed(speed)
+        
+        # Apply global speed multiplier
+        effective_speed = speed * self.global_speed
+        # Ensure result is still within valid range
+        effective_speed = max(0.1, min(1.0, effective_speed))
         
         # Acquire lock for this channel
         async with self.locks[channel]:
             current = self.positions[channel]
             
             # Calculate step direction
-            if current == target:
+            if current == actual_target:
                 return  # Already at target
             
-            step = 1 if target > current else -1
+            step = 1 if actual_target > current else -1
             
             # Movement loop
             position = current
-            while position != target:
+            while position != actual_target:
                 # Check emergency stop
                 if self.emergency_stop:
                     raise asyncio.CancelledError("Emergency stop activated")
@@ -108,10 +131,10 @@ class ServoController:
                     print(f"Error moving servo {channel}: {e}")
                     raise
                 
-                # Delay based on speed (0.02s base, adjusted by speed)
+                # Delay based on effective speed (0.02s base, adjusted by speed)
                 # speed=1.0: 0.02s per step (fast)
                 # speed=0.1: 0.18s per step (slow)
-                delay = 0.02 * (1.1 - speed)
+                delay = 0.02 * (1.1 - effective_speed)
                 await asyncio.sleep(delay)
     
     async def move_multiple(self, targets, speed=None):

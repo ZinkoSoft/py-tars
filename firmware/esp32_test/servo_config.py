@@ -16,21 +16,24 @@ SERVO_CALIBRATION = {
         "max": 350,        # downHeight (lowered position)
         "neutral": 300,    # neutralHeight
         "label": "Main Legs Lift",
-        "servo_type": "LDX-227"
+        "servo_type": "LDX-227",
+        "reverse": False
     },
     1: {
         "min": 192,        # forwardStarboard (left leg forward)
         "max": 408,        # backStarboard (left leg back)
         "neutral": 300,    # neutralStarboard
         "label": "Left Leg Rotation",
-        "servo_type": "LDX-227"
+        "servo_type": "LDX-227",
+        "reverse": True    # Reverse direction for left leg
     },
     2: {
         "min": 192,        # backPort (right leg back)
         "max": 408,        # forwardPort (right leg forward)
         "neutral": 300,    # neutralPort
         "label": "Right Leg Rotation",
-        "servo_type": "LDX-227"
+        "servo_type": "LDX-227",
+        "reverse": False
     },
     
     # Right Arm (MG996R shoulder, MG90S forearm/hand) - Channels 3-5
@@ -39,21 +42,24 @@ SERVO_CALIBRATION = {
         "max": 440,        # portMainMax
         "neutral": 287,    # Calculated midpoint
         "label": "Right Shoulder",
-        "servo_type": "MG996R"
+        "servo_type": "MG996R",
+        "reverse": True
     },
     4: {
         "min": 200,        # portForarmMin
         "max": 380,        # portForarmMax
         "neutral": 290,    # Calculated midpoint
         "label": "Right Elbow",
-        "servo_type": "MG90S"
+        "servo_type": "MG90S",
+        "reverse": True
     },
     5: {
         "min": 200,        # portHandMin
         "max": 280,        # portHandMax (NOT 380 - prevents over-extension)
         "neutral": 240,    # Calculated midpoint
         "label": "Right Hand",
-        "servo_type": "MG90S"
+        "servo_type": "MG90S",
+        "reverse": True
     },
     
     # Left Arm (MG996R shoulder, MG90S forearm/hand) - Channels 6-8
@@ -63,21 +69,24 @@ SERVO_CALIBRATION = {
         "max": 440,        # starMainMin (inverted)
         "neutral": 287,    # Calculated midpoint
         "label": "Left Shoulder",
-        "servo_type": "MG996R"
+        "servo_type": "MG996R",
+        "reverse": True
     },
     7: {
         "min": 200,        # starForarmMax (inverted)
         "max": 380,        # starForarmMin (inverted)
         "neutral": 290,    # Calculated midpoint
         "label": "Left Elbow",
-        "servo_type": "MG90S"
+        "servo_type": "MG90S",
+        "reverse": True
     },
     8: {
         "min": 280,        # starHandMax (inverted)
         "max": 380,        # starHandMin (inverted)
         "neutral": 330,    # Calculated midpoint
         "label": "Left Hand",
-        "servo_type": "MG90S"
+        "servo_type": "MG90S",
+        "reverse": False
     }
 }
 
@@ -93,6 +102,48 @@ SERVO_LABELS = [
     "Left Elbow",          # Channel 7
     "Left Hand"            # Channel 8
 ]
+
+
+def reverse_servo(pulse, min_pulse, max_pulse):
+    """
+    Reverse servo direction by inverting the pulse width within the range.
+    
+    Args:
+        pulse: Current pulse width value
+        min_pulse: Minimum pulse width for this servo
+        max_pulse: Maximum pulse width for this servo
+    
+    Returns:
+        int: Reversed pulse width value
+    
+    Example:
+        If range is 192-408 (min-max):
+        - Input 192 (min) -> Output 408 (max)
+        - Input 300 (middle) -> Output 300 (middle)
+        - Input 408 (max) -> Output 192 (min)
+    """
+    return max_pulse - (pulse - min_pulse)
+
+
+def apply_reverse_if_needed(channel, pulse):
+    """
+    Apply reverse transformation if configured for this channel.
+    
+    Args:
+        channel: Servo channel (0-8)
+        pulse: Target pulse width
+    
+    Returns:
+        int: Pulse width (reversed if needed)
+    """
+    calibration = SERVO_CALIBRATION[channel]
+    
+    if calibration.get("reverse", False):
+        min_pulse = calibration["min"]
+        max_pulse = calibration["max"]
+        return reverse_servo(pulse, min_pulse, max_pulse)
+    
+    return pulse
 
 
 def validate_channel(channel):
