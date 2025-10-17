@@ -33,7 +33,7 @@ except ImportError:
                 await asyncio.gather(*self._tasks, return_exceptions=True)
 
 
-import asyncio_mqtt as mqtt
+from tars.adapters.mqtt_client import MQTTClient  # type: ignore[import]
 import orjson
 
 from .audio import AudioFanoutClient
@@ -114,24 +114,25 @@ class WakeActivationService:
             level=log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
         )
 
-        host, port, username, password = self._parse_mqtt_url(self.cfg.mqtt_url)
-        self.log.info("Connecting to MQTT broker %s:%s", host, port)
+        mqtt_client = MQTTClient(self.cfg.mqtt_url, "wake-activation", enable_health=True)
+        self.log.info("Connecting to MQTT %s", self.cfg.mqtt_url)
+        await mqtt_client.connect()
 
-        async with mqtt.Client(
-            hostname=host, port=port, username=username, password=password
-        ) as client:
+        try:
             # Wait for STT health before starting if enabled
             if self.cfg.wait_for_stt_health:
-                await self._wait_for_stt_health(client)
+                await self._wait_for_stt_health(mqtt_client)
 
-            await self._publish_health(client)
+            await self._publish_health(mqtt_client)
             async with TaskGroup() as tg:
-                tg.create_task(self._health_loop(client))
-                tg.create_task(self._tts_status_loop(client))
-                tg.create_task(self._stt_final_loop(client))
-                tg.create_task(self._inference_loop(client))
+                tg.create_task(self._health_loop(mqtt_client))
+                tg.create_task(self._tts_status_loop(mqtt_client))
+                tg.create_task(self._stt_final_loop(mqtt_client))
+                tg.create_task(self._inference_loop(mqtt_client))
                 await self._stop_event.wait()
                 self.log.info("Stop signal received; shutting down wake activation service")
+        finally:
+            await mqtt_client.shutdown()
 
     async def stop(self) -> None:
         """Request cooperative shutdown."""
@@ -140,7 +141,7 @@ class WakeActivationService:
         await self._cancel_idle_timeout()
         await self._cancel_interrupt_timer()
 
-    async def _health_loop(self, client: mqtt.Client) -> None:
+    async def _health_loop(self, client: MQTTClient) -> None:
         interval = max(1.0, self.cfg.health_interval_sec)
         self.log.info("Starting health heartbeat every %.1fs", interval)
         try:
@@ -154,40 +155,42 @@ class WakeActivationService:
             self.log.exception("Health loop terminated unexpectedly")
             raise
 
-    async def _publish_health(self, client: mqtt.Client) -> None:
+    async def _publish_health(self, client: MQTTClient) -> None:
         payload = HealthPayload(ts=time.time()).model_dump()
         await client.publish(self.cfg.health_topic, orjson.dumps(payload), qos=1, retain=True)
         self.log.debug("Published health heartbeat: %s", payload)
 
-    async def _tts_status_loop(self, client: mqtt.Client) -> None:
+    async def _tts_status_loop(self, client: MQTTClient) -> None:
         topic = self.cfg.tts_status_topic
-        async with client.filtered_messages(topic) as messages:
-            await client.subscribe(topic)
-            async for msg in messages:
-                if self._stop_event.is_set():
-                    break
-                try:
-                    payload = orjson.loads(msg.payload)
-                except Exception:
-                    self.log.warning("Invalid TTS status payload: %r", msg.payload)
-                    continue
-                await self._handle_tts_status(payload)
 
-    async def _stt_final_loop(self, client: mqtt.Client) -> None:
+        async def _handler(payload: bytes) -> None:
+            if self._stop_event.is_set():
+                return
+            try:
+                data = orjson.loads(payload)
+            except Exception:
+                self.log.warning("Invalid TTS status payload")
+                return
+            await self._handle_tts_status(data)
+
+        await client.subscribe(topic, _handler)
+
+    async def _stt_final_loop(self, client: MQTTClient) -> None:
         topic = self.cfg.stt_final_topic
-        async with client.filtered_messages(topic) as messages:
-            await client.subscribe(topic)
-            async for msg in messages:
-                if self._stop_event.is_set():
-                    break
-                try:
-                    payload = orjson.loads(msg.payload)
-                except Exception:
-                    self.log.debug("Invalid STT payload: %r", msg.payload)
-                    continue
-                await self._handle_stt_final(client, payload)
 
-    async def _inference_loop(self, client: mqtt.Client) -> None:
+        async def _handler(payload: bytes) -> None:
+            if self._stop_event.is_set():
+                return
+            try:
+                data = orjson.loads(payload)
+            except Exception:
+                self.log.debug("Invalid STT payload")
+                return
+            await self._handle_stt_final(client, data)
+
+        await client.subscribe(topic, _handler)
+
+    async def _inference_loop(self, client: MQTTClient) -> None:
         """Consume audio frames and publish wake events when detected."""
 
         try:
@@ -225,15 +228,15 @@ class WakeActivationService:
             await audio_client.close()
             await self._cancel_idle_timeout()
 
-    async def publish_wake_event(self, client: mqtt.Client, event: WakeEvent) -> None:
+    async def publish_wake_event(self, client: MQTTClient, event: WakeEvent) -> None:
         await client.publish(self.cfg.wake_event_topic, orjson.dumps(event.model_dump()), qos=1)
         self.log.info("Published wake event: %s", event.model_dump())
 
-    async def send_mic_command(self, client: mqtt.Client, command: MicCommand) -> None:
+    async def send_mic_command(self, client: MQTTClient, command: MicCommand) -> None:
         await client.publish(self.cfg.mic_control_topic, orjson.dumps(command.model_dump()), qos=1)
         self.log.info("Published mic command: %s", command.model_dump())
 
-    async def send_tts_command(self, client: mqtt.Client, command: TtsControl) -> None:
+    async def send_tts_command(self, client: MQTTClient, command: TtsControl) -> None:
         await client.publish(self.cfg.tts_control_topic, orjson.dumps(command.model_dump()), qos=1)
         self.log.info("Published TTS control: %s", command.model_dump())
 

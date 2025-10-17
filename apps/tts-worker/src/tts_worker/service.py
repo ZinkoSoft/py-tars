@@ -4,11 +4,8 @@ import asyncio
 import logging
 from contextlib import suppress
 from typing import Any, Optional
-from urllib.parse import urlparse
 
-import asyncio_mqtt as mqtt
 import orjson as json
-from asyncio_mqtt import MqttError
 from pydantic import BaseModel, ValidationError
 
 from .config import (
@@ -25,7 +22,7 @@ from .config import (
 )
 from .piper_synth import set_player_observer, set_stop_checker
 
-from tars.adapters.mqtt_asyncio import AsyncioMQTTPublisher  # type: ignore[import]
+from tars.adapters.mqtt_client import MQTTClient  # type: ignore[import]
 from tars.contracts.envelope import Envelope  # type: ignore[import]
 from tars.contracts.v1 import (  # type: ignore[import]
     EVENT_TYPE_SAY,
@@ -44,7 +41,6 @@ from tars.domain.tts import (  # type: ignore[import]
     TTSControlMessage,
     StatusEvent,
 )
-from tars.runtime.publisher import publish_event  # type: ignore[import]
 
 
 logger = logging.getLogger("tts-worker")
@@ -55,14 +51,9 @@ CONTROL_TOPIC = TOPIC_TTS_CONTROL
 EVENT_TYPE_HEALTH_TTS = "system.health.tts"
 
 
-def parse_mqtt(url: str) -> tuple[str, int, Optional[str], Optional[str]]:
-    u = urlparse(url)
-    return (u.hostname or "127.0.0.1", u.port or 1883, u.username, u.password)
-
-
 class TTSService:
     def __init__(self, primary_synth: Any, *, wake_ack_synth: Any | None = None) -> None:
-        self._publisher: AsyncioMQTTPublisher | None = None
+        self._mqtt_client: MQTTClient | None = None
         wake_cache_dir = None
         try:
             enabled = bool(int(TTS_WAKE_CACHE_ENABLE))
@@ -91,7 +82,7 @@ class TTSService:
         set_player_observer(self._domain.on_player_spawn)
         set_stop_checker(self._domain.should_abort_playback)
 
-    def _build_callbacks(self, client: mqtt.Client) -> TTSCallbacks:
+    def _build_callbacks(self, mqtt_client: MQTTClient) -> TTSCallbacks:
         async def publish_status(
             event: StatusEvent,
             text: str,
@@ -101,7 +92,7 @@ class TTSService:
             system_announce: Optional[bool],
         ) -> None:
             await self._publish_status(
-                client,
+                mqtt_client,
                 event=event,
                 text=text,
                 utt_id=utt_id,
@@ -143,28 +134,27 @@ class TTSService:
 
     async def _publish_event(
         self, event_type: str, data: Any, *, qos: int = 1, retain: bool = False
-    ) -> str | None:
-        publisher = self._publisher
-        if publisher is None:
-            logger.warning("MQTT publisher unavailable; dropping %s", event_type)
-            return None
+    ) -> str:
+        if self._mqtt_client is None:
+            logger.warning("MQTT client unavailable; dropping %s", event_type)
+            return ""
         try:
-            return await publish_event(
-                publisher,
-                logger,
-                event_type,
-                data,
+            from tars.contracts.registry import resolve_topic
+            topic = resolve_topic(event_type)
+            return await self._mqtt_client.publish_event(
+                topic=topic,
+                event_type=event_type,
+                data=data.model_dump() if hasattr(data, "model_dump") else data,
                 qos=qos,
                 retain=retain,
-                source=SOURCE_NAME,
             )
         except Exception as exc:
             logger.error("Failed to publish %s: %s", event_type, exc)
-            return None
+            return ""
 
     async def _publish_status(
         self,
-        mqtt_client: mqtt.Client,
+        mqtt_client: MQTTClient,
         *,
         event: StatusEvent,
         text: str,
@@ -197,77 +187,73 @@ class TTSService:
         )
 
     async def run(self) -> None:
-        host, port, username, password = parse_mqtt(MQTT_URL)
-        logger.info("Connecting to MQTT %s:%s", host, port)
+        logger.info("Connecting to MQTT %s", MQTT_URL)
         try:
-            async with mqtt.Client(
-                hostname=host, port=port, username=username, password=password, client_id="tars-tts"
-            ) as client:
-                logger.info("Connected to MQTT %s:%s as tars-tts", host, port)
-                self._publisher = AsyncioMQTTPublisher(client)
-                await self._publish_event(
-                    EVENT_TYPE_HEALTH_TTS, HealthPing(ok=True, event="ready"), retain=True
-                )
-                await client.subscribe([(SAY_TOPIC, 1), (CONTROL_TOPIC, 1)])
-                logger.info(
-                    "Subscribed to %s and %s, ready to process messages", SAY_TOPIC, CONTROL_TOPIC
-                )
-                callbacks = self._build_callbacks(client)
-                logger.debug("Starting phrase cache preload task")
-                preload_task: asyncio.Task[None] | None = None
+            self._mqtt_client = MQTTClient(MQTT_URL, "tars-tts", enable_health=True)
+            await self._mqtt_client.connect()
+            
+            logger.info("Connected to MQTT as tars-tts")
+            await self._publish_event(
+                EVENT_TYPE_HEALTH_TTS, HealthPing(ok=True, event="ready"), retain=True
+            )
+            
+            # Set up subscriptions
+            async def handle_say(payload: bytes) -> None:
+                say = self._decode_event(payload, TtsSay, event_type=EVENT_TYPE_SAY)
+                if say is None:
+                    return
+                callbacks = self._build_callbacks(self._mqtt_client)  # type: ignore
+                await self._domain.handle_say(say, callbacks)
+            
+            async def handle_control(payload: bytes) -> None:
                 try:
-                    preload_task = asyncio.create_task(self._domain.preload_wake_cache())
+                    data = json.loads(payload)
+                except json.JSONDecodeError as exc:
+                    logger.warning("Invalid tts/control payload: %s", exc)
+                    return
+                try:
+                    control = TTSControlMessage.from_dict(data)
+                except ValueError as exc:
+                    logger.warning("Invalid tts/control payload: %s", exc)
+                    return
+                callbacks = self._build_callbacks(self._mqtt_client)  # type: ignore
+                await self._domain.handle_control(control, callbacks)
+            
+            await self._mqtt_client.subscribe(SAY_TOPIC, handle_say, qos=1)
+            await self._mqtt_client.subscribe(CONTROL_TOPIC, handle_control, qos=1)
+            
+            logger.info(
+                "Subscribed to %s and %s, ready to process messages", SAY_TOPIC, CONTROL_TOPIC
+            )
+            
+            # Preload wake cache
+            logger.debug("Starting phrase cache preload task")
+            preload_task: asyncio.Task[None] | None = None
+            try:
+                preload_task = asyncio.create_task(self._domain.preload_wake_cache())
 
-                    def _handle_preload_result(task: asyncio.Task[None]) -> None:
-                        try:
-                            task.result()
-                        except asyncio.CancelledError:
-                            logger.debug("Phrase cache preload cancelled")
-                        except Exception as exc:  # pragma: no cover - defensive logging
-                            logger.warning("Phrase cache preload failed", extra={"error": str(exc)})
-                        else:
-                            logger.info("Phrase cache preload complete")
+                def _handle_preload_result(task: asyncio.Task[None]) -> None:
+                    try:
+                        task.result()
+                    except asyncio.CancelledError:
+                        logger.debug("Phrase cache preload cancelled")
+                    except Exception as exc:  # pragma: no cover - defensive logging
+                        logger.warning("Phrase cache preload failed", extra={"error": str(exc)})
+                    else:
+                        logger.info("Phrase cache preload complete")
 
-                    preload_task.add_done_callback(_handle_preload_result)
+                preload_task.add_done_callback(_handle_preload_result)
 
-                    async with client.messages() as messages:
-                        async for msg in messages:
-                            try:
-                                logger.info("Received message on %s", msg.topic)
-                                if msg.topic.value == SAY_TOPIC:
-                                    say = self._decode_event(
-                                        msg.payload, TtsSay, event_type=EVENT_TYPE_SAY
-                                    )
-                                    if say is None:
-                                        continue
-                                    await self._domain.handle_say(say, callbacks)
-                                elif msg.topic.value == CONTROL_TOPIC:
-                                    try:
-                                        data = json.loads(msg.payload)
-                                    except json.JSONDecodeError as exc:
-                                        logger.warning("Invalid tts/control payload: %s", exc)
-                                        continue
-                                    try:
-                                        control = TTSControlMessage.from_dict(data)
-                                    except ValueError as exc:
-                                        logger.warning("Invalid tts/control payload: %s", exc)
-                                        continue
-                                    await self._domain.handle_control(control, callbacks)
-                                else:
-                                    logger.debug("Ignoring unexpected topic %s", msg.topic)
-                            except Exception as exc:
-                                logger.error("Error processing message: %s", exc)
-                                await self._publish_event(
-                                    EVENT_TYPE_HEALTH_TTS,
-                                    HealthPing(ok=False, err=str(exc)),
-                                    retain=True,
-                                )
-                finally:
-                    if preload_task is not None and not preload_task.done():
-                        preload_task.cancel()
-                        with suppress(asyncio.CancelledError):
-                            await preload_task
-        except MqttError as exc:
+                # Keep service running
+                await asyncio.Event().wait()
+                
+            finally:
+                if preload_task is not None and not preload_task.done():
+                    preload_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await preload_task
+                await self._mqtt_client.shutdown()
+        except Exception as exc:
             logger.info("MQTT disconnected: %s; shutting down gracefully", exc)
         finally:
             self._publisher = None

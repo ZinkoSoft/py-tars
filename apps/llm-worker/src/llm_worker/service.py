@@ -5,7 +5,11 @@ import logging
 import time
 from typing import Any, Dict
 
-from .mqtt_client import MQTTClient
+import orjson
+from pydantic import ValidationError
+
+from tars.adapters.mqtt_client import MQTTClient
+from tars.contracts.envelope import Envelope
 from .handlers import CharacterManager, ToolExecutor, RAGHandler, MessageRouter, RequestHandler
 from .config import (
     MQTT_URL,
@@ -83,8 +87,14 @@ class LLMService:
             logger.warning("Unsupported provider '%s', defaulting to openai", provider)
             self.provider = OpenAIProvider(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL or None)
 
-        # MQTT client wrapper
-        self.mqtt_client = MQTTClient(MQTT_URL, client_id="tars-llm", source_name="llm-worker")
+        # MQTT client wrapper (centralized)
+        self.mqtt_client = MQTTClient(
+            MQTT_URL,
+            client_id="tars-llm",
+            source_name="llm-worker",
+            enable_health=True,
+            enable_heartbeat=True,
+        )
 
         # Handlers for different responsibilities
         self.character_mgr = CharacterManager()
@@ -157,61 +167,114 @@ class LLMService:
         }
 
     async def run(self):
-        """Main service loop: connect to MQTT, subscribe, and route messages to handlers."""
+        """Main service loop: connect to MQTT, subscribe, and handle messages via individual handlers."""
         try:
-            async with await self.mqtt_client.connect() as client:
-                await self.mqtt_client.publish_health(client, TOPIC_HEALTH)
+            # Connect to MQTT broker
+            await self.mqtt_client.connect()
+            logger.info("Connected to MQTT broker")
 
-                # Subscribe to all topics
-                await self.mqtt_client.subscribe_all(
-                    client,
-                    llm_request_topic=TOPIC_LLM_REQUEST,
-                    character_current_topic=TOPIC_CHARACTER_CURRENT,
-                    character_result_topic=TOPIC_CHARACTER_RESULT,
-                    character_get_topic=TOPIC_CHARACTER_GET,
-                    rag_enabled=RAG_ENABLED,
-                    memory_results_topic=TOPIC_MEMORY_RESULTS,
-                    tool_calling_enabled=TOOL_CALLING_ENABLED,
-                    tools_registry_topic=TOPIC_TOOLS_REGISTRY,
-                    tools_result_topic=TOPIC_TOOL_CALL_RESULT,
-                )
+            # Subscribe to all topics with individual handlers
+            await self.mqtt_client.subscribe(TOPIC_CHARACTER_CURRENT, self._handle_character_current)
+            await self.mqtt_client.subscribe(TOPIC_CHARACTER_RESULT, self._handle_character_result)
+            await self.mqtt_client.subscribe(TOPIC_LLM_REQUEST, self._handle_llm_request)
 
-                # CRITICAL: Small delay to allow retained messages to arrive before starting message loop
-                # This ensures tool registry and character state are received before processing requests
-                await asyncio.sleep(0.5)
+            if RAG_ENABLED:
+                await self.mqtt_client.subscribe(TOPIC_MEMORY_RESULTS, self._handle_memory_results, qos=1)
+                logger.info("RAG enabled - subscribed to memory/results")
 
-                # Warm up memory service if RAG is enabled (Priority 3)
-                # This eliminates cold start penalty on first real query
-                if RAG_ENABLED:
-                    asyncio.create_task(self._warmup_memory(client))
-                    # Start periodic metrics logging (Priority 4)
-                    asyncio.create_task(self._periodic_metrics_logging())
+            if TOOL_CALLING_ENABLED:
+                await self.mqtt_client.subscribe(TOPIC_TOOLS_REGISTRY, self._handle_tools_registry)
+                await self.mqtt_client.subscribe(TOPIC_TOOL_CALL_RESULT, self._handle_tool_result)
+                logger.info("Tool calling enabled - subscribed to tool topics")
 
-                logger.info("Starting message processing loop")
+            # Request initial character state
+            try:
+                await self.mqtt_client.client.publish(TOPIC_CHARACTER_GET, orjson.dumps({"section": None}))
+                logger.info("Requested character/get on startup")
+            except Exception:
+                logger.debug("character/get publish failed (may be offline)")
 
-                # Process messages via router - spawn as background tasks for concurrency
-                # This allows memory/results to be processed while LLM requests are in-flight
-                async for m in self.mqtt_client.message_stream(client):
-                    logger.debug(
-                        "Message received: topic=%s payload_size=%d", m.topic, len(m.payload)
-                    )
-                    # Spawn message handling as background task to avoid blocking the message loop
-                    asyncio.create_task(
-                        self.router.route_message(
-                            client,
-                            m,
-                            character_current_topic=TOPIC_CHARACTER_CURRENT,
-                            character_result_topic=TOPIC_CHARACTER_RESULT,
-                            tools_registry_topic=TOPIC_TOOLS_REGISTRY,
-                            tools_result_topic=TOPIC_TOOL_CALL_RESULT,
-                            memory_results_topic=TOPIC_MEMORY_RESULTS,
-                            llm_request_topic=TOPIC_LLM_REQUEST,
-                        )
-                    )
+            # CRITICAL: Small delay to allow retained messages to arrive
+            await asyncio.sleep(0.5)
+
+            # Warm up memory service if RAG is enabled
+            if RAG_ENABLED:
+                asyncio.create_task(self._warmup_memory())
+                asyncio.create_task(self._periodic_metrics_logging())
+
+            logger.info("LLM worker ready - processing messages via subscription handlers")
+
+            # Keep service running (centralized client handles message dispatch)
+            await asyncio.Event().wait()
+
         except Exception as e:
-            logger.info("MQTT disconnected or error: %s; shutting down gracefully", e)
+            logger.error("LLM worker error: %s", e, exc_info=True)
+        finally:
+            await self.mqtt_client.shutdown()
+            logger.info("LLM worker shutdown complete")
 
-    async def _warmup_memory(self, client: Any) -> None:
+    # --- Subscription Handlers ---
+
+    async def _handle_character_current(self, payload: bytes) -> None:
+        """Handle character/current retained message."""
+        await self.router._handle_character_current(type("Message", (), {"payload": payload})())
+
+    async def _handle_character_result(self, payload: bytes) -> None:
+        """Handle character/result message."""
+        await self.router._handle_character_result(type("Message", (), {"payload": payload})())
+
+    async def _handle_llm_request(self, payload: bytes) -> None:
+        """Handle llm/request message."""
+        await self.request_handler.process_request(self.mqtt_client.client, payload)
+
+    async def _handle_memory_results(self, payload: bytes) -> None:
+        """Handle memory/results message."""
+        logger.info("Memory results received: payload_size=%d", len(payload))
+        try:
+            # Parse envelope to extract data and correlation ID
+            envelope = Envelope.model_validate_json(payload)
+            data = envelope.data if isinstance(envelope.data, dict) else {}
+            # Add correlation ID to data for RAG handler
+            data["correlate"] = envelope.id
+            logger.debug("Memory results: envelope_id=%s, data_keys=%s", envelope.id, list(data.keys()))
+            self.rag_handler.handle_results(data)
+        except ValidationError:
+            # Fallback to direct JSON parsing for backward compatibility
+            try:
+                data = orjson.loads(payload)
+                logger.info("Memory results fallback parsing: data_keys=%s", list(data.keys()) if isinstance(data, dict) else "not_dict")
+                self.rag_handler.handle_results(data)
+            except Exception as e:
+                logger.warning("Failed to parse memory/results payload: %s", e)
+        except Exception as e:
+            logger.warning("Failed to handle memory/results: %s", e)
+
+    async def _handle_tools_registry(self, payload: bytes) -> None:
+        """Handle tools/registry message."""
+        logger.debug("Tool registry message received")
+        try:
+            registry_data = orjson.loads(payload)
+            logger.debug("Parsed registry with %d tools", len(registry_data.get("tools", [])))
+            await self.tool_executor.load_tools_from_registry(registry_data)
+        except Exception as e:
+            logger.warning("Failed to load tools from registry: %s", e, exc_info=True)
+
+    async def _handle_tool_result(self, payload: bytes) -> None:
+        """Handle tools/result message."""
+        logger.debug("Tool result received")
+        try:
+            result_data = orjson.loads(payload)
+            call_id = result_data.get("call_id")
+            content = result_data.get("content")
+            error = result_data.get("error")
+            if call_id:
+                self.tool_executor.handle_tool_result(call_id, content, error)
+            else:
+                logger.warning("Tool result missing call_id: %s", result_data)
+        except Exception as e:
+            logger.warning("Failed to handle tool result: %s", e, exc_info=True)
+
+    async def _warmup_memory(self) -> None:
         """Warm up memory service to eliminate cold start penalty (Priority 3).
 
         Sends a dummy query to pre-load embedder and ensure fast first real query.
@@ -231,7 +294,7 @@ class LLMService:
             # Send a simple warm-up query (won't cache due to unique correlation ID)
             await self.rag_handler.query(
                 mqtt_client=self.mqtt_client,
-                client=client,
+                client=self.mqtt_client.client,
                 prompt="system initialization",
                 top_k=1,
                 correlation_id=warmup_id,

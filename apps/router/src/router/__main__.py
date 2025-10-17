@@ -3,11 +3,8 @@ from __future__ import annotations
 import asyncio
 import os
 from typing import Iterable
-from urllib.parse import urlparse
 
-import asyncio_mqtt as mqtt
-from asyncio_mqtt import MqttError
-
+from tars.adapters.mqtt_client import MQTTClient  # type: ignore[import]
 from tars.adapters.mqtt_asyncio import AsyncioMQTTPublisher, AsyncioMQTTSubscriber  # type: ignore[import]
 from tars.contracts.envelope import Envelope  # type: ignore[import]
 from tars.contracts.v1 import (  # type: ignore[import]
@@ -26,16 +23,6 @@ from tars.runtime.dispatcher import Dispatcher  # type: ignore[import]
 from tars.runtime.logging import configure_logging  # type: ignore[import]
 from tars.runtime.registry import register_topics  # type: ignore[import]
 from tars.runtime.subscription import Sub  # type: ignore[import]
-
-
-def parse_mqtt(url: str) -> tuple[str, int, str | None, str | None]:
-    parsed = urlparse(url)
-    return (
-        parsed.hostname or "127.0.0.1",
-        parsed.port or 1883,
-        parsed.username,
-        parsed.password,
-    )
 
 
 def _build_subscriptions(settings: RouterSettings, policy: RouterPolicy) -> Iterable[Sub]:
@@ -104,46 +91,45 @@ async def run_router() -> None:
             "tts_say": settings.topic_tts_say,
         },
     )
-    host, port, username, password = parse_mqtt(settings.mqtt_url)
     backoff = 1.0
 
     while True:
-        logger.info("router.mqtt.connect", extra={"host": host, "port": port})
+        logger.info("router.mqtt.connect", extra={"mqtt_url": settings.mqtt_url})
         try:
-            async with mqtt.Client(
-                hostname=host,
-                port=port,
-                username=username,
-                password=password,
-                client_id="tars-router",
-            ) as client:
-                logger.info("router.mqtt.connected", extra={"host": host, "port": port})
-                publisher = AsyncioMQTTPublisher(client)
-                subscriber = AsyncioMQTTSubscriber(client)
-                subs = _build_subscriptions(settings, policy)
+            mqtt_client = MQTTClient(settings.mqtt_url, "tars-router", enable_health=True)
+            await mqtt_client.connect()
+            
+            if not mqtt_client.client:
+                raise RuntimeError("MQTT client unavailable after connect")
+                
+            logger.info("router.mqtt.connected")
+            publisher = AsyncioMQTTPublisher(mqtt_client.client)
+            subscriber = AsyncioMQTTSubscriber(mqtt_client.client)
+            subs = _build_subscriptions(settings, policy)
 
-                def ctx_factory(_envelope: Envelope) -> Ctx:
-                    return Ctx(pub=publisher, policy=policy, logger=logger, metrics=metrics)
+            def ctx_factory(_envelope: Envelope) -> Ctx:
+                return Ctx(pub=publisher, policy=policy, logger=logger, metrics=metrics)
 
-                dispatcher = Dispatcher(
-                    subscriber,
-                    subs,
-                    ctx_factory,
-                    logger=logger,
-                    queue_maxsize=settings.stream_settings.queue_maxsize,
-                    overflow_strategy=settings.stream_settings.queue_overflow,
-                    handler_timeout=settings.stream_settings.handler_timeout_sec,
-                )
-                ctx = Ctx(pub=publisher, policy=policy, logger=logger, metrics=metrics)
-                await ctx.publish(
-                    "system.health.router", HealthPing(ok=True, event="ready"), qos=1, retain=True
-                )
-                backoff = 1.0
-                try:
-                    await dispatcher.run()
-                finally:
-                    await dispatcher.stop()
-        except MqttError as exc:
+            dispatcher = Dispatcher(
+                subscriber,
+                subs,
+                ctx_factory,
+                logger=logger,
+                queue_maxsize=settings.stream_settings.queue_maxsize,
+                overflow_strategy=settings.stream_settings.queue_overflow,
+                handler_timeout=settings.stream_settings.handler_timeout_sec,
+            )
+            ctx = Ctx(pub=publisher, policy=policy, logger=logger, metrics=metrics)
+            await ctx.publish(
+                "system.health.router", HealthPing(ok=True, event="ready"), qos=1, retain=True
+            )
+            backoff = 1.0
+            try:
+                await dispatcher.run()
+            finally:
+                await dispatcher.stop()
+                await mqtt_client.shutdown()
+        except Exception as exc:  
             logger.warning(
                 "router.mqtt.disconnected", extra={"error": str(exc), "backoff": backoff}
             )

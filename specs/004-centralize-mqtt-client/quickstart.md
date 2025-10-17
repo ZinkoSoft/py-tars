@@ -500,33 +500,217 @@ async def stream_partials():
 
 ### 4. Extending the Client
 
+The centralized MQTT client supports **composition-based extension** for service-specific needs.
+This keeps the core module clean while enabling customization without code duplication.
+
+#### Pattern 4a: Domain-Specific Wrapper
+
+Wrap `MQTTClient` with domain-specific convenience methods:
+
 ```python
-class CustomMQTTClient:
-    """Service-specific wrapper around centralized client."""
+class STTMQTTClient:
+    """STT service-specific MQTT wrapper."""
     
-    def __init__(self, mqtt_url: str):
-        self.client = MQTTClient(
-            mqtt_url=mqtt_url,
-            client_id="tars-custom",
-            enable_health=True,
-        )
-        self.cache = {}
+    def __init__(self, mqtt_url: str, client_id: str):
+        self._client = MQTTClient(mqtt_url, client_id, enable_health=True)
     
     async def connect(self) -> None:
-        await self.client.connect()
-        await self.client.subscribe("cache/update", self._handle_cache)
+        await self._client.connect()
     
-    async def _handle_cache(self, payload: bytes) -> None:
-        envelope = Envelope.model_validate_json(payload)
-        key = envelope.data.get("key")
-        value = envelope.data.get("value")
-        self.cache[key] = value
+    async def shutdown(self) -> None:
+        await self._client.shutdown()
     
-    async def publish_with_cache(self, topic: str, event_type: str, data: dict) -> None:
-        """Custom method combining publish + cache update."""
-        await self.client.publish_event(topic, event_type, data)
-        cache_key = f"{topic}:{event_type}"
-        self.cache[cache_key] = data
+    async def publish_final_transcription(
+        self,
+        text: str,
+        confidence: float,
+        lang: str = "en",
+    ) -> None:
+        """Publish STT final result with domain-specific schema."""
+        await self._client.publish_event(
+            topic="stt/final",
+            event_type="stt.final",
+            data={
+                "text": text,
+                "confidence": confidence,
+                "lang": lang,
+                "is_final": True,
+            },
+            qos=1,
+        )
+    
+    async def publish_partial_transcription(
+        self,
+        text: str,
+        confidence: float,
+    ) -> None:
+        """Publish STT partial result (streaming)."""
+        await self._client.publish_event(
+            topic="stt/partial",
+            event_type="stt.partial",
+            data={
+                "text": text,
+                "confidence": confidence,
+                "is_final": False,
+            },
+            qos=0,  # Best-effort for partials
+        )
+
+# Usage
+stt_client = STTMQTTClient("mqtt://localhost:1883", "stt-worker")
+await stt_client.connect()
+await stt_client.publish_final_transcription("hello world", 0.95)
+```
+
+**Benefits**:
+- Domain methods instead of generic `publish_event()`
+- Encapsulates topic/event_type conventions
+- No pollution of core `MQTTClient`
+
+#### Pattern 4b: Message Batching
+
+Extend with batching for high-frequency events:
+
+```python
+from collections import defaultdict
+
+class BatchingMQTTClient:
+    """Batches messages before publishing to reduce overhead."""
+    
+    def __init__(
+        self,
+        mqtt_url: str,
+        client_id: str,
+        batch_size: int = 10,
+        batch_interval: float = 1.0,
+    ):
+        self._client = MQTTClient(mqtt_url, client_id)
+        self._batches: dict[str, list[dict]] = defaultdict(list)
+        self._batch_size = batch_size
+        self._batch_interval = batch_interval
+        self._flush_task: Optional[asyncio.Task] = None
+    
+    async def connect(self) -> None:
+        await self._client.connect()
+        self._flush_task = asyncio.create_task(self._flush_loop())
+    
+    async def shutdown(self) -> None:
+        if self._flush_task:
+            self._flush_task.cancel()
+            try:
+                await self._flush_task
+            except asyncio.CancelledError:
+                pass
+        await self._flush_all()
+        await self._client.shutdown()
+    
+    async def publish_batched(self, topic: str, data: dict) -> None:
+        """Add message to batch."""
+        self._batches[topic].append(data)
+        if len(self._batches[topic]) >= self._batch_size:
+            await self._flush_topic(topic)
+    
+    async def _flush_loop(self) -> None:
+        """Background task to flush batches."""
+        try:
+            while True:
+                await asyncio.sleep(self._batch_interval)
+                await self._flush_all()
+        except asyncio.CancelledError:
+            pass
+    
+    async def _flush_all(self) -> None:
+        for topic in list(self._batches.keys()):
+            await self._flush_topic(topic)
+    
+    async def _flush_topic(self, topic: str) -> None:
+        if not self._batches[topic]:
+            return
+        batch = self._batches[topic]
+        self._batches[topic] = []
+        await self._client.publish_event(
+            topic=f"{topic}/batch",
+            event_type=f"{topic.replace('/', '.')}.batch",
+            data={"items": batch, "count": len(batch)},
+        )
+
+# Usage
+batch_client = BatchingMQTTClient(
+    "mqtt://localhost:1883",
+    "sensor-service",
+    batch_size=50,
+    batch_interval=2.0,
+)
+await batch_client.connect()
+for reading in sensor_readings:
+    await batch_client.publish_batched("sensors/temperature", reading)
+```
+
+**Benefits**:
+- Reduces MQTT overhead for high-frequency data
+- Automatic batching with size and time limits
+- Independent from core client
+
+#### Pattern 4c: Direct Client Access
+
+Use the `.client` property for advanced `asyncio-mqtt` features:
+
+```python
+class AdvancedMQTTClient:
+    """Uses direct client access for custom features."""
+    
+    def __init__(self, mqtt_url: str, client_id: str):
+        self._client = MQTTClient(mqtt_url, client_id)
+    
+    async def connect(self) -> None:
+        await self._client.connect()
+    
+    async def subscribe_with_filter(
+        self,
+        topic: str,
+        filter_fn: Callable[[Any], bool],
+        handler: Callable[[bytes], None],
+    ) -> None:
+        """Subscribe with custom message filtering."""
+        # Access underlying asyncio-mqtt client
+        underlying = self._client.client
+        if not underlying:
+            raise RuntimeError("Not connected")
+        
+        await underlying.subscribe(topic)
+        
+        # Manual message iteration with filtering
+        async def filtered_dispatch():
+            async with underlying.messages() as messages:
+                async for msg in messages:
+                    if filter_fn(msg):
+                        await handler(msg.payload)
+        
+        asyncio.create_task(filtered_dispatch())
+
+# Usage
+advanced = AdvancedMQTTClient("mqtt://localhost:1883", "advanced-service")
+await advanced.connect()
+await advanced.subscribe_with_filter(
+    "sensors/#",
+    lambda msg: "temperature" in msg.topic,  # Filter by topic substring
+    handle_temperature,
+)
+```
+
+**Benefits**:
+- Full access to `asyncio-mqtt` capabilities
+- Custom subscription logic
+- Low-level control when needed
+
+#### Complete Extension Example
+
+See `packages/tars-core/examples/custom_mqtt_wrapper.py` for working examples:
+
+```bash
+# Run extension examples (requires Mosquitto at localhost:1883)
+cd packages/tars-core
+python -m examples.custom_mqtt_wrapper
 ```
 
 ---
@@ -572,6 +756,153 @@ await client.shutdown()
 - [ ] Replace `disconnect()` with `shutdown()`
 - [ ] Enable health publishing if service had custom health logic
 - [ ] Update tests to mock centralized client
+
+### Additional Migration Examples
+
+#### Example 1: Memory Worker (Request-Response Pattern)
+
+**Before** (15 lines):
+```python
+# Manual envelope creation + correlation tracking
+envelope = Envelope.new(
+    event_type="memory.query.result",
+    data={"query": query_text, "results": results},
+    correlate=request_id,
+)
+payload = orjson.dumps(envelope.model_dump())
+await self._client.publish("memory/results", payload, qos=1)
+```
+
+**After** (5 lines):
+```python
+# Automatic envelope wrapping
+await client.publish_event(
+    topic="memory/results",
+    event_type="memory.query.result",
+    data={"query": query_text, "results": results},
+    correlation_id=request_id,
+    qos=1,
+)
+```
+
+**Savings**: 10 lines (67% reduction)
+
+#### Example 2: LLM Worker (Streaming Pattern)
+
+**Before** (20+ lines):
+```python
+# Manual streaming with envelope wrapping
+for seq, chunk in enumerate(stream_chunks):
+    envelope = Envelope.new(
+        event_type="llm.stream.delta",
+        data={
+            "id": request_id,
+            "seq": seq,
+            "delta": chunk,
+            "done": False,
+        },
+    )
+    payload = orjson.dumps(envelope.model_dump())
+    await self._client.publish("llm/stream", payload, qos=0)
+
+# Final message
+final_envelope = Envelope.new(
+    event_type="llm.stream.done",
+    data={"id": request_id, "seq": seq + 1, "done": True},
+)
+await self._client.publish("llm/stream", orjson.dumps(final_envelope.model_dump()))
+```
+
+**After** (8 lines):
+```python
+# Automatic envelope wrapping for streaming
+for seq, chunk in enumerate(stream_chunks):
+    await client.publish_event(
+        "llm/stream", "llm.stream.delta",
+        {"id": request_id, "seq": seq, "delta": chunk, "done": False},
+        qos=0,
+    )
+
+await client.publish_event("llm/stream", "llm.stream.done",
+    {"id": request_id, "seq": seq + 1, "done": True})
+```
+
+**Savings**: 12 lines (60% reduction)
+
+#### Example 3: Service with Health Monitoring
+
+**Before** (25+ lines):
+```python
+# Manual health status publishing
+class MyService:
+    async def publish_health(self, ok: bool, msg: str):
+        health_topic = f"system/health/{self.client_id}"
+        payload = orjson.dumps({
+            "ok": ok,
+            "event": msg,
+            "timestamp": time.time(),
+        })
+        await self._client.publish(health_topic, payload, qos=1, retain=True)
+    
+    async def run(self):
+        await self.connect()
+        await self.publish_health(True, "connected")
+        try:
+            # ... service logic ...
+        finally:
+            await self.publish_health(False, "shutdown")
+            await self.disconnect()
+```
+
+**After** (8 lines):
+```python
+# Built-in health publishing
+class MyService:
+    async def run(self):
+        async with MQTTClient.from_env(enable_health=True) as client:
+            # Health "connected" published automatically
+            # ... service logic ...
+            # Health "shutdown" published automatically on exit
+```
+
+**Savings**: 17 lines (68% reduction), plus automatic health management
+
+#### Example 4: Wildcard Subscriptions
+
+**Before** (12 lines):
+```python
+# Manual wildcard handling
+async def handle_all_sensors(msg):
+    topic = str(msg.topic)
+    payload = msg.payload
+    # Manual envelope parsing
+    envelope = Envelope.model_validate_json(payload)
+    # Process data
+
+await self._client.subscribe("sensors/#")
+async with self._client.messages() as messages:
+    async for msg in messages:
+        await handle_all_sensors(msg)
+```
+
+**After** (6 lines):
+```python
+# Automatic wildcard + envelope handling
+async def handle_sensors(payload: bytes):
+    envelope = Envelope.model_validate_json(payload)
+    # Process data
+
+await client.subscribe("sensors/#", handle_sensors)
+# Automatic dispatch in background task
+```
+
+**Savings**: 6 lines (50% reduction), plus automatic background dispatch
+
+### Detailed Migration Guide
+
+For comprehensive migration instructions including service-specific examples, see:
+
+📖 [**Complete Migration Guide**](../../packages/tars-core/docs/MIGRATION_GUIDE.md)
 
 ---
 

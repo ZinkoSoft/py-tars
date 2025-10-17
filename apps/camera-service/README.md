@@ -97,6 +97,36 @@ open http://localhost:8080/stream
 curl http://localhost:8080/snapshot > snapshot.jpg
 ```
 
+## MQTT Client Architecture
+
+**Centralized Client**: Uses `tars.adapters.mqtt_client.MQTTClient` from `tars-core` package.
+
+**Key Features**:
+- **Auto-Reconnection**: Exponential backoff (0.5s-5s configurable) with session recovery
+- **Health Monitoring**: Publishes health status to `system/health/camera` (retained)
+- **Heartbeat**: Optional keepalive messages to `system/keepalive/camera`
+- **Message Deduplication**: TTL cache prevents duplicate processing during reconnects
+- **Async Publishing**: Non-blocking frame publishing with automatic retries
+
+**Publishing Pattern**:
+```python
+async def _publish_frame(self, jpeg_data: bytes, ...) -> None:
+    """Publish frame using centralized client."""
+    payload = {"frame": base64_encode(jpeg_data), ...}
+    await self.mqtt.publish(self.cfg.mqtt.frame_topic, payload, qos=0)
+```
+
+**Health Integration**:
+- Health check reports camera backend and capture status
+- Auto-publishes to `system/health/camera` on connect/disconnect
+- Heartbeat maintains session presence
+
+**Migration Benefits** (from local wrapper):
+- Eliminated ~100 lines of manual reconnection logic
+- Centralized health monitoring across all services
+- Consistent error handling and logging patterns
+- Async-first design (no thread blocking)
+
 ## Development
 
 ### Setup Development Environment
@@ -144,10 +174,9 @@ camera-service/
 │       ├── __init__.py
 │       ├── __main__.py     # CLI entry point
 │       ├── config.py       # Configuration parsing
-│       ├── service.py      # Core business logic
+│       ├── service.py      # Core business logic (MQTT lifecycle, async publishing)
 │       ├── capture.py      # Camera capture
-│       ├── streaming.py    # HTTP streaming
-│       └── mqtt_client.py  # MQTT client
+│       └── streaming.py    # HTTP streaming
 ├── tests/
 │   ├── conftest.py         # Shared fixtures
 │   ├── unit/               # Unit tests
@@ -174,11 +203,13 @@ pytest -m contract
 
 The camera service consists of three main components:
 
-1. **Camera Capture** (`capture.py`): Interfaces with V4L2 camera device, handles frame capture and JPEG encoding
+1. **Camera Capture** (`capture.py`): Interfaces with V4L2 camera device, handles frame capture and error recovery
 2. **HTTP Streaming** (`streaming.py`): Flask server providing MJPEG stream and snapshot endpoints
-3. **MQTT Client** (`mqtt_client.py`): Publishes occasional frames to MQTT for monitoring and health status
+3. **Service Orchestration** (`service.py`): Coordinates capture, streaming, and async MQTT publishing
 
 ### MQTT Integration
+
+Uses centralized `tars.adapters.mqtt_client.MQTTClient` for all MQTT operations.
 
 #### Subscribed Topics
 
@@ -188,8 +219,9 @@ None - this service only publishes.
 
 | Topic | QoS | Retained | Payload Schema | Purpose |
 |-------|-----|----------|----------------|---------|
-| `camera/frame` | 0 | No | `{ frame: str, timestamp: float, width: int, height: int, quality: int, mqtt_rate: int }` | Monitoring frames (base64 JPEG) |
-| `system/health/camera` | 1 | Yes | `{ ok: bool, event?: str, err?: str, timestamp: float }` | Service health status |
+| `camera/frame` | 0 | No | `{ frame: str, timestamp: float, width: int, height: int, quality: int, mqtt_rate: int, backend: str, consecutive_failures: int }` | Monitoring frames (base64 JPEG) |
+| `system/health/camera` | 1 | Yes | `{ ok: bool, event?: str, timestamp: float }` | Service health status (auto-published) |
+| `system/keepalive/camera` | 0 | No | `{ ok: bool, event: "hb", ts: float }` | Heartbeat (auto-published) |
 
 **Frame Payload Example:**
 ```json
@@ -199,6 +231,10 @@ None - this service only publishes.
   "width": 640,
   "height": 480,
   "quality": 80,
+  "mqtt_rate": 2,
+  "backend": "opencv",
+  "consecutive_failures": 0
+}
   "mqtt_rate": 2
 }
 ```
