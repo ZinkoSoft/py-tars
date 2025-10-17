@@ -257,7 +257,7 @@ class MemoryService:
             topic=TOPIC_CHAR_CURRENT,
             event_type=EVENT_TYPE_CHARACTER_CURRENT,
             data=self.character,
-            correlate=self.character.message_id,
+            correlation_id=self.character.message_id,
             qos=1,
             retain=True,
         )
@@ -319,7 +319,7 @@ class MemoryService:
             topic=TOPIC_HEALTH,
             event_type=EVENT_TYPE_MEMORY_HEALTH,
             data=payload,
-            correlate=None,
+            correlation_id=None,
             qos=1,
             retain=retain,
         )
@@ -329,7 +329,7 @@ class MemoryService:
             topic=TOPIC_CHAR_CURRENT,
             event_type=EVENT_TYPE_CHARACTER_CURRENT,
             data=self.character,
-            correlate=self.character.message_id,
+            correlation_id=self.character.message_id,
             qos=1,
             retain=True,
         )
@@ -620,7 +620,7 @@ class MemoryService:
             topic=TOPIC_RESULTS,
             event_type=EVENT_TYPE_MEMORY_RESULTS,
             data=payload,
-            correlate=correlate or query.message_id,
+            correlation_id=correlate or query.message_id,
             qos=1,
             retain=False,
         )
@@ -637,7 +637,7 @@ class MemoryService:
                 topic=TOPIC_CHAR_RESULT,
                 event_type=EVENT_TYPE_CHARACTER_RESULT,
                 data=self.character,
-                correlate=correlate or request.message_id,
+                correlation_id=correlate or request.message_id,
                 qos=0,
                 retain=False,
             )
@@ -655,7 +655,7 @@ class MemoryService:
             topic=TOPIC_CHAR_RESULT,
             event_type=EVENT_TYPE_CHARACTER_RESULT,
             data=payload,
-            correlate=correlate or request.message_id,
+            correlation_id=correlate or request.message_id,
             qos=0,
             retain=False,
         )
