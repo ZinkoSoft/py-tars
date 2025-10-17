@@ -623,6 +623,9 @@ class MQTTClient:
         
         logger.info("Published health: ok=%s event=%s error=%s", ok, event, err)
 
+        logger.debug("Published raw message: topic=%s size=%d qos=%d retain=%s", 
+                    topic, len(payload), qos, retain)
+
     # --- Subscription Methods ---
 
     async def subscribe(

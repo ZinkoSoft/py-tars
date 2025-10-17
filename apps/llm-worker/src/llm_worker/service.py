@@ -189,7 +189,12 @@ class LLMService:
 
             # Request initial character state
             try:
-                await self.mqtt_client.client.publish(TOPIC_CHARACTER_GET, orjson.dumps({"section": None}))
+                await self.mqtt_client.publish_event(
+                    topic=TOPIC_CHARACTER_GET,
+                    event_type="memory.character.get",
+                    data={"section": None},
+                    qos=0,
+                )
                 logger.info("Requested character/get on startup")
             except Exception:
                 logger.debug("character/get publish failed (may be offline)")

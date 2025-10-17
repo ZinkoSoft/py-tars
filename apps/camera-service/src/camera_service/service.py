@@ -8,6 +8,7 @@ import time
 
 from PIL import Image
 from tars.adapters.mqtt_client import MQTTClient  # type: ignore[import]
+from tars.contracts.v1.camera import CameraFrame  # type: ignore[import]
 
 from .capture import CameraCapture
 from .config import ServiceConfig
@@ -175,19 +176,22 @@ class CameraService:
         """Publish frame to MQTT (base64 encoded)."""
         frame_b64 = base64.b64encode(jpeg_data).decode("ascii")
 
-        payload = {
-            "frame": frame_b64,
-            "timestamp": time.time(),
-            "width": width,
-            "height": height,
-            "quality": quality,
-            "mqtt_rate": mqtt_rate,
-            "backend": backend,
-            "consecutive_failures": consecutive_failures,
-        }
+        frame = CameraFrame(
+            frame_data=frame_b64,
+            format="jpeg",
+            width=width,
+            height=height,
+            frame_number=self.frame_count,
+            fps=mqtt_rate if mqtt_rate > 0 else None,
+        )
 
         try:
-            await self.mqtt.publish(self.cfg.mqtt.frame_topic, payload, qos=0)
+            await self.mqtt.publish_event(
+                topic=self.cfg.mqtt.frame_topic,
+                event_type="camera.frame",
+                data=frame,
+                qos=0,
+            )
         except Exception as e:
             logger.error(f"Failed to publish frame: {e}")
 

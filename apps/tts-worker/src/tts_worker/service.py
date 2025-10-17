@@ -173,18 +173,15 @@ class TTSService:
             system_announce=system_announce,
         )
         message_id = await self._publish_event(EVENT_TYPE_TTS_STATUS, status, qos=0)
-        if message_id is None:
-            envelope = Envelope.new(
-                event_type=EVENT_TYPE_TTS_STATUS, data=status, source=SOURCE_NAME
+        if message_id:
+            logger.log(
+                log_level,
+                "Published TTS %s status: message_id=%s",
+                event,
+                message_id,
             )
-            await mqtt_client.publish(STATUS_TOPIC, envelope.model_dump_json().encode(), qos=0)
-            message_id = envelope.id
-        logger.log(
-            log_level,
-            "Published TTS %s status: message_id=%s",
-            event,
-            message_id,
-        )
+        else:
+            logger.warning("Failed to publish TTS %s status", event)
 
     async def run(self) -> None:
         logger.info("Connecting to MQTT %s", MQTT_URL)
