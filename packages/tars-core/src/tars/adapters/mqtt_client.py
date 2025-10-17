@@ -526,7 +526,7 @@ class MQTTClient:
         correlation_id: Optional[str] = None,
         qos: int = 0,
         retain: bool = False,
-    ) -> None:
+    ) -> str:
         """Publish event wrapped in Envelope to MQTT topic.
         
         Args:
@@ -537,11 +537,14 @@ class MQTTClient:
             qos: MQTT QoS level (0, 1, or 2)
             retain: Whether to retain message on broker
         
+        Returns:
+            Envelope ID (serves as message ID for tracking)
+        
         Raises:
             RuntimeError: If not connected to broker
         
         Example:
-            await client.publish_event(
+            msg_id = await client.publish_event(
                 topic="stt/final",
                 event_type="stt.final",
                 data={"text": "hello world", "confidence": 0.95},
@@ -573,13 +576,16 @@ class MQTTClient:
         await self._client.publish(topic, payload, qos=qos, retain=retain)
         
         logger.debug(
-            "Published event: topic=%s type=%s correlation_id=%s qos=%d retain=%s",
+            "Published event: topic=%s type=%s envelope_id=%s correlation_id=%s qos=%d retain=%s",
             topic,
             event_type,
+            envelope.id,
             correlation_id,
             qos,
             retain,
         )
+        
+        return envelope.id
 
     async def publish_health(
         self,
