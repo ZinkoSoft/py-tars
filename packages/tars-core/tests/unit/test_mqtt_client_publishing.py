@@ -7,7 +7,8 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from pydantic import BaseModel
 
-from tars.adapters.mqtt_client import MQTTClient, HealthStatus
+from tars.adapters.mqtt_client import MQTTClient
+from tars.contracts.v1.health import HealthPing
 from tars.contracts.envelope import Envelope
 
 
@@ -196,13 +197,13 @@ class TestPublishHealth:
 
     @pytest.mark.asyncio
     async def test_publish_health_wraps_in_envelope(self, mqtt_url, mock_mqtt_client):
-        """Wrap HealthStatus in Envelope with event_type='health.status'."""
+        """Wrap HealthPing in Envelope with event_type='health.status'."""
         client = MQTTClient(mqtt_url, "test-client", enable_health=True)
         
         with patch("tars.adapters.mqtt_client.mqtt.Client", return_value=mock_mqtt_client):
             await client.connect()
             
-            await client.publish_health(ok=False, error="Connection lost")
+            await client.publish_health(ok=False, err="Connection lost")
         
         call_args = mock_mqtt_client.publish.call_args
         payload = call_args[0][1]
@@ -210,7 +211,7 @@ class TestPublishHealth:
         
         assert envelope.type == "health.status"
         assert envelope.data["ok"] is False
-        assert envelope.data["error"] == "Connection lost"
+        assert envelope.data["err"] == "Connection lost"
 
     @pytest.mark.asyncio
     async def test_publish_health_disabled_is_noop(self, mqtt_url, mock_mqtt_client):
@@ -250,11 +251,11 @@ class TestPublishHealth:
         with patch("tars.adapters.mqtt_client.mqtt.Client", return_value=mock_mqtt_client):
             await client.connect()
             
-            await client.publish_health(ok=False, error="Broker unreachable")
+            await client.publish_health(ok=False, err="Broker unreachable")
         
         call_args = mock_mqtt_client.publish.call_args
         payload = call_args[0][1]
         envelope = Envelope.model_validate_json(payload)
         
         assert envelope.data["ok"] is False
-        assert envelope.data["error"] == "Broker unreachable"
+        assert envelope.data["err"] == "Broker unreachable"

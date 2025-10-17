@@ -29,6 +29,7 @@ import orjson
 from pydantic import BaseModel, Field, field_validator, ValidationInfo
 
 from tars.contracts.envelope import Envelope
+from tars.contracts.v1.health import HealthPing
 
 logger = logging.getLogger(__name__)
 
@@ -197,28 +198,6 @@ class MQTTClientConfig(BaseModel):
             reconnect_min_delay=float(os.getenv("MQTT_RECONNECT_MIN_DELAY", "0.5")),
             reconnect_max_delay=float(os.getenv("MQTT_RECONNECT_MAX_DELAY", "5.0")),
         )
-
-
-class HealthStatus(BaseModel):
-    """Health status payload for system/health/{client_id} topic.
-    
-    Attributes:
-        ok: Health status (True=healthy, False=unhealthy)
-        event: Health event name (e.g., "ready", "shutdown", "reconnected")
-        error: Error message if ok=False (optional)
-    """
-
-    ok: bool
-    event: Optional[str] = None
-    error: Optional[str] = None
-
-    @field_validator("error")
-    @classmethod
-    def validate_error_when_unhealthy(cls, v: Optional[str], info: ValidationInfo) -> Optional[str]:
-        """Warn if error is set when ok=True."""
-        if "ok" in info.data and info.data["ok"] is True and v is not None:
-            logger.warning("Health status ok=True but error=%r (unexpected)", v)
-        return v
 
 
 class HeartbeatPayload(BaseModel):
@@ -606,7 +585,7 @@ class MQTTClient:
         self,
         ok: bool,
         event: Optional[str] = None,
-        error: Optional[str] = None,
+        err: Optional[str] = None,
     ) -> None:
         """Publish health status to system/health/{client_id} topic.
         
@@ -616,11 +595,11 @@ class MQTTClient:
         Args:
             ok: Health status (True=healthy, False=unhealthy)
             event: Health event name (e.g., "ready", "shutdown", "reconnected")
-            error: Error message if ok=False
+            err: Error message if ok=False
         
         Example:
             await client.publish_health(ok=True, event="ready")
-            await client.publish_health(ok=False, error="Connection lost")
+            await client.publish_health(ok=False, err="Connection lost")
         """
         if not self._config.enable_health:
             return  # Health publishing disabled
@@ -629,8 +608,8 @@ class MQTTClient:
             logger.warning("Cannot publish health: not connected")
             return
         
-        # Create health status payload
-        health = HealthStatus(ok=ok, event=event, error=error)
+        # Create health status payload using HealthPing contract
+        health = HealthPing(ok=ok, event=event, err=err)
         
         # Publish via publish_event
         topic = f"system/health/{self._config.client_id}"
@@ -642,7 +621,7 @@ class MQTTClient:
             retain=True,
         )
         
-        logger.info("Published health: ok=%s event=%s error=%s", ok, event, error)
+        logger.info("Published health: ok=%s event=%s error=%s", ok, event, err)
 
     # --- Subscription Methods ---
 

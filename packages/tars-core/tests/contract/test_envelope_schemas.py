@@ -249,9 +249,9 @@ class TestMQTTClientEnvelopeContract:
         assert envelope.data == {"message": "hello", "count": 42}
 
     async def test_publish_health_creates_valid_envelope(self, mqtt_url, mock_mqtt_client):
-        """publish_health() creates valid Envelope with HealthStatus."""
+        """publish_health() creates valid Envelope with HealthPing."""
         from unittest.mock import patch
-        from tars.adapters.mqtt_client import HealthStatus
+        from tars.contracts.v1.health import HealthPing
         
         client = MQTTClient(mqtt_url, "test-client", enable_health=True)
         
