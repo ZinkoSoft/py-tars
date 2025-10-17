@@ -4,7 +4,11 @@ import time
 import uuid
 from pydantic import BaseModel, Field
 
+# Event types (legacy - prefer topic constants)
 EVENT_TYPE_HEALTH = "system.health"
+
+# MQTT Topic constants
+TOPIC_SYSTEM_HEALTH_PREFIX = "system/health/"  # Append service name
 
 
 class HealthPing(BaseModel):

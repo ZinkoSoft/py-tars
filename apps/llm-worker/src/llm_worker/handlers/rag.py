@@ -118,11 +118,10 @@ class RAGHandler:
 
             # Publish using envelope with correlation ID
             await mqtt_client.publish_event(
-                client,
-                event_type=EVENT_TYPE_MEMORY_QUERY,
                 topic=self.memory_query_topic,
-                payload=query,
-                correlate=correlation_id,
+                event_type=EVENT_TYPE_MEMORY_QUERY,
+                data=query.model_dump(),
+                correlation_id=correlation_id,
                 qos=1,
                 retain=False,
             )

@@ -1,11 +1,39 @@
 """Versioned event contracts (v1)."""
 
-from .health import EVENT_TYPE_HEALTH, HealthPing
+# Camera contracts
+from .camera import (
+	EVENT_TYPE_CAMERA_CAPTURE,
+	EVENT_TYPE_CAMERA_IMAGE,
+	TOPIC_CAMERA_CAPTURE,
+	TOPIC_CAMERA_IMAGE,
+	TOPIC_CAMERA_FRAME,
+	BaseCameraMessage,
+	CameraCaptureRequest,
+	CameraFrame,
+	CameraImageResponse,
+	CameraStatusUpdate,
+)
+
+# Health contracts
+from .health import (
+	EVENT_TYPE_HEALTH,
+	TOPIC_SYSTEM_HEALTH_PREFIX,
+	HealthPing,
+)
+
+# LLM contracts
 from .llm import (
 	EVENT_TYPE_LLM_CANCEL,
 	EVENT_TYPE_LLM_REQUEST,
 	EVENT_TYPE_LLM_RESPONSE,
 	EVENT_TYPE_LLM_STREAM,
+	TOPIC_LLM_CANCEL,
+	TOPIC_LLM_REQUEST,
+	TOPIC_LLM_RESPONSE,
+	TOPIC_LLM_STREAM,
+	TOPIC_LLM_TOOLS_REGISTRY,
+	TOPIC_LLM_TOOL_CALL_REQUEST,
+	TOPIC_LLM_TOOL_CALL_RESULT,
 	BaseLLMMessage,
 	ConversationMessage,
 	LLMCancel,
@@ -13,6 +41,8 @@ from .llm import (
 	LLMResponse,
 	LLMStreamDelta,
 )
+
+# MCP contracts
 from .mcp import (
 	EVENT_TYPE_TOOLS_REGISTRY,
 	EVENT_TYPE_TOOL_CALL_REQUEST,
@@ -22,6 +52,8 @@ from .mcp import (
 	ToolSpec,
 	ToolsRegistry,
 )
+
+# Memory contracts
 from .memory import (
 	EVENT_TYPE_CHARACTER_CURRENT,
 	EVENT_TYPE_CHARACTER_GET,
@@ -29,6 +61,12 @@ from .memory import (
 	EVENT_TYPE_MEMORY_HEALTH,
 	EVENT_TYPE_MEMORY_QUERY,
 	EVENT_TYPE_MEMORY_RESULTS,
+	TOPIC_CHARACTER_GET,
+	TOPIC_CHARACTER_RESULT,
+	TOPIC_CHARACTER_UPDATE,
+	TOPIC_MEMORY_QUERY,
+	TOPIC_MEMORY_RESULTS,
+	TOPIC_SYSTEM_CHARACTER_CURRENT,
 	BaseMemoryMessage,
 	CharacterGetRequest,
 	CharacterSection,
@@ -37,6 +75,8 @@ from .memory import (
 	MemoryResult,
 	MemoryResults,
 )
+
+# Movement contracts
 from .movement import (
 	TOPIC_HEALTH_MOVEMENT_CONTROLLER,
 	TOPIC_HEALTH_MOVEMENT_SERVICE,
@@ -63,23 +103,76 @@ from .movement import (
 	validate_movement_command,
 	validate_test_movement,
 )
-from .stt import EVENT_TYPE_STT_FINAL, EVENT_TYPE_STT_PARTIAL, FinalTranscript, PartialTranscript
-from .tts import EVENT_TYPE_SAY, EVENT_TYPE_TTS_STATUS, TtsSay, TtsStatus
-from .wake import EVENT_TYPE_WAKE_EVENT, EVENT_TYPE_WAKE_MIC, WakeEvent, WakeMicCommand
+
+# STT contracts
+from .stt import (
+	EVENT_TYPE_STT_FINAL,
+	EVENT_TYPE_STT_PARTIAL,
+	TOPIC_STT_FINAL,
+	TOPIC_STT_PARTIAL,
+	TOPIC_STT_AUDIO_FFT,
+	AudioFFTData,
+	FinalTranscript,
+	PartialTranscript,
+)
+
+# TTS contracts
+from .tts import (
+	EVENT_TYPE_SAY,
+	EVENT_TYPE_TTS_STATUS,
+	TOPIC_TTS_SAY,
+	TOPIC_TTS_STATUS,
+	TOPIC_TTS_CONTROL,
+	TtsControlCommand,
+	TtsSay,
+	TtsStatus,
+)
+
+# Wake contracts
+from .wake import (
+	EVENT_TYPE_WAKE_EVENT,
+	EVENT_TYPE_WAKE_MIC,
+	TOPIC_WAKE_EVENT,
+	TOPIC_WAKE_MIC,
+	WakeEvent,
+	WakeMicCommand,
+)
 
 __all__ = [
+	# Camera
+	"EVENT_TYPE_CAMERA_CAPTURE",
+	"EVENT_TYPE_CAMERA_IMAGE",
+	"TOPIC_CAMERA_CAPTURE",
+	"TOPIC_CAMERA_IMAGE",
+	"TOPIC_CAMERA_FRAME",
+	"BaseCameraMessage",
+	"CameraCaptureRequest",
+	"CameraFrame",
+	"CameraImageResponse",
+	"CameraStatusUpdate",
+	# Health
 	"EVENT_TYPE_HEALTH",
+	"TOPIC_SYSTEM_HEALTH_PREFIX",
 	"HealthPing",
+	# LLM
 	"EVENT_TYPE_LLM_CANCEL",
 	"EVENT_TYPE_LLM_REQUEST",
 	"EVENT_TYPE_LLM_RESPONSE",
 	"EVENT_TYPE_LLM_STREAM",
+	"TOPIC_LLM_CANCEL",
+	"TOPIC_LLM_REQUEST",
+	"TOPIC_LLM_RESPONSE",
+	"TOPIC_LLM_STREAM",
+	"TOPIC_LLM_TOOLS_REGISTRY",
+	"TOPIC_LLM_TOOL_CALL_REQUEST",
+	"TOPIC_LLM_TOOL_CALL_RESULT",
 	"BaseLLMMessage",
 	"ConversationMessage",
 	"LLMCancel",
 	"LLMRequest",
 	"LLMResponse",
 	"LLMStreamDelta",
+	# MCP
 	"EVENT_TYPE_TOOLS_REGISTRY",
 	"EVENT_TYPE_TOOL_CALL_REQUEST",
 	"EVENT_TYPE_TOOL_CALL_RESULT",
@@ -87,12 +180,19 @@ __all__ = [
 	"ToolCallResult",
 	"ToolSpec",
 	"ToolsRegistry",
+	# Memory
 	"EVENT_TYPE_MEMORY_QUERY",
 	"EVENT_TYPE_MEMORY_RESULTS",
 	"EVENT_TYPE_MEMORY_HEALTH",
 	"EVENT_TYPE_CHARACTER_GET",
 	"EVENT_TYPE_CHARACTER_RESULT",
 	"EVENT_TYPE_CHARACTER_CURRENT",
+	"TOPIC_CHARACTER_GET",
+	"TOPIC_CHARACTER_RESULT",
+	"TOPIC_CHARACTER_UPDATE",
+	"TOPIC_MEMORY_QUERY",
+	"TOPIC_MEMORY_RESULTS",
+	"TOPIC_SYSTEM_CHARACTER_CURRENT",
 	"BaseMemoryMessage",
 	"MemoryQuery",
 	"MemoryResult",
@@ -100,6 +200,7 @@ __all__ = [
 	"CharacterGetRequest",
 	"CharacterSnapshot",
 	"CharacterSection",
+	# Movement
 	"TOPIC_HEALTH_MOVEMENT_CONTROLLER",
 	"TOPIC_HEALTH_MOVEMENT_SERVICE",
 	"TOPIC_MOVEMENT_COMMAND",
@@ -124,16 +225,29 @@ __all__ = [
 	"validate_emergency_stop",
 	"validate_movement_command",
 	"validate_test_movement",
+	# STT
 	"EVENT_TYPE_STT_FINAL",
 	"EVENT_TYPE_STT_PARTIAL",
+	"TOPIC_STT_FINAL",
+	"TOPIC_STT_PARTIAL",
+	"TOPIC_STT_AUDIO_FFT",
+	"AudioFFTData",
 	"FinalTranscript",
 	"PartialTranscript",
+	# TTS
 	"EVENT_TYPE_SAY",
 	"EVENT_TYPE_TTS_STATUS",
+	"TOPIC_TTS_SAY",
+	"TOPIC_TTS_STATUS",
+	"TOPIC_TTS_CONTROL",
+	"TtsControlCommand",
 	"TtsSay",
 	"TtsStatus",
+	# Wake
 	"EVENT_TYPE_WAKE_EVENT",
 	"EVENT_TYPE_WAKE_MIC",
+	"TOPIC_WAKE_EVENT",
+	"TOPIC_WAKE_MIC",
 	"WakeEvent",
 	"WakeMicCommand",
 ]

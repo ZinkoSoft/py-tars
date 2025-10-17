@@ -9,8 +9,7 @@ description = "Camera service for TARS - captures and streams video frames"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "asyncio-mqtt>=0.16.2",
-    "paho-mqtt<2.0",
+    "tars-core",
     "orjson>=3.10.7",
     "numpy<2.0,>=1.26",
     "opencv-python>=4.8.0",

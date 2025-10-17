@@ -5,8 +5,13 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+# Event types (legacy - prefer topic constants)
 EVENT_TYPE_WAKE_EVENT = "wake.event"
 EVENT_TYPE_WAKE_MIC = "wake.mic"
+
+# MQTT Topic constants
+TOPIC_WAKE_EVENT = "wake/event"
+TOPIC_WAKE_MIC = "wake/mic"
 
 
 class WakeEvent(BaseModel):

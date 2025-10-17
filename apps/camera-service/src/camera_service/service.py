@@ -1,15 +1,17 @@
 """Camera service orchestration."""
 
 import asyncio
+import base64
 import io
 import logging
 import time
 
 from PIL import Image
+from tars.adapters.mqtt_client import MQTTClient  # type: ignore[import]
+from tars.contracts.v1.camera import CameraFrame  # type: ignore[import]
 
 from .capture import CameraCapture
 from .config import ServiceConfig
-from .mqtt_client import MQTTPublisher
 from .streaming import StreamingServer
 
 logger = logging.getLogger("camera.service")
@@ -25,19 +27,20 @@ class CameraService:
 
         # Components
         self.camera: CameraCapture | None = None
-        self.mqtt: MQTTPublisher | None = None
+        self.mqtt: MQTTClient | None = None
         self.http: StreamingServer | None = None
 
     async def start(self) -> None:
         """Initialize all components and start capture loop."""
         try:
             # Initialize MQTT
-            self.mqtt = MQTTPublisher(
+            self.mqtt = MQTTClient(
                 self.cfg.mqtt.url,
-                self.cfg.mqtt.frame_topic,
-                self.cfg.mqtt.health_topic,
+                client_id="tars-camera",
+                enable_health=True,
+                enable_heartbeat=True,
             )
-            self.mqtt.connect()
+            await self.mqtt.connect()
 
             # Initialize camera
             self.camera = CameraCapture(
@@ -56,8 +59,8 @@ class CameraService:
             )
             self.http.start()
 
-            # Publish health
-            self.mqtt.publish_health(True, "started")
+            # Centralized client handles health automatically on connect
+            logger.info("Camera service health published automatically by centralized client")
 
             self.running = True
             logger.info(
@@ -72,10 +75,11 @@ class CameraService:
         except Exception as e:
             logger.error(f"Failed to start camera service: {e}")
             if self.mqtt:
-                self.mqtt.publish_health(False, str(e))
+                # Centralized client will publish health=false automatically on error
+                await self.mqtt.shutdown()
             raise
 
-    def stop(self) -> None:
+    async def stop(self) -> None:
         """Stop service and cleanup resources."""
         self.running = False
 
@@ -83,8 +87,7 @@ class CameraService:
             self.camera.close()
 
         if self.mqtt:
-            self.mqtt.publish_health(False, "stopped")
-            self.mqtt.disconnect()
+            await self.mqtt.shutdown()
 
         logger.info("Camera service stopped")
 
@@ -129,7 +132,7 @@ class CameraService:
 
                 # Publish to MQTT at reduced rate
                 if frame_counter % mqtt_frame_interval == 0:
-                    self.mqtt.publish_frame(
+                    await self._publish_frame(
                         jpeg_data,
                         self.cfg.camera.width,
                         self.cfg.camera.height,
@@ -157,8 +160,40 @@ class CameraService:
 
             except Exception as e:
                 logger.error(f"Error in capture loop: {e}")
-                self.mqtt.publish_health(False, str(e))
+                # Centralized client will handle health publishing on errors
                 await asyncio.sleep(1.0)
+
+    async def _publish_frame(
+        self,
+        jpeg_data: bytes,
+        width: int,
+        height: int,
+        quality: int,
+        mqtt_rate: int,
+        backend: str | None,
+        consecutive_failures: int,
+    ) -> None:
+        """Publish frame to MQTT (base64 encoded)."""
+        frame_b64 = base64.b64encode(jpeg_data).decode("ascii")
+
+        frame = CameraFrame(
+            frame_data=frame_b64,
+            format="jpeg",
+            width=width,
+            height=height,
+            frame_number=self.frame_count,
+            fps=mqtt_rate if mqtt_rate > 0 else None,
+        )
+
+        try:
+            await self.mqtt.publish_event(
+                topic=self.cfg.mqtt.frame_topic,
+                event_type="camera.frame",
+                data=frame,
+                qos=0,
+            )
+        except Exception as e:
+            logger.error(f"Failed to publish frame: {e}")
 
     def _encode_jpeg(self, frame_rgb, quality: int) -> bytes:
         """Encode RGB frame as JPEG bytes."""
@@ -176,7 +211,7 @@ class CameraService:
 
             self.camera.open()
             logger.info(f"Camera reconnected with backend: {self.camera.backend}")
-            self.mqtt.publish_health(True, "reconnected")
+            # Centralized client will handle health updates automatically
         except Exception as e:
             logger.error(f"Camera reconnection failed: {e}")
-            self.mqtt.publish_health(False, f"reconnection_failed: {e}")
+            # Errors will be reflected in health status automatically

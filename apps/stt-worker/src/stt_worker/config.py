@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from typing import Set
 
+from tars.contracts.v1.stt import TOPIC_STT_AUDIO_FFT  # type: ignore[import]
+
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 MQTT_URL = os.getenv("MQTT_URL", "mqtt://tars:pass@127.0.0.1:1883")
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
@@ -59,7 +61,7 @@ PARTIAL_ALPHA_RATIO_MIN = float(os.getenv("PARTIAL_ALPHA_RATIO_MIN", "0.5"))
 TAIL_WINDOW_SEC = float(os.getenv("TAIL_WINDOW_SEC", "6.0"))
 
 FFT_PUBLISH = int(os.getenv("FFT_PUBLISH", "1"))
-FFT_TOPIC = os.getenv("FFT_TOPIC", "stt/audio_fft")
+FFT_TOPIC = os.getenv("FFT_TOPIC", TOPIC_STT_AUDIO_FFT)
 FFT_RATE_HZ = float(os.getenv("FFT_RATE_HZ", "12"))
 FFT_BINS = int(os.getenv("FFT_BINS", "64"))
 FFT_LOG_SCALE = int(os.getenv("FFT_LOG_SCALE", "1"))

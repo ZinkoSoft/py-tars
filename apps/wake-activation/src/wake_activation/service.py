@@ -33,7 +33,7 @@ except ImportError:
                 await asyncio.gather(*self._tasks, return_exceptions=True)
 
 
-import asyncio_mqtt as mqtt
+from tars.adapters.mqtt_client import MQTTClient  # type: ignore[import]
 import orjson
 
 from .audio import AudioFanoutClient
@@ -114,24 +114,25 @@ class WakeActivationService:
             level=log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
         )
 
-        host, port, username, password = self._parse_mqtt_url(self.cfg.mqtt_url)
-        self.log.info("Connecting to MQTT broker %s:%s", host, port)
+        mqtt_client = MQTTClient(self.cfg.mqtt_url, "wake-activation", enable_health=True)
+        self.log.info("Connecting to MQTT %s", self.cfg.mqtt_url)
+        await mqtt_client.connect()
 
-        async with mqtt.Client(
-            hostname=host, port=port, username=username, password=password
-        ) as client:
+        try:
             # Wait for STT health before starting if enabled
             if self.cfg.wait_for_stt_health:
-                await self._wait_for_stt_health(client)
+                await self._wait_for_stt_health(mqtt_client)
 
-            await self._publish_health(client)
+            await self._publish_health(mqtt_client)
             async with TaskGroup() as tg:
-                tg.create_task(self._health_loop(client))
-                tg.create_task(self._tts_status_loop(client))
-                tg.create_task(self._stt_final_loop(client))
-                tg.create_task(self._inference_loop(client))
+                tg.create_task(self._health_loop(mqtt_client))
+                tg.create_task(self._tts_status_loop(mqtt_client))
+                tg.create_task(self._stt_final_loop(mqtt_client))
+                tg.create_task(self._inference_loop(mqtt_client))
                 await self._stop_event.wait()
                 self.log.info("Stop signal received; shutting down wake activation service")
+        finally:
+            await mqtt_client.shutdown()
 
     async def stop(self) -> None:
         """Request cooperative shutdown."""
@@ -140,7 +141,7 @@ class WakeActivationService:
         await self._cancel_idle_timeout()
         await self._cancel_interrupt_timer()
 
-    async def _health_loop(self, client: mqtt.Client) -> None:
+    async def _health_loop(self, client: MQTTClient) -> None:
         interval = max(1.0, self.cfg.health_interval_sec)
         self.log.info("Starting health heartbeat every %.1fs", interval)
         try:
@@ -154,40 +155,48 @@ class WakeActivationService:
             self.log.exception("Health loop terminated unexpectedly")
             raise
 
-    async def _publish_health(self, client: mqtt.Client) -> None:
-        payload = HealthPayload(ts=time.time()).model_dump()
-        await client.publish(self.cfg.health_topic, orjson.dumps(payload), qos=1, retain=True)
-        self.log.debug("Published health heartbeat: %s", payload)
+    async def _publish_health(self, client: MQTTClient) -> None:
+        payload = HealthPayload(ts=time.time())
+        await client.publish_event(
+            topic=self.cfg.health_topic,
+            event_type="wake.health",
+            data=payload.model_dump(),
+            qos=1,
+            retain=True
+        )
+        self.log.debug("Published health heartbeat: %s", payload.model_dump())
 
-    async def _tts_status_loop(self, client: mqtt.Client) -> None:
+    async def _tts_status_loop(self, client: MQTTClient) -> None:
         topic = self.cfg.tts_status_topic
-        async with client.filtered_messages(topic) as messages:
-            await client.subscribe(topic)
-            async for msg in messages:
-                if self._stop_event.is_set():
-                    break
-                try:
-                    payload = orjson.loads(msg.payload)
-                except Exception:
-                    self.log.warning("Invalid TTS status payload: %r", msg.payload)
-                    continue
-                await self._handle_tts_status(payload)
 
-    async def _stt_final_loop(self, client: mqtt.Client) -> None:
+        async def _handler(payload: bytes) -> None:
+            if self._stop_event.is_set():
+                return
+            try:
+                data = orjson.loads(payload)
+            except Exception:
+                self.log.warning("Invalid TTS status payload")
+                return
+            await self._handle_tts_status(data)
+
+        await client.subscribe(topic, _handler)
+
+    async def _stt_final_loop(self, client: MQTTClient) -> None:
         topic = self.cfg.stt_final_topic
-        async with client.filtered_messages(topic) as messages:
-            await client.subscribe(topic)
-            async for msg in messages:
-                if self._stop_event.is_set():
-                    break
-                try:
-                    payload = orjson.loads(msg.payload)
-                except Exception:
-                    self.log.debug("Invalid STT payload: %r", msg.payload)
-                    continue
-                await self._handle_stt_final(client, payload)
 
-    async def _inference_loop(self, client: mqtt.Client) -> None:
+        async def _handler(payload: bytes) -> None:
+            if self._stop_event.is_set():
+                return
+            try:
+                data = orjson.loads(payload)
+            except Exception:
+                self.log.debug("Invalid STT payload")
+                return
+            await self._handle_stt_final(client, data)
+
+        await client.subscribe(topic, _handler)
+
+    async def _inference_loop(self, client: MQTTClient) -> None:
         """Consume audio frames and publish wake events when detected."""
 
         try:
@@ -225,16 +234,31 @@ class WakeActivationService:
             await audio_client.close()
             await self._cancel_idle_timeout()
 
-    async def publish_wake_event(self, client: mqtt.Client, event: WakeEvent) -> None:
-        await client.publish(self.cfg.wake_event_topic, orjson.dumps(event.model_dump()), qos=1)
+    async def publish_wake_event(self, client: MQTTClient, event: WakeEvent) -> None:
+        await client.publish_event(
+            topic=self.cfg.wake_event_topic,
+            event_type="wake.event",
+            data=event.model_dump(),
+            qos=1
+        )
         self.log.info("Published wake event: %s", event.model_dump())
 
-    async def send_mic_command(self, client: mqtt.Client, command: MicCommand) -> None:
-        await client.publish(self.cfg.mic_control_topic, orjson.dumps(command.model_dump()), qos=1)
+    async def send_mic_command(self, client: MQTTClient, command: MicCommand) -> None:
+        await client.publish_event(
+            topic=self.cfg.mic_control_topic,
+            event_type="mic.control",
+            data=command.model_dump(),
+            qos=1
+        )
         self.log.info("Published mic command: %s", command.model_dump())
 
-    async def send_tts_command(self, client: mqtt.Client, command: TtsControl) -> None:
-        await client.publish(self.cfg.tts_control_topic, orjson.dumps(command.model_dump()), qos=1)
+    async def send_tts_command(self, client: MQTTClient, command: TtsControl) -> None:
+        await client.publish_event(
+            topic=self.cfg.tts_control_topic,
+            event_type="tts.control",
+            data=command.model_dump(),
+            qos=1
+        )
         self.log.info("Published TTS control: %s", command.model_dump())
 
     def _parse_mqtt_url(self, url: str) -> tuple[str, int, str | None, str | None]:
@@ -243,7 +267,7 @@ class WakeActivationService:
         port = parsed.port or 1883
         return host, port, parsed.username, parsed.password
 
-    async def _handle_detection(self, client: mqtt.Client, result: DetectionResult) -> None:
+    async def _handle_detection(self, client: MQTTClient, result: DetectionResult) -> None:
         confidence = max(0.0, min(result.score, 1.0))
         session_id = self._next_session_id()
         if self._tts_state == "speaking":
@@ -253,7 +277,7 @@ class WakeActivationService:
 
     async def _handle_standard_wake(
         self,
-        client: mqtt.Client,
+        client: MQTTClient,
         result: DetectionResult,
         confidence: float,
         session_id: int,
@@ -283,7 +307,7 @@ class WakeActivationService:
 
     async def _handle_interrupt_detection(
         self,
-        client: mqtt.Client,
+        client: MQTTClient,
         result: DetectionResult,
         confidence: float,
         session_id: int,
@@ -347,7 +371,7 @@ class WakeActivationService:
             self._active_interrupt = None
             await self._cancel_interrupt_timer()
 
-    async def _handle_stt_final(self, client: mqtt.Client, payload: dict[str, object]) -> None:
+    async def _handle_stt_final(self, client: MQTTClient, payload: dict[str, object]) -> None:
         if self._active_interrupt is None:
             return
         if payload.get("is_final") is False:
@@ -363,7 +387,7 @@ class WakeActivationService:
         else:
             await self._resolve_interrupt_with_speech()
 
-    async def _handle_interrupt_cancel(self, client: mqtt.Client, phrase: str) -> None:
+    async def _handle_interrupt_cancel(self, client: MQTTClient, phrase: str) -> None:
         context = self._active_interrupt
         if context is None:
             return
@@ -394,7 +418,7 @@ class WakeActivationService:
         self._tts_state = "paused"
         self._tts_utt_id = None
 
-    async def _publish_error_event(self, client: mqtt.Client, cause: str) -> None:
+    async def _publish_error_event(self, client: MQTTClient, cause: str) -> None:
         event = WakeEvent(
             type=WakeEventType.ERROR, confidence=None, energy=None, cause=cause, ts=time.monotonic()
         )
@@ -429,13 +453,13 @@ class WakeActivationService:
         self._session_counter += 1
         return self._session_counter
 
-    async def _schedule_idle_timeout(self, client: mqtt.Client, session_id: int) -> None:
+    async def _schedule_idle_timeout(self, client: MQTTClient, session_id: int) -> None:
         await self._cancel_idle_timeout()
         if self.cfg.idle_timeout_sec <= 0:
             return
         self._idle_timeout_task = asyncio.create_task(self._idle_timeout_flow(client, session_id))
 
-    async def _idle_timeout_flow(self, client: mqtt.Client, session_id: int) -> None:
+    async def _idle_timeout_flow(self, client: MQTTClient, session_id: int) -> None:
         try:
             await asyncio.sleep(self.cfg.idle_timeout_sec)
         except asyncio.CancelledError:
@@ -482,7 +506,7 @@ class WakeActivationService:
                 await self._idle_timeout_task
         self._idle_timeout_task = None
 
-    async def _start_interrupt_timer(self, client: mqtt.Client, context: InterruptContext) -> None:
+    async def _start_interrupt_timer(self, client: MQTTClient, context: InterruptContext) -> None:
         await self._cancel_interrupt_timer()
         if self.cfg.interrupt_window_sec <= 0:
             return
@@ -495,7 +519,7 @@ class WakeActivationService:
                 await self._interrupt_task
         self._interrupt_task = None
 
-    async def _interrupt_timeout_flow(self, client: mqtt.Client, context: InterruptContext) -> None:
+    async def _interrupt_timeout_flow(self, client: MQTTClient, context: InterruptContext) -> None:
         delay = max(0.0, context.deadline - time.monotonic())
         try:
             await asyncio.sleep(delay)
@@ -535,54 +559,46 @@ class WakeActivationService:
             message = f"{event} {fields}"
         self.log.info(message)
 
-    async def _wait_for_stt_health(self, client: mqtt.Client) -> None:
+    async def _wait_for_stt_health(self, client: MQTTClient) -> None:
         """Wait for STT service to report healthy status before starting audio processing."""
         self.log.info("Waiting for STT service health on topic '%s'...", self.cfg.stt_health_topic)
 
-        timeout_task = asyncio.create_task(asyncio.sleep(self.cfg.stt_health_timeout_sec))
-        health_received = False
+        # Create a future to wait for health message
+        health_future: asyncio.Future[bool] = asyncio.Future()
 
+        async def health_handler(payload: bytes) -> None:
+            """Handler for STT health messages."""
+            try:
+                envelope = orjson.loads(payload)
+                # Check both direct format and nested data format
+                health_data = envelope.get("data", envelope)
+                if health_data.get("ok") is True:
+                    self.log.info(
+                        "✅ STT service is healthy, proceeding with wake activation startup"
+                    )
+                    if not health_future.done():
+                        health_future.set_result(True)
+                else:
+                    error = (
+                        health_data.get("err")
+                        or health_data.get("event")
+                        or "unknown error"
+                    )
+                    self.log.warning("STT service reports unhealthy: %s", error)
+            except Exception as exc:
+                self.log.debug("Invalid STT health payload: %s (%s)", payload, exc)
+
+        # Subscribe to STT health topic with handler
+        await client.subscribe(self.cfg.stt_health_topic, health_handler)
+
+        # Wait for health message with timeout
         try:
-            async with client.filtered_messages(self.cfg.stt_health_topic) as messages:
-                await client.subscribe(self.cfg.stt_health_topic)
-
-                async for msg in messages:
-                    if timeout_task.done():
-                        break
-
-                    try:
-                        payload = orjson.loads(msg.payload)
-                        # Check both direct format and nested data format
-                        health_data = payload.get("data", payload)
-                        if health_data.get("ok") is True:
-                            self.log.info(
-                                "✅ STT service is healthy, proceeding with wake activation startup"
-                            )
-                            health_received = True
-                            break
-                        else:
-                            error = (
-                                health_data.get("err")
-                                or health_data.get("event")
-                                or "unknown error"
-                            )
-                            self.log.warning("STT service reports unhealthy: %s", error)
-                    except Exception as exc:
-                        self.log.debug("Invalid STT health payload: %s (%s)", msg.payload, exc)
-
-                    # Check if timeout occurred
-                    if timeout_task.done():
-                        break
-
-        except TimeoutError:
-            pass
-        finally:
-            if not timeout_task.done():
-                timeout_task.cancel()
-                try:
-                    await timeout_task
-                except asyncio.CancelledError:
-                    pass
+            health_received = await asyncio.wait_for(
+                health_future,
+                timeout=self.cfg.stt_health_timeout_sec
+            )
+        except asyncio.TimeoutError:
+            health_received = False
 
         if not health_received:
             self.log.warning(

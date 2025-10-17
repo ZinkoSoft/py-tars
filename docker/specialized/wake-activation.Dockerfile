@@ -17,12 +17,18 @@ RUN apt-get update \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Install tars-core first (required for contracts)
+COPY packages/tars-core/pyproject.toml packages/tars-core/README.md /tmp/tars-core/
+COPY packages/tars-core/src /tmp/tars-core/src
+RUN pip install --upgrade pip && \
+    pip install /tmp/tars-core && \
+    rm -rf /tmp/tars-core
+
 # Install dependencies ONLY (don't install the package itself)
 COPY apps/wake-activation/pyproject.toml ./pyproject.toml
 
 # Install base dependencies
-RUN pip install --upgrade pip \
-    && pip install --only-binary=:all: "speexdsp-ns==0.1.2" \
+RUN pip install --only-binary=:all: "speexdsp-ns==0.1.2" \
     && python -c "import tomllib; data = tomllib.load(open('pyproject.toml','rb')); base_deps = data['project']['dependencies']; opt_deps = data['project'].get('optional-dependencies', {}).get('openwakeword', []); all_deps = base_deps + opt_deps; print('\\n'.join(all_deps))" > /tmp/requirements.txt \
     && pip install -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt

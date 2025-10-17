@@ -33,8 +33,7 @@ COPY ${SERVICE_PATH}/src ./src
 COPY --from=frontend-builder /workspace/frontend/dist ./frontend/dist
 
 # Install the package
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir -e .
 
 ENV MQTT_URL="mqtt://tars:pass@127.0.0.1:1883"
 

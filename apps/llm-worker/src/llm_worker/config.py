@@ -2,6 +2,22 @@ from __future__ import annotations
 
 import os
 
+from tars.contracts.v1 import (  # type: ignore[import]
+    TOPIC_CHARACTER_GET,
+    TOPIC_CHARACTER_RESULT,
+    TOPIC_LLM_CANCEL,
+    TOPIC_LLM_REQUEST,
+    TOPIC_LLM_RESPONSE,
+    TOPIC_LLM_STREAM,
+    TOPIC_LLM_TOOLS_REGISTRY,
+    TOPIC_LLM_TOOL_CALL_REQUEST,
+    TOPIC_LLM_TOOL_CALL_RESULT,
+    TOPIC_MEMORY_QUERY,
+    TOPIC_MEMORY_RESULTS,
+    TOPIC_SYSTEM_CHARACTER_CURRENT,
+    TOPIC_TTS_SAY,
+)
+
 
 def env_str(key: str, default: str | None = None) -> str:
     v = os.getenv(key, default if default is not None else "")
@@ -75,28 +91,30 @@ RAG_STRATEGY = env_str("RAG_STRATEGY", "hybrid")  # "hybrid", "recent", "similar
 RAG_DYNAMIC_PROMPTS = env_bool("RAG_DYNAMIC_PROMPTS", True)  # Enable token-aware prompt building
 RAG_CACHE_TTL = env_int("RAG_CACHE_TTL", 300)  # Cache TTL in seconds (default 5 minutes)
 
-# Topics
-TOPIC_LLM_REQUEST = env_str("TOPIC_LLM_REQUEST", "llm/request")
-TOPIC_LLM_RESPONSE = env_str("TOPIC_LLM_RESPONSE", "llm/response")
-TOPIC_LLM_STREAM = env_str("TOPIC_LLM_STREAM", "llm/stream")
-TOPIC_LLM_CANCEL = env_str("TOPIC_LLM_CANCEL", "llm/cancel")
+# Topics - use constants from tars-core (re-export for backward compatibility)
+# These can still be overridden via environment if needed, but default to contract constants
+TOPIC_LLM_REQUEST = TOPIC_LLM_REQUEST
+TOPIC_LLM_RESPONSE = TOPIC_LLM_RESPONSE
+TOPIC_LLM_STREAM = TOPIC_LLM_STREAM
+TOPIC_LLM_CANCEL = TOPIC_LLM_CANCEL
 TOPIC_HEALTH = env_str("TOPIC_HEALTH", "system/health/llm")
-TOPIC_MEMORY_QUERY = env_str("TOPIC_MEMORY_QUERY", "memory/query")
-TOPIC_MEMORY_RESULTS = env_str("TOPIC_MEMORY_RESULTS", "memory/results")
+TOPIC_MEMORY_QUERY = TOPIC_MEMORY_QUERY
+TOPIC_MEMORY_RESULTS = TOPIC_MEMORY_RESULTS
 
 # Character (persona) topic
-TOPIC_CHARACTER_CURRENT = env_str("TOPIC_CHARACTER_CURRENT", "system/character/current")
-TOPIC_CHARACTER_GET = env_str("TOPIC_CHARACTER_GET", "character/get")
-TOPIC_CHARACTER_RESULT = env_str("TOPIC_CHARACTER_RESULT", "character/result")
+TOPIC_CHARACTER_CURRENT = TOPIC_SYSTEM_CHARACTER_CURRENT
+TOPIC_CHARACTER_GET = TOPIC_CHARACTER_GET
+TOPIC_CHARACTER_RESULT = TOPIC_CHARACTER_RESULT
 
 # Tool calling
 TOOL_CALLING_ENABLED = env_bool("TOOL_CALLING_ENABLED", False)
-TOPIC_TOOLS_REGISTRY = env_str("TOPIC_TOOLS_REGISTRY", "llm/tools/registry")
-TOPIC_TOOL_CALL_RESULT = env_str("TOPIC_TOOL_CALL_RESULT", "llm/tools/result")
+TOPIC_TOOLS_REGISTRY = TOPIC_LLM_TOOLS_REGISTRY
+TOPIC_TOOL_CALL_REQUEST = TOPIC_LLM_TOOL_CALL_REQUEST
+TOPIC_TOOL_CALL_RESULT = TOPIC_LLM_TOOL_CALL_RESULT
 
 # Optional: forward streaming chunks to TTS as sentences (now disabled; router bridges LLM->TTS)
 LLM_TTS_STREAM = env_bool("LLM_TTS_STREAM", False)
-TOPIC_TTS_SAY = env_str("TOPIC_TTS_SAY", "tts/say")
+TOPIC_TTS_SAY = TOPIC_TTS_SAY
 STREAM_MIN_CHARS = env_int("STREAM_MIN_CHARS", 60)
 STREAM_MAX_CHARS = env_int("STREAM_MAX_CHARS", 240)
 STREAM_BOUNDARY_CHARS = env_str("STREAM_BOUNDARY_CHARS", ".!?;:")

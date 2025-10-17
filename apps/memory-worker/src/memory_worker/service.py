@@ -7,12 +7,13 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-import asyncio_mqtt as mqtt
+import asyncio_mqtt as mqtt  # For type hints only
 import numpy as np
 import orjson as json
 from pydantic import ValidationError
 from sentence_transformers import SentenceTransformer
 
+from tars.adapters.mqtt_client import MQTTClient
 from .config import (
     CHARACTER_DIR,
     CHARACTER_NAME,
@@ -34,7 +35,6 @@ from .config import (
     TOP_K,
 )
 from .hyperdb import HyperConfig, HyperDB
-from .mqtt_client import MemoryMQTTClient
 
 from tars.contracts.envelope import Envelope
 from tars.contracts.registry import register
@@ -146,7 +146,13 @@ class MemoryService:
         )
         self._load_or_initialize_db()
         self.character = self._load_character()
-        self.mqtt_client = MemoryMQTTClient(MQTT_URL, source_name=SOURCE_NAME)
+        self.mqtt_client = MQTTClient(
+            MQTT_URL,
+            client_id="tars-memory",
+            source_name=SOURCE_NAME,
+            enable_health=True,
+            enable_heartbeat=True,
+        )
 
     def _register_topics(self) -> None:
         register(EVENT_TYPE_MEMORY_QUERY, TOPIC_QUERY)
@@ -205,46 +211,99 @@ class MemoryService:
             logger.warning("Could not reconcile embedding dimensions", exc_info=True)
 
     async def run(self) -> None:
+        """Main service loop with subscription-based message handling."""
         try:
-            async with await self.mqtt_client.connect() as client:
-                await self._publish_health(client, ok=True, event="ready", retain=True)
-                await self._publish_character_current(client)
+            # Connect to MQTT broker
+            await self.mqtt_client.connect()
+            logger.info("Connected to MQTT broker")
 
-                # Subscribe to all topics
-                topics = [
-                    TOPIC_STT_FINAL,
-                    TOPIC_TTS_SAY,
-                    TOPIC_QUERY,
-                    TOPIC_CHAR_GET,
-                    TOPIC_CHAR_UPDATE,
-                ]
-                await self.mqtt_client.subscribe(client, topics)
+            # Publish initial health and character state
+            await self._publish_health_initial()
+            await self._publish_character_current_initial()
 
-                async with client.messages() as stream:
-                    async for message in stream:
-                        topic = str(getattr(message, "topic", ""))
-                        payload = message.payload
-                        try:
-                            if topic == TOPIC_QUERY:
-                                query, correlate = self._decode_memory_query(payload)
-                                if query is None or not query.text.strip():
-                                    logger.info("Ignored empty memory/query message")
-                                    continue
-                                await self._handle_memory_query(client, query, correlate)
-                            elif topic == TOPIC_CHAR_GET:
-                                request, correlate = self._decode_character_get(payload)
-                                await self._handle_char_get(client, request, correlate)
-                            elif topic == TOPIC_CHAR_UPDATE:
-                                await self._handle_character_update(client, payload)
-                            elif topic in (TOPIC_STT_FINAL, TOPIC_TTS_SAY):
-                                await self._ingest_document(topic, payload)
-                            else:
-                                logger.debug("Unhandled topic: %s", topic)
-                        except Exception as exc:  # pragma: no cover - defensive
-                            logger.exception("Error handling message on topic=%s", topic)
-                            await self._publish_health(client, ok=False, err=str(exc), retain=True)
+            # Subscribe to all topics with individual handlers
+            await self.mqtt_client.subscribe(TOPIC_QUERY, self._handle_query_message)
+            await self.mqtt_client.subscribe(TOPIC_CHAR_GET, self._handle_char_get_message)
+            await self.mqtt_client.subscribe(TOPIC_CHAR_UPDATE, self._handle_char_update_message)
+            await self.mqtt_client.subscribe(TOPIC_STT_FINAL, self._handle_ingest_message)
+            await self.mqtt_client.subscribe(TOPIC_TTS_SAY, self._handle_ingest_message)
+
+            logger.info("Memory worker ready - processing messages via subscription handlers")
+
+            # Keep service running (centralized client handles message dispatch)
+            await asyncio.Event().wait()
+
         except Exception as exc:  # pragma: no cover - network layer
-            logger.info("MQTT disconnected or error: %s; shutting down gracefully", exc)
+            logger.error("Memory worker error: %s", exc, exc_info=True)
+        finally:
+            await self.mqtt_client.shutdown()
+            logger.info("Memory worker shutdown complete")
+
+    # --- Initial publish helpers ---
+
+    async def _publish_health_initial(self) -> None:
+        """Publish initial health status on startup."""
+        await self.mqtt_client.publish_event(
+            topic=TOPIC_HEALTH,
+            event_type=EVENT_TYPE_MEMORY_HEALTH,
+            data=HealthPing(ok=True, event="ready"),
+            qos=1,
+            retain=True,
+        )
+
+    async def _publish_character_current_initial(self) -> None:
+        """Publish initial character state on startup."""
+        await self.mqtt_client.publish_event(
+            topic=TOPIC_CHAR_CURRENT,
+            event_type=EVENT_TYPE_CHARACTER_CURRENT,
+            data=self.character,
+            correlation_id=self.character.message_id,
+            qos=1,
+            retain=True,
+        )
+
+    # --- Subscription Handlers ---
+
+    async def _handle_query_message(self, payload: bytes) -> None:
+        """Handle memory/query subscription message."""
+        try:
+            query, correlate = self._decode_memory_query(payload)
+            if query is None or not query.text.strip():
+                logger.info("Ignored empty memory/query message")
+                return
+            await self._handle_memory_query(self.mqtt_client.client, query, correlate)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("Error handling memory/query")
+            await self._publish_health(self.mqtt_client.client, ok=False, err=str(exc), retain=True)
+
+    async def _handle_char_get_message(self, payload: bytes) -> None:
+        """Handle character/get subscription message."""
+        try:
+            request, correlate = self._decode_character_get(payload)
+            await self._handle_char_get(self.mqtt_client.client, request, correlate)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("Error handling character/get")
+            await self._publish_health(self.mqtt_client.client, ok=False, err=str(exc), retain=True)
+
+    async def _handle_char_update_message(self, payload: bytes) -> None:
+        """Handle character/update subscription message."""
+        try:
+            await self._handle_character_update(self.mqtt_client.client, payload)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("Error handling character/update")
+            await self._publish_health(self.mqtt_client.client, ok=False, err=str(exc), retain=True)
+
+    async def _handle_ingest_message(self, payload: bytes) -> None:
+        """Handle stt/final or tts/say subscription message."""
+        try:
+            # Determine topic from payload (we can infer from structure or use a wrapper)
+            # For now, let's just ingest both types similarly
+            await self._ingest_document("ingestion", payload)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("Error handling ingestion")
+            await self._publish_health(self.mqtt_client.client, ok=False, err=str(exc), retain=True)
+
+    # --- Original handler methods (updated signatures) ---
 
     async def _publish_health(
         self,
@@ -257,22 +316,20 @@ class MemoryService:
     ) -> None:
         payload = HealthPing(ok=ok, event=event, err=err)
         await self.mqtt_client.publish_event(
-            client,
-            event_type=EVENT_TYPE_MEMORY_HEALTH,
             topic=TOPIC_HEALTH,
-            payload=payload,
-            correlate=None,
+            event_type=EVENT_TYPE_MEMORY_HEALTH,
+            data=payload,
+            correlation_id=None,
             qos=1,
             retain=retain,
         )
 
     async def _publish_character_current(self, client: mqtt.Client) -> None:
         await self.mqtt_client.publish_event(
-            client,
-            event_type=EVENT_TYPE_CHARACTER_CURRENT,
             topic=TOPIC_CHAR_CURRENT,
-            payload=self.character,
-            correlate=self.character.message_id,
+            event_type=EVENT_TYPE_CHARACTER_CURRENT,
+            data=self.character,
+            correlation_id=self.character.message_id,
             qos=1,
             retain=True,
         )
@@ -560,11 +617,10 @@ class MemoryService:
         )
 
         await self.mqtt_client.publish_event(
-            client,
-            event_type=EVENT_TYPE_MEMORY_RESULTS,
             topic=TOPIC_RESULTS,
-            payload=payload,
-            correlate=correlate or query.message_id,
+            event_type=EVENT_TYPE_MEMORY_RESULTS,
+            data=payload,
+            correlation_id=correlate or query.message_id,
             qos=1,
             retain=False,
         )
@@ -578,11 +634,10 @@ class MemoryService:
         snapshot_dict = self.character.model_dump()
         if not request.section:
             await self.mqtt_client.publish_event(
-                client,
-                event_type=EVENT_TYPE_CHARACTER_RESULT,
                 topic=TOPIC_CHAR_RESULT,
-                payload=self.character,
-                correlate=correlate or request.message_id,
+                event_type=EVENT_TYPE_CHARACTER_RESULT,
+                data=self.character,
+                correlation_id=correlate or request.message_id,
                 qos=0,
                 retain=False,
             )
@@ -597,11 +652,10 @@ class MemoryService:
             }
         payload = CharacterSection(section=section, value=value)
         await self.mqtt_client.publish_event(
-            client,
-            event_type=EVENT_TYPE_CHARACTER_RESULT,
             topic=TOPIC_CHAR_RESULT,
-            payload=payload,
-            correlate=correlate or request.message_id,
+            event_type=EVENT_TYPE_CHARACTER_RESULT,
+            data=payload,
+            correlation_id=correlate or request.message_id,
             qos=0,
             retain=False,
         )

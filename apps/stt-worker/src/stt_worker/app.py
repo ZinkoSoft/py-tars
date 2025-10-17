@@ -50,12 +50,11 @@ from .config import (
     WAKE_EVENT_FALLBACK_DELAY_MS,
     WAKE_EVENT_FALLBACK_TTL_MS,
 )
-from .mqtt_utils import MQTTClientWrapper
 from .fft_ws import FFTWebSocketServer
 from .suppression import SuppressionEngine, SuppressionState
 from .transcriber import SpeechTranscriber
 from .vad import VADProcessor
-from tars.adapters.mqtt_asyncio import AsyncioMQTTPublisher  # type: ignore[import]
+from tars.adapters.mqtt_client import MQTTClient  # type: ignore[import]
 from tars.contracts.envelope import Envelope  # type: ignore[import]
 from tars.contracts.v1 import (  # type: ignore[import]
     EVENT_TYPE_SAY,
@@ -64,6 +63,10 @@ from tars.contracts.v1 import (  # type: ignore[import]
     EVENT_TYPE_TTS_STATUS,
     EVENT_TYPE_WAKE_EVENT,
     EVENT_TYPE_WAKE_MIC,
+    TOPIC_TTS_SAY,
+    TOPIC_TTS_STATUS,
+    TOPIC_WAKE_EVENT,
+    TOPIC_WAKE_MIC,
     FinalTranscript,
     HealthPing,
     TtsSay,
@@ -76,7 +79,6 @@ from tars.domain.stt import (  # type: ignore[import]
     STTServiceConfig,
     PartialSettings,
 )
-from tars.runtime.publisher import publish_event  # type: ignore[import]
 
 logging.basicConfig(
     level=LOG_LEVEL,
@@ -94,7 +96,7 @@ class STTWorker:
         self.audio_capture = AudioCapture()
         self.transcriber = SpeechTranscriber()
         self.vad_processor: VADProcessor | None = None
-        self.mqtt = MQTTClientWrapper(MQTT_URL)
+        self.mqtt = MQTTClient(MQTT_URL, "tars-stt", enable_health=True, enable_heartbeat=True)
         self.state = SuppressionState()
         self.suppress_engine = SuppressionEngine(self.state)
         self.pending_tts = False
@@ -105,7 +107,6 @@ class STTWorker:
         self._wake_ttl_task: asyncio.Task | None = None
         self._wake_fallback_task: asyncio.Task | None = None
         self.audio_fanout: AudioFanoutPublisher | None = None
-        self._publisher: AsyncioMQTTPublisher | None = None
         self.service: STTService | None = None
         self._enable_partials = False
         self._resume_after_tts = False
@@ -121,14 +122,11 @@ class STTWorker:
             except Exception as exc:  # pragma: no cover - best effort
                 logger.warning("Could not save models to host: %s", exc)
         await self.mqtt.connect()
-        if not self.mqtt.client:
-            raise RuntimeError("MQTT client unavailable after connect")
-        self._publisher = AsyncioMQTTPublisher(self.mqtt.client)
         await self.publish_health(True, "STT service ready")
-        await self.mqtt.subscribe_stream("tts/status", self._handle_tts_status)
-        await self.mqtt.subscribe_stream("tts/say", self._handle_tts_say)
-        await self.mqtt.subscribe_stream("wake/mic", self._handle_wake_mic)
-        await self.mqtt.subscribe_stream("wake/event", self._handle_wake_event)
+        await self.mqtt.subscribe(TOPIC_TTS_STATUS, self._handle_tts_status)
+        await self.mqtt.subscribe(TOPIC_TTS_SAY, self._handle_tts_say)
+        await self.mqtt.subscribe(TOPIC_WAKE_MIC, self._handle_wake_mic)
+        await self.mqtt.subscribe(TOPIC_WAKE_EVENT, self._handle_wake_event)
         self.audio_fanout = AudioFanoutPublisher(
             AUDIO_FANOUT_PATH,
             target_sample_rate=AUDIO_FANOUT_RATE,
@@ -155,19 +153,21 @@ class STTWorker:
             self._fft_ws = None
 
     async def publish_health(self, ok: bool, message: str = "") -> None:
-        event_text = message or ("ready" if ok else "")
-        err_text = None if ok else (message or "error")
-        payload = HealthPing(ok=ok, event=event_text, err=err_text)
-        await self._publish_event(EVENT_TYPE_HEALTH_STT, payload, retain=True)
+        await self.mqtt.publish_health(ok=ok, event=message or ("ready" if ok else ""), err=None if ok else (message or "error"))
 
     async def publish_transcript(self, transcript: FinalTranscript) -> None:
-        message_id = await self._publish_event(EVENT_TYPE_STT_FINAL, transcript, qos=1)
+        envelope_id = await self.mqtt.publish_event(
+            topic="stt/final",  
+            event_type=EVENT_TYPE_STT_FINAL,
+            data=transcript.model_dump(),
+            qos=1
+        )
         text = transcript.text
         preview = text[:60] + ("..." if len(text) > 60 else "")
         logger.info(
             "Published final transcript: %s",
             preview,
-            extra={"message_id": message_id},
+            extra={"envelope_id": envelope_id},
         )
 
     async def _publish_event(
@@ -177,24 +177,21 @@ class STTWorker:
         *,
         qos: int = 1,
         retain: bool = False,
-    ) -> str | None:
-        publisher = self._publisher
-        if publisher is None:
-            logger.warning("MQTT publisher unavailable; dropping %s", event_type)
-            return None
+    ) -> str:
+        """Publish event using centralized MQTT client."""
         try:
-            return await publish_event(
-                publisher,
-                logger,
-                event_type,
-                data,
+            from tars.contracts.registry import resolve_topic
+            topic = resolve_topic(event_type)
+            return await self.mqtt.publish_event(
+                topic=topic,
+                event_type=event_type,
+                data=data.model_dump() if hasattr(data, "model_dump") else data,
                 qos=qos,
                 retain=retain,
-                source=SOURCE_NAME,
             )
         except Exception as exc:  # pragma: no cover - best effort logging
             logger.error("Failed to publish %s: %s", event_type, exc)
-            return None
+            return ""
 
     @staticmethod
     def _decode_event(
@@ -635,8 +632,7 @@ class STTWorker:
                 except Exception as exc:  # pragma: no cover - best effort cleanup
                     logger.debug("Error shutting down FFT websocket: %s", exc)
                 self._fft_ws = None
-            await self.mqtt.disconnect()
-            self._publisher = None
+            await self.mqtt.shutdown()
             self.service = None
 
     async def _partials_loop(self) -> None:

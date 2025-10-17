@@ -4,6 +4,7 @@ import uuid
 from pydantic import BaseModel, Field
 from typing import List, Literal
 
+# Event types (legacy - prefer topic constants)
 EVENT_TYPE_LLM_REQUEST = "llm.request"
 EVENT_TYPE_LLM_RESPONSE = "llm.response"
 EVENT_TYPE_LLM_STREAM = "llm.stream"
@@ -11,6 +12,15 @@ EVENT_TYPE_LLM_CANCEL = "llm.cancel"
 EVENT_TYPE_TOOLS_REGISTRY = "llm.tools.registry"
 EVENT_TYPE_TOOL_CALL_REQUEST = "llm.tool.call.request"
 EVENT_TYPE_TOOL_CALL_RESULT = "llm.tool.call.result"
+
+# MQTT Topic constants
+TOPIC_LLM_REQUEST = "llm/request"
+TOPIC_LLM_RESPONSE = "llm/response"
+TOPIC_LLM_STREAM = "llm/stream"
+TOPIC_LLM_CANCEL = "llm/cancel"
+TOPIC_LLM_TOOLS_REGISTRY = "llm/tools/registry"
+TOPIC_LLM_TOOL_CALL_REQUEST = "llm/tool.call.request"
+TOPIC_LLM_TOOL_CALL_RESULT = "llm/tool.call.result"
 
 
 class ConversationMessage(BaseModel):

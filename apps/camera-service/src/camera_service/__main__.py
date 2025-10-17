@@ -45,9 +45,14 @@ def main():
 
     service = CameraService(cfg)
 
+    async def shutdown():
+        """Async shutdown handler."""
+        logging.info("Shutting down camera service...")
+        await service.stop()
+
     def signal_handler(signum, frame):
-        logging.info(f"Received signal {signum}, shutting down...")
-        service.stop()
+        logging.info(f"Received signal {signum}, initiating shutdown...")
+        asyncio.create_task(shutdown())
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -56,8 +61,13 @@ def main():
         asyncio.run(service.start())
     except KeyboardInterrupt:
         pass
+    except Exception as e:
+        logging.error(f"Service error: {e}")
     finally:
-        service.stop()
+        # Final cleanup (synchronous fallback)
+        if service.camera:
+            service.camera.close()
+        logging.info("Camera service exited")
 
 
 if __name__ == "__main__":
