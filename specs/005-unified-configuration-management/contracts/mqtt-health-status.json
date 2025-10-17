@@ -1,0 +1,82 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ConfigHealthPayload",
+  "description": "MQTT payload for system/health/config-manager topic - retained health status",
+  "type": "object",
+  "required": ["ok", "database_status", "operational_mode", "config_epoch", "schema_version", "lkg_cache_valid", "litestream_status"],
+  "additionalProperties": false,
+  "properties": {
+    "ok": {
+      "type": "boolean",
+      "description": "Overall health status (false if database unhealthy or in fallback mode)"
+    },
+    "database_status": {
+      "type": "string",
+      "enum": ["healthy", "locked", "corrupted", "schema-mismatch"],
+      "description": "Current database health state"
+    },
+    "operational_mode": {
+      "type": "string",
+      "enum": ["normal", "read-only-fallback", "rebuilding"],
+      "description": "Current operational mode"
+    },
+    "config_epoch": {
+      "type": "string",
+      "description": "Current database epoch (UUID)",
+      "format": "uuid"
+    },
+    "schema_version": {
+      "type": "integer",
+      "description": "Current schema version number",
+      "minimum": 1
+    },
+    "lkg_cache_valid": {
+      "type": "boolean",
+      "description": "Whether LKG cache HMAC signature is valid"
+    },
+    "litestream_status": {
+      "type": "string",
+      "enum": ["healthy", "error", "disabled"],
+      "description": "Litestream backup status"
+    },
+    "last_backup": {
+      "type": ["string", "null"],
+      "description": "ISO 8601 timestamp of last successful backup",
+      "format": "date-time"
+    },
+    "event": {
+      "type": ["string", "null"],
+      "description": "Event description for state transitions"
+    },
+    "err": {
+      "type": ["string", "null"],
+      "description": "Error message if unhealthy"
+    }
+  },
+  "examples": [
+    {
+      "ok": true,
+      "database_status": "healthy",
+      "operational_mode": "normal",
+      "config_epoch": "550e8400-e29b-41d4-a716-446655440000",
+      "schema_version": 1,
+      "lkg_cache_valid": true,
+      "litestream_status": "healthy",
+      "last_backup": "2025-10-17T12:00:00Z",
+      "event": null,
+      "err": null
+    },
+    {
+      "ok": false,
+      "database_status": "corrupted",
+      "operational_mode": "read-only-fallback",
+      "config_epoch": "550e8400-e29b-41d4-a716-446655440000",
+      "schema_version": 1,
+      "lkg_cache_valid": true,
+      "litestream_status": "error",
+      "last_backup": "2025-10-17T11:55:00Z",
+      "event": "Database corruption detected, entered read-only fallback mode",
+      "err": "SQLite integrity check failed"
+    }
+  ]
+}

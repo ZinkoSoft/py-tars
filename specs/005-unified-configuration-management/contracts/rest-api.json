@@ -1,0 +1,388 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "TARS Configuration Management API",
+    "version": "1.0.0",
+    "description": "REST API for managing service configurations"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080/api/config",
+      "description": "Local development"
+    }
+  ],
+  "security": [
+    {
+      "ApiToken": []
+    }
+  ],
+  "paths": {
+    "/services": {
+      "get": {
+        "summary": "List all services with configurations",
+        "operationId": "listServices",
+        "responses": {
+          "200": {
+            "description": "List of services",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "services": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/services/{service}": {
+      "get": {
+        "summary": "Get configuration for a service",
+        "operationId": "getServiceConfig",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]*$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Service configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigReadResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Service not found"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update service configuration",
+        "operationId": "updateServiceConfig",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Configuration updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigUpdateResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permissions (requires config.write role)"
+          },
+          "409": {
+            "description": "Version conflict (optimistic lock)"
+          }
+        }
+      }
+    },
+    "/search": {
+      "post": {
+        "summary": "Search configuration items",
+        "operationId": "searchConfigs",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigSearchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Search results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigSearchResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Get configuration manager health status",
+        "operationId": "getHealth",
+        "responses": {
+          "200": {
+            "description": "Health status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigHealthPayload"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rebuild": {
+      "post": {
+        "summary": "Trigger database rebuild (requires REBUILD_TOKEN)",
+        "operationId": "triggerRebuild",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["token"],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "description": "REBUILD_TOKEN from .env for authorization"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Rebuild initiated"
+          },
+          "403": {
+            "description": "Invalid token or rebuild not allowed"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Token"
+      }
+    },
+    "schemas": {
+      "ConfigReadResponse": {
+        "type": "object",
+        "required": ["service", "config", "metadata"],
+        "properties": {
+          "service": {
+            "type": "string"
+          },
+          "config": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": "integer"
+              },
+              "updated_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "config_epoch": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          }
+        }
+      },
+      "ConfigUpdateRequest": {
+        "type": "object",
+        "required": ["service", "config", "version"],
+        "properties": {
+          "service": {
+            "type": "string"
+          },
+          "config": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "version": {
+            "type": "integer",
+            "description": "Current version for optimistic locking"
+          }
+        }
+      },
+      "ConfigUpdateResponse": {
+        "type": "object",
+        "required": ["success"],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "new_version": {
+            "type": ["integer", "null"]
+          },
+          "error": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "ConfigSearchRequest": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "default": ""
+          },
+          "service_filter": {
+            "type": ["string", "null"]
+          },
+          "complexity_filter": {
+            "type": ["string", "null"],
+            "enum": ["simple", "advanced"]
+          },
+          "type_filter": {
+            "type": ["string", "null"],
+            "enum": ["string", "integer", "float", "boolean", "enum", "path", "secret"]
+          }
+        }
+      },
+      "ConfigSearchResponse": {
+        "type": "object",
+        "required": ["results", "total"],
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigItem"
+            }
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
+      "ConfigItem": {
+        "type": "object",
+        "required": ["service", "key", "value_json", "type", "complexity", "description"],
+        "properties": {
+          "id": {
+            "type": ["integer", "null"]
+          },
+          "service": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "value_json": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["string", "integer", "float", "boolean", "enum", "path", "secret"]
+          },
+          "complexity": {
+            "type": "string",
+            "enum": ["simple", "advanced"]
+          },
+          "description": {
+            "type": "string"
+          },
+          "help_text": {
+            "type": "string"
+          },
+          "is_secret": {
+            "type": "boolean"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_by": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "ConfigHealthPayload": {
+        "type": "object",
+        "required": ["ok", "database_status", "operational_mode", "config_epoch", "schema_version", "lkg_cache_valid", "litestream_status"],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "database_status": {
+            "type": "string",
+            "enum": ["healthy", "locked", "corrupted", "schema-mismatch"]
+          },
+          "operational_mode": {
+            "type": "string",
+            "enum": ["normal", "read-only-fallback", "rebuilding"]
+          },
+          "config_epoch": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "schema_version": {
+            "type": "integer"
+          },
+          "lkg_cache_valid": {
+            "type": "boolean"
+          },
+          "litestream_status": {
+            "type": "string",
+            "enum": ["healthy", "error", "disabled"]
+          },
+          "last_backup": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "event": {
+            "type": ["string", "null"]
+          },
+          "err": {
+            "type": ["string", "null"]
+          }
+        }
+      }
+    }
+  }
+}
