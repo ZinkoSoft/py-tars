@@ -7,14 +7,20 @@ ARG SERVICE_PATH=.
 
 WORKDIR /app
 
+# Install tars-core first (required for contracts)
+COPY packages/tars-core/pyproject.toml packages/tars-core/README.md /tmp/tars-core/
+COPY packages/tars-core/src /tmp/tars-core/src
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir /tmp/tars-core && \
+    rm -rf /tmp/tars-core
+
 # Copy package configuration and source code
 COPY ${SERVICE_PATH}/pyproject.toml ./
 COPY ${SERVICE_PATH}/src ./src
 COPY ${SERVICE_PATH}/static ./static
 
 # Install the package
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir -e .
 
 ENV MQTT_URL="mqtt://tars:pass@127.0.0.1:1883"
 

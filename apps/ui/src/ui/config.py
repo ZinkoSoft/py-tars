@@ -7,6 +7,14 @@ import copy
 import os
 from typing import Any
 
+from tars.contracts.v1 import (  # type: ignore[import]
+    TOPIC_LLM_RESPONSE,
+    TOPIC_STT_AUDIO_FFT,
+    TOPIC_STT_FINAL,
+    TOPIC_STT_PARTIAL,
+    TOPIC_TTS_STATUS,
+)
+
 # Python 3.11 has tomllib in stdlib
 try:
     import tomllib  # type: ignore
@@ -31,11 +39,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "rotation": 0,
     },
     "topics": {
-        "audio": "stt/audio_fft",
-        "partial": "stt/partial",
-        "final": "stt/final",
-        "tts": "tts/status",
-        "llm_response": "llm/response",
+        "audio": TOPIC_STT_AUDIO_FFT,
+        "partial": TOPIC_STT_PARTIAL,
+        "final": TOPIC_STT_FINAL,
+        "tts": TOPIC_TTS_STATUS,
+        "llm_response": TOPIC_LLM_RESPONSE,
     },
     "fft_ws": {
         "enabled": True,

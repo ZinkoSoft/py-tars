@@ -3,6 +3,8 @@
 import os
 from dataclasses import dataclass
 
+from tars.contracts.v1 import TOPIC_CAMERA_FRAME  # type: ignore[import]
+
 
 @dataclass
 class CameraConfig:
@@ -63,7 +65,7 @@ def load_config() -> ServiceConfig:
 
     mqtt = MQTTConfig(
         url=os.getenv("MQTT_URL", "mqtt://tars:pass@127.0.0.1:1883"),
-        frame_topic=os.getenv("CAMERA_FRAME_TOPIC", "camera/frame"),
+        frame_topic=os.getenv("CAMERA_FRAME_TOPIC", TOPIC_CAMERA_FRAME),
         health_topic="system/health/camera",
     )
 

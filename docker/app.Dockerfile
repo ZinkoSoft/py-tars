@@ -4,7 +4,7 @@
 # Build args (set per-service in compose):
 #   - PY_VERSION   : Python version (default 3.11)
 #   - APP_PATH     : Path to the app (e.g., apps/router)
-#   - CONTRACTS_PATH: Path to contracts package (default packages/tars-contracts)
+#   - CONTRACTS_PATH: Path to contracts package (default packages/tars-core)
 #   - APP_MODULE   : Python module to run with `python -m` (e.g., tars_router.app_main)
 #   - APP_CMD      : Optional shell command to run instead of APP_MODULE (e.g., "uvicorn server:app --host 0.0.0.0 --port 5010")
 #
@@ -25,7 +25,7 @@ WORKDIR /app
 # ---------- Builder: build wheels for contracts + selected app ----------
 FROM base AS builder
 ARG APP_PATH
-ARG CONTRACTS_PATH=packages/tars-contracts
+ARG CONTRACTS_PATH=packages/tars-core
 RUN python -m pip install --upgrade pip build wheel
 # Copy only metadata first to leverage Docker layer cache
 COPY ${CONTRACTS_PATH}/pyproject.toml /src/contracts/pyproject.toml

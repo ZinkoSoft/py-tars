@@ -163,17 +163,31 @@ class RequestHandler:
         # Build system prompt with character
         system = self.character_mgr.build_system_prompt(request.system)
 
-        # Tools
+        # Tools - CRITICAL: Disable tools for streaming requests
+        # Tool calls in streaming mode fail because OpenAI returns empty content deltas
+        # when tool_calls are present. The streaming parser only handles text content,
+        # not tool_calls, resulting in empty responses (0 chunks).
+        # See: apps/llm-worker/src/llm_worker/providers/openai.py:495 (only yields if delta.content)
         tool_calling_enabled = self.config.get("TOOL_CALLING_ENABLED", False)
-        tools = (
-            self.tool_executor.tools if tool_calling_enabled and self.tool_executor.tools else None
-        )
+        if want_stream and tool_calling_enabled and self.tool_executor.tools:
+            logger.warning(
+                "Tools disabled for streaming request (streaming doesn't support tool calls yet)"
+            )
+            tools = None
+        else:
+            tools = (
+                self.tool_executor.tools
+                if tool_calling_enabled and self.tool_executor.tools
+                else None
+            )
 
         # Debug: log tool status
         logger.info(
-            "Tool calling: enabled=%s, tools_available=%d",
+            "Tool calling: enabled=%s, tools_available=%d, stream=%s, tools_used=%s",
             tool_calling_enabled,
             len(self.tool_executor.tools) if self.tool_executor.tools else 0,
+            want_stream,
+            "yes" if tools else "no",
         )
 
         return {
@@ -468,11 +482,10 @@ class RequestHandler:
                 "llm/stream id=%s seq=%d len=%d", params["req_id"], seq, len(delta_text or "")
             )
             await self.mqtt_client.publish_event(
-                client,
-                event_type=self.config.get("EVENT_TYPE_LLM_STREAM", "llm.stream"),
                 topic=self.config.get("TOPIC_LLM_STREAM", "llm/stream"),
-                payload=out,
-                correlate=params["correlation_id"],
+                event_type=self.config.get("EVENT_TYPE_LLM_STREAM", "llm.stream"),
+                data=out,
+                correlation_id=params["correlation_id"],
             )
 
             # Optional TTS forwarding
@@ -484,11 +497,10 @@ class RequestHandler:
                         break
                     logger.info("TTS chunk publish len=%d", len(sent))
                     await self.mqtt_client.publish_event(
-                        client,
-                        event_type=self.config.get("EVENT_TYPE_SAY", "tts.say"),
                         topic=self.config.get("TOPIC_TTS_SAY", "tts/say"),
-                        payload=TtsSay(text=sent),
-                        correlate=params["correlation_id"],
+                        event_type=self.config.get("EVENT_TYPE_SAY", "tts.say"),
+                        data=TtsSay(text=sent),
+                        correlation_id=params["correlation_id"],
                     )
                     tts_buf = remainder
 
@@ -605,11 +617,10 @@ class RequestHandler:
         )
         logger.info("Streaming done for id=%s with %d chunks", params["req_id"], seq)
         await self.mqtt_client.publish_event(
-            client,
-            event_type=self.config.get("EVENT_TYPE_LLM_STREAM", "llm.stream"),
             topic=self.config.get("TOPIC_LLM_STREAM", "llm/stream"),
-            payload=done,
-            correlate=params["correlation_id"],
+            event_type=self.config.get("EVENT_TYPE_LLM_STREAM", "llm.stream"),
+            data=done,
+            correlation_id=params["correlation_id"],
         )
 
     async def _publish_tts_chunk(
@@ -618,11 +629,10 @@ class RequestHandler:
         """Publish TTS chunk."""
         logger.info("TTS final chunk publish len=%d", len(text))
         await self.mqtt_client.publish_event(
-            client,
-            event_type=self.config.get("EVENT_TYPE_SAY", "tts.say"),
             topic=self.config.get("TOPIC_TTS_SAY", "tts/say"),
-            payload=TtsSay(text=text),
-            correlate=params["correlation_id"],
+            event_type=self.config.get("EVENT_TYPE_SAY", "tts.say"),
+            data=TtsSay(text=text),
+            correlation_id=params["correlation_id"],
         )
 
     async def _publish_response(
@@ -644,11 +654,10 @@ class RequestHandler:
             tokens=usage or {},
         )
         await self.mqtt_client.publish_event(
-            client,
-            event_type=self.config.get("EVENT_TYPE_LLM_RESPONSE", "llm.response"),
             topic=self.config.get("TOPIC_LLM_RESPONSE", "llm/response"),
-            payload=resp,
-            correlate=params["correlation_id"],
+            event_type=self.config.get("EVENT_TYPE_LLM_RESPONSE", "llm.response"),
+            data=resp,
+            correlation_id=params["correlation_id"],
         )
 
     async def _publish_error(self, client: mqtt.Client, params: Dict[str, Any], error: str) -> None:
@@ -661,9 +670,8 @@ class RequestHandler:
             model=params.get("model", "unknown"),
         )
         await self.mqtt_client.publish_event(
-            client,
-            event_type=self.config.get("EVENT_TYPE_LLM_RESPONSE", "llm.response"),
             topic=self.config.get("TOPIC_LLM_RESPONSE", "llm/response"),
-            payload=error_resp,
-            correlate=params.get("correlation_id"),
+            event_type=self.config.get("EVENT_TYPE_LLM_RESPONSE", "llm.response"),
+            data=error_resp,
+            correlation_id=params.get("correlation_id"),
         )
