@@ -49,6 +49,7 @@ class Config:
     health_topic: str
 
     # Server Configuration
+    port: int
     log_level: str
 
     @classmethod
@@ -73,5 +74,6 @@ class Config:
             memory_query_topic=os.getenv("UI_MEMORY_QUERY", TOPIC_MEMORY_QUERY),
             memory_results_topic=os.getenv("UI_MEMORY_RESULTS", TOPIC_MEMORY_RESULTS),
             health_topic=os.getenv("UI_HEALTH_TOPIC", "system/health/#"),
+            port=int(os.getenv("PORT", "8080")),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
         )

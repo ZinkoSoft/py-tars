@@ -1,9 +1,10 @@
 import os
 import asyncio
 import logging
+from pathlib import Path
 from typing import Set, Any, Dict
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from tars.adapters.mqtt_client import MQTTClient  # type: ignore[import]
 import orjson
@@ -17,19 +18,46 @@ app = FastAPI()
 logger = logging.getLogger("ui-web")
 logging.basicConfig(level=config.log_level)
 
-# Serve static index.html from ./static
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Determine if we're serving the Vue.js built frontend or legacy static HTML
+frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
+static_dir = Path(__file__).parent.parent.parent / "static"
+
+if frontend_dist.exists() and (frontend_dist / "index.html").exists():
+    # Serve Vue.js built frontend (production)
+    logger.info(f"Serving Vue.js frontend from {frontend_dist}")
+    app.mount("/assets", StaticFiles(directory=str(frontend_dist / "assets")), name="assets")
+    FRONTEND_MODE = "vue"
+    INDEX_HTML_PATH = frontend_dist / "index.html"
+elif static_dir.exists():
+    # Fallback to legacy static HTML
+    logger.info(f"Serving legacy static HTML from {static_dir}")
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+    FRONTEND_MODE = "legacy"
+    INDEX_HTML_PATH = static_dir / "index.html"
+else:
+    logger.warning("No frontend found - serving minimal HTML")
+    FRONTEND_MODE = "none"
+    INDEX_HTML_PATH = None
 
 
 class ConnectionManager:
     def __init__(self) -> None:
         self.active: Set[WebSocket] = set()
         self._lock = asyncio.Lock()
+        self._health_cache: Dict[str, Dict[str, Any]] = {}  # Cache retained health messages
 
     async def connect(self, ws: WebSocket) -> None:
         await ws.accept()
         async with self._lock:
             self.active.add(ws)
+            # Send cached health messages to new connection
+            for topic, payload in self._health_cache.items():
+                try:
+                    message = {"topic": topic, "payload": payload}
+                    data = orjson.dumps(message).decode()
+                    await ws.send_text(data)
+                except Exception as e:
+                    logger.warning(f"Failed to send cached health to new connection: {e}")
 
     async def disconnect(self, ws: WebSocket) -> None:
         async with self._lock:
@@ -46,6 +74,11 @@ class ConnectionManager:
                     to_remove.append(ws)
             for ws in to_remove:
                 self.active.discard(ws)
+
+    async def cache_health(self, topic: str, payload: Dict[str, Any]) -> None:
+        """Cache health messages for new connections (mimics MQTT retained messages)"""
+        async with self._lock:
+            self._health_cache[topic] = payload
 
 
 manager = ConnectionManager()
@@ -97,16 +130,54 @@ async def mqtt_bridge_task() -> None:
 
     while True:
         try:
-            logger.info("Connecting to MQTT %s", mqtt_url)
-            await mqtt_client.connect()
-            # Register subscriptions
-            for t in topics:
-                handler = await _make_handler(t)
-                await mqtt_client.subscribe(t, handler, qos=1)
-                logger.info("Subscribed to %s", t)
-
-            # Block until disconnected
-            await asyncio.Event().wait()
+            logger.info(f"Connecting to MQTT {config.mqtt_host}:{config.mqtt_port}")
+            async with mqtt.Client(
+                hostname=config.mqtt_host,
+                port=config.mqtt_port,
+                username=config.mqtt_username,
+                password=config.mqtt_password,
+            ) as client:
+                logger.info("Connected to MQTT, subscribing topics")
+                async with client.messages() as messages:
+                    for t in topics:
+                        await client.subscribe(t)
+                        logger.info(f"Subscribed to {t}")
+                    async for msg in messages:
+                        payload_data: Any
+                        try:
+                            if isinstance(msg.payload, (bytes, bytearray, str)):
+                                payload_data = orjson.loads(msg.payload)
+                            else:
+                                payload_data = {"raw": str(msg.payload)}
+                        except Exception:
+                            payload_data = {
+                                "raw": (
+                                    msg.payload.decode(errors="ignore")
+                                    if isinstance(msg.payload, (bytes, bytearray))
+                                    else str(msg.payload)
+                                )
+                            }
+                        # Normalize topic to a string for browser clients
+                        topic_obj = getattr(msg, "topic", None)
+                        if isinstance(topic_obj, (bytes, bytearray)):
+                            topic_str = topic_obj.decode("utf-8", "ignore")
+                        elif isinstance(topic_obj, str):
+                            topic_str = topic_obj
+                        else:
+                            topic_str = getattr(topic_obj, "value", str(topic_obj))
+                        # Keep a copy of memory/results for REST consumers
+                        if topic_str == config.memory_results_topic:
+                            try:
+                                # payload has shape { query, results: [{document, score}], k }
+                                globals()["_last_memory_results"] = payload_data
+                            except Exception:
+                                pass
+                        # Cache and log health messages (mimics MQTT retained message behavior)
+                        if topic_str.startswith("system/health/"):
+                            logger.info(f"Health message: {topic_str} -> {payload_data}")
+                            await manager.cache_health(topic_str, payload_data)
+                        logger.debug(f"Forwarding {topic_str}")
+                        await manager.broadcast({"topic": topic_str, "payload": payload_data})
         except Exception as e:
             logger.error("MQTT bridge error: %s", e)
             try:
@@ -123,11 +194,16 @@ async def on_start() -> None:
 
 @app.get("/")
 async def index() -> HTMLResponse:
-    try:
-        with open(os.path.join("static", "index.html"), "r", encoding="utf-8") as f:
-            return HTMLResponse(f.read())
-    except Exception:
-        return HTMLResponse("<h1>TARS Web UI</h1>")
+    """Serve the frontend index.html (Vue.js or legacy)."""
+    if INDEX_HTML_PATH and INDEX_HTML_PATH.exists():
+        try:
+            with open(INDEX_HTML_PATH, "r", encoding="utf-8") as f:
+                return HTMLResponse(f.read())
+        except Exception as e:
+            logger.error(f"Failed to serve index.html: {e}")
+            return HTMLResponse("<h1>TARS Web UI - Error loading frontend</h1>", status_code=500)
+    else:
+        return HTMLResponse("<h1>TARS Web UI - No frontend configured</h1>", status_code=404)
 
 
 @app.get("/api/memory")
@@ -167,7 +243,7 @@ def main() -> None:
     """Main entry point for the TARS Web UI."""
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8080, log_level=config.log_level.lower())
+    uvicorn.run(app, host="0.0.0.0", port=config.port, log_level=config.log_level.lower())
 
 
 if __name__ == "__main__":
