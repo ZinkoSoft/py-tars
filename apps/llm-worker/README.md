@@ -26,6 +26,40 @@ A pluggable LLM microservice for TARS with streaming support, tool calling, RAG 
 
 **Main service** (`LLMService`) is only ~190 lines, handling initialization and MQTT lifecycle.
 
+## MQTT Client Architecture
+
+**Centralized Client**: Uses `tars.adapters.mqtt_client.MQTTClient` from `tars-core` package.
+
+**Key Features**:
+- **Auto-Reconnection**: Exponential backoff (0.5s-5s configurable) with session recovery
+- **Health Monitoring**: Publishes health status to `system/health/llm` (retained)
+- **Heartbeat**: Optional keepalive messages to `system/keepalive/llm`
+- **Message Deduplication**: TTL cache prevents duplicate processing during reconnects
+- **Subscription Handlers**: Clean async handler pattern replaces manual message loops
+
+**Handler Pattern**:
+```python
+async def _handle_llm_request(self, payload: bytes) -> None:
+    """Handler registered with client.add_subscription_handler()"""
+    # Parse, validate, process
+    request = LLMRequest.model_validate_json(payload)
+    # ...
+
+# Registration
+await self._client.add_subscription_handler("llm/request", self._handle_llm_request)
+```
+
+**Health Integration**:
+- Health check reports LLM provider connectivity
+- Auto-publishes to `system/health/llm` on connect/disconnect
+- Heartbeat maintains session presence
+
+**Migration Benefits** (from local wrapper):
+- Eliminated ~200 lines of duplicate reconnection logic
+- Centralized health monitoring across all services
+- Consistent error handling and logging patterns
+- Reduced maintenance burden (single implementation)
+
 ## Environment Variables
 
 ### Core Settings
@@ -257,23 +291,24 @@ docker compose up llm-worker
 ### Directory Structure
 
 ```
-apps/llm-worker/
-├── src/
-│   └── llm_worker/          # Main package
-│       ├── handlers/        # Handler modules (routing, RAG, tools, character)
-│       ├── providers/       # LLM provider implementations
-│       ├── __main__.py      # Entry point
-│       ├── config.py        # Configuration management
-│       ├── service.py       # Main service class
-│       ├── mcp_client.py    # MCP client implementation
-│       └── mqtt_client.py   # MQTT client wrapper
-├── tests/
-│   ├── unit/               # Unit tests
-│   ├── integration/        # Integration tests
-│   └── contract/           # MQTT contract tests
-├── Makefile                # Build automation
-├── pyproject.toml         # Package configuration
-└── README.md              # This file
+```
+llm_worker/
+├── __init__.py
+├── __main__.py          # CLI entry point
+├── config.py            # Environment configuration
+├── service.py           # Main LLMService (MQTT lifecycle, handler registration)
+├── domain/              # Business logic (provider-agnostic)
+│   ├── character.py     # CharacterManager (system prompt, persona)
+│   ├── message_router.py # Route messages to handlers
+│   ├── rag.py           # RAGHandler (non-blocking memory queries)
+│   ├── request_handler.py # RequestHandler (complete LLM pipeline)
+│   └── tool_executor.py # ToolExecutor (MCP tool calling)
+├── providers/           # LLM provider integrations
+│   ├── base.py          # Provider protocol
+│   └── openai.py        # OpenAI provider (streaming, tool calling, Responses API)
+└── mcp/                 # MCP client
+    └── mcp_client.py    # MCPClient (stdio transport, tool registry)
+```
 ```
 
 ### Available Make Targets
