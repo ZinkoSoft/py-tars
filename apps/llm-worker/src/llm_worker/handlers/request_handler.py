@@ -163,17 +163,31 @@ class RequestHandler:
         # Build system prompt with character
         system = self.character_mgr.build_system_prompt(request.system)
 
-        # Tools
+        # Tools - CRITICAL: Disable tools for streaming requests
+        # Tool calls in streaming mode fail because OpenAI returns empty content deltas
+        # when tool_calls are present. The streaming parser only handles text content,
+        # not tool_calls, resulting in empty responses (0 chunks).
+        # See: apps/llm-worker/src/llm_worker/providers/openai.py:495 (only yields if delta.content)
         tool_calling_enabled = self.config.get("TOOL_CALLING_ENABLED", False)
-        tools = (
-            self.tool_executor.tools if tool_calling_enabled and self.tool_executor.tools else None
-        )
+        if want_stream and tool_calling_enabled and self.tool_executor.tools:
+            logger.warning(
+                "Tools disabled for streaming request (streaming doesn't support tool calls yet)"
+            )
+            tools = None
+        else:
+            tools = (
+                self.tool_executor.tools
+                if tool_calling_enabled and self.tool_executor.tools
+                else None
+            )
 
         # Debug: log tool status
         logger.info(
-            "Tool calling: enabled=%s, tools_available=%d",
+            "Tool calling: enabled=%s, tools_available=%d, stream=%s, tools_used=%s",
             tool_calling_enabled,
             len(self.tool_executor.tools) if self.tool_executor.tools else 0,
+            want_stream,
+            "yes" if tools else "no",
         )
 
         return {
