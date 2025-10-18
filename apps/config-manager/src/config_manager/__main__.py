@@ -42,7 +42,8 @@ async def lifespan(app: FastAPI):
     # Set log level
     logging.getLogger().setLevel(config.log_level)
 
-    # Initialize service
+    # Initialize service (assign to global)
+    global service
     service = ConfigManagerService(config)
 
     try:
@@ -57,6 +58,7 @@ async def lifespan(app: FastAPI):
         if service:
             await service.shutdown()
             logger.info("Config manager service stopped")
+            service = None
 
 
 def create_app() -> FastAPI:

@@ -39,6 +39,9 @@ class Config:
     # Server Configuration
     port: int
     log_level: str
+    
+    # Config Manager
+    config_manager_url: str
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -64,4 +67,5 @@ class Config:
             health_topic=os.getenv("UI_HEALTH_TOPIC", "system/health/#"),
             port=int(os.getenv("PORT", "8080")),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
+            config_manager_url=os.getenv("CONFIG_MANAGER_URL", "http://config-manager:8081"),
         )

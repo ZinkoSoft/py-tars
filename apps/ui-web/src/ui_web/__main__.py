@@ -3,7 +3,7 @@ import asyncio
 import logging
 from pathlib import Path
 from typing import Set, Any, Dict
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from tars.adapters.mqtt_client import MQTTClient  # type: ignore[import]
@@ -196,6 +196,67 @@ async def api_memory(q: str = "*", k: int = 25) -> JSONResponse:
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
     return JSONResponse(_last_memory_results or {"results": [], "query": q, "k": k})
+
+
+# --- Config Manager Proxy Endpoints ---
+import httpx
+
+@app.get("/health")
+async def proxy_health() -> JSONResponse:
+    """Proxy health check to config-manager service."""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{config.config_manager_url}/health", timeout=5.0)
+            return JSONResponse(content=response.json(), status_code=response.status_code)
+    except Exception as e:
+        logger.error("Failed to proxy health check: %s", e)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=503)
+
+
+@app.get("/api/config/services")
+async def proxy_get_services() -> JSONResponse:
+    """Proxy GET /api/config/services to config-manager."""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{config.config_manager_url}/api/config/services", timeout=10.0)
+            return JSONResponse(content=response.json(), status_code=response.status_code)
+    except Exception as e:
+        logger.error("Failed to proxy GET /api/config/services: %s", e)
+        return JSONResponse({"error": str(e)}, status_code=503)
+
+
+@app.get("/api/config/services/{service_name}")
+async def proxy_get_service_config(service_name: str, include_fields: bool = False) -> JSONResponse:
+    """Proxy GET /api/config/services/{service_name} to config-manager."""
+    try:
+        async with httpx.AsyncClient() as client:
+            url = f"{config.config_manager_url}/api/config/services/{service_name}"
+            if include_fields:
+                url += "?include_fields=true"
+            response = await client.get(url, timeout=10.0)
+            return JSONResponse(content=response.json(), status_code=response.status_code)
+    except Exception as e:
+        logger.error("Failed to proxy GET /api/config/services/%s: %s", service_name, e)
+        return JSONResponse({"error": str(e)}, status_code=503)
+
+
+@app.put("/api/config/services/{service_name}")
+async def proxy_put_service_config(service_name: str, request: Request) -> JSONResponse:
+    """Proxy PUT /api/config/services/{service_name} to config-manager."""
+    try:
+        # Get request body as JSON
+        body = await request.json()
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.put(
+                f"{config.config_manager_url}/api/config/services/{service_name}",
+                json=body,
+                timeout=10.0
+            )
+            return JSONResponse(content=response.json(), status_code=response.status_code)
+    except Exception as e:
+        logger.error("Failed to proxy PUT /api/config/services/%s: %s", service_name, e)
+        return JSONResponse({"error": str(e)}, status_code=503)
 
 
 @app.websocket("/ws")

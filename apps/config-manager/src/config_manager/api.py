@@ -75,6 +75,37 @@ class ConfigUpdateResponse(BaseModel):
     message: Optional[str] = Field(default=None, description="Optional message")
 
 
+def _get_service():
+    """Get the global service instance from app state.
+    
+    Raises:
+        HTTPException: If service not initialized
+    """
+    import sys
+    
+    # Get the service from the module in sys.modules
+    # Try both __main__ (when run as script) and config_manager.__main__ (when imported)
+    main_module = sys.modules.get('__main__') or sys.modules.get('config_manager.__main__')
+    if not main_module:
+        logger.error("Main module not found in sys.modules")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service module not loaded",
+        )
+    
+    service = getattr(main_module, 'service', None)
+    
+    if not service or not service.database:
+        logger.error("Service not initialized - service=%s, database=%s, module=%s", 
+                    service, service.database if service else None, main_module.__name__)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service not initialized",
+        )
+    
+    return service
+
+
 @router.get("/services", response_model=ServiceListResponse)
 async def list_services():
     """List all available services with configuration.
@@ -82,14 +113,7 @@ async def list_services():
     Returns:
         List of service names
     """
-    from . import __main__
-    service = __main__.service
-
-    if not service or not service.database:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service not initialized",
-        )
+    service = _get_service()
 
     try:
         services = await service.database.list_services()
@@ -113,14 +137,7 @@ async def get_service_config(service_name: str, include_fields: bool = False):
     Returns:
         Service configuration with version and metadata
     """
-    from . import __main__
-    service = __main__.service
-
-    if not service or not service.database:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service not initialized",
-        )
+    service = _get_service()
 
     try:
         config_data = await service.database.get_service_config(service_name)
@@ -183,13 +200,12 @@ async def update_service_config(service_name: str, request: ConfigUpdateRequest)
     Returns:
         Update response with new version
     """
-    from . import __main__
-    service = __main__.service
-
-    if not service or not service.database or not service.mqtt_publisher:
+    service = _get_service()
+    
+    if not service.mqtt_publisher:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service not initialized",
+            detail="MQTT publisher not initialized",
         )
 
     if request.service != service_name:
