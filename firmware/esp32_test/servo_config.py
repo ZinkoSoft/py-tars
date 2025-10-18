@@ -28,12 +28,12 @@ SERVO_CALIBRATION = {
         "reverse": False    # Reverse direction for left leg
     },
     2: {
-        "min": 192,        # backPort (right leg back)
-        "max": 408,        # forwardPort (right leg forward)
+        "min": 408,        # forwardPort (right leg forward)
+        "max": 192,        # backPort (right leg back)
         "neutral": 300,    # neutralPort
         "label": "Right Leg Rotation",
         "servo_type": "LDX-227",
-        "reverse": True
+        "reverse": False
     },
     
     # Right Arm (MG996R shoulder, MG90S forearm/hand) - Channels 3-5
@@ -43,7 +43,7 @@ SERVO_CALIBRATION = {
         "neutral": 135,    # Calculated midpoint
         "label": "Right Shoulder",
         "servo_type": "MG996R",
-        "reverse": True
+        "reverse": False
     },
     4: {
         "min": 200,        # portForarmMin
@@ -51,7 +51,7 @@ SERVO_CALIBRATION = {
         "neutral": 200,    # Calculated midpoint
         "label": "Right Elbow",
         "servo_type": "MG90S",
-        "reverse": True
+        "reverse": False
     },
     5: {
         "min": 200,        # portHandMin
@@ -59,7 +59,7 @@ SERVO_CALIBRATION = {
         "neutral": 200,    # Calculated midpoint
         "label": "Right Hand",
         "servo_type": "MG90S",
-        "reverse": True
+        "reverse": False
     },
     
     # Left Arm (MG996R shoulder, MG90S forearm/hand) - Channels 6-8
