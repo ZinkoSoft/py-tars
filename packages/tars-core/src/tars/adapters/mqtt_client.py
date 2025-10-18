@@ -750,8 +750,17 @@ class MQTTClient:
                 
                 # Watchdog: check for stale connection
                 if last_publish and (now - last_publish > 3 * self._config.heartbeat_interval):
-                    logger.warning("Heartbeat watchdog: connection may be stale")
-                    # TODO: Trigger reconnection in Phase 4
+                    logger.warning("Heartbeat watchdog: connection may be stale, triggering reconnection")
+                    self._connected = False
+                    if self._client:
+                        try:
+                            await self._client.__aexit__(None, None, None)
+                        except Exception as e:
+                            logger.debug("Error during forced disconnect: %s", e)
+                        self._client = None
+                    # Wait a bit before next iteration which will reconnect
+                    await asyncio.sleep(1.0)
+                    continue
                 
                 # Publish heartbeat
                 try:

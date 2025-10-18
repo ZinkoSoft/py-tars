@@ -52,9 +52,19 @@ export const useHealthStore = defineStore('health', () => {
       return
     }
 
-    const componentId = extractComponentFromTopic(topic)
+    // Try to extract component ID from source field first (new structured format)
+    let componentId: string | null = null
+    if ('source' in payload && typeof payload.source === 'string') {
+      componentId = extractComponentFromTopic(`system/health/${payload.source}`)
+    }
+    
+    // Fallback to extracting from topic (old format or direct subscriptions)
     if (!componentId) {
-      console.warn('[Health] Unknown component in topic:', topic)
+      componentId = extractComponentFromTopic(topic)
+    }
+    
+    if (!componentId) {
+      console.warn('[Health] Unknown component in topic:', topic, 'payload:', payload)
       return
     }
 

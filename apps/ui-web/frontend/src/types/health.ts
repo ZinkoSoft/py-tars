@@ -136,11 +136,15 @@ export const HEALTH_TOPIC_MAP: Record<string, ServiceComponentId> = {
   'tars-memory': 'memory',
   'memory-worker': 'memory',
   camera: 'camera',
+  'camera-service': 'camera',
   router: 'router',
   'tars-router': 'router',
   movement: 'esp32',
   'tars-movement': 'esp32',
-  'wake-activation': 'esp32'
+  'wake-activation': 'esp32',
+  // Note: config-manager, mcp-bridge, and other support services intentionally excluded
+  // as they are not part of the core voice assistant pipeline
+  'quickstart-health-test': 'router' // Map test messages to router for now
 }
 
 /**

@@ -81,12 +81,14 @@ class ConfigManagerService:
                 config_epoch = await self.database.create_epoch()
                 logger.info(f"Created initial config epoch: {config_epoch}")
             
-            # Update cache
+            # Update cache (even if empty, to create the cache file)
+            await self.cache_manager.atomic_update_from_db(
+                service_configs, config_epoch
+            )
             if service_configs:
-                await self.cache_manager.atomic_update_from_db(
-                    service_configs, config_epoch
-                )
                 logger.info(f"LKG cache synced with {len(service_configs)} services")
+            else:
+                logger.info("LKG cache initialized with empty configuration")
 
             # Initialize MQTT publisher
             logger.info("Connecting to MQTT broker")

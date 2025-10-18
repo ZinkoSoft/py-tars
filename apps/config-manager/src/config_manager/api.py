@@ -24,6 +24,19 @@ class ServiceListResponse(BaseModel):
     services: List[str] = Field(description="List of service names")
 
 
+class ConfigFieldMetadataResponse(BaseModel):
+    """Field metadata for a configuration key."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(description="Configuration key")
+    type: str = Field(description="Value type (string, integer, float, boolean, etc.)")
+    complexity: str = Field(description="Complexity level (simple or advanced)")
+    description: str = Field(description="Human-readable description")
+    help_text: Optional[str] = Field(default=None, description="Optional help text")
+    is_secret: bool = Field(default=False, description="Whether value is a secret")
+
+
 class ConfigGetResponse(BaseModel):
     """Response for getting service configuration."""
 
@@ -34,6 +47,9 @@ class ConfigGetResponse(BaseModel):
     version: int = Field(description="Configuration version for optimistic locking")
     updated_at: str = Field(description="ISO8601 timestamp of last update")
     config_epoch: str = Field(description="Current configuration epoch")
+    fields: Optional[List[ConfigFieldMetadataResponse]] = Field(
+        default=None, description="Optional field metadata (when include_fields=true)"
+    )
 
 
 class ConfigUpdateRequest(BaseModel):
@@ -87,11 +103,12 @@ async def list_services():
 
 
 @router.get("/services/{service_name}", response_model=ConfigGetResponse)
-async def get_service_config(service_name: str):
+async def get_service_config(service_name: str, include_fields: bool = False):
     """Get configuration for a specific service.
 
     Args:
         service_name: Name of the service
+        include_fields: Whether to include field metadata (default: False)
 
     Returns:
         Service configuration with version and metadata
@@ -116,12 +133,31 @@ async def get_service_config(service_name: str):
         # Get config epoch
         epoch = await service.database.get_config_epoch()
 
+        # Optionally fetch field metadata
+        fields = None
+        if include_fields:
+            config_items = await service.database.search_config_items(
+                service_filter=service_name
+            )
+            fields = [
+                ConfigFieldMetadataResponse(
+                    key=item.key,
+                    type=item.type,
+                    complexity=item.complexity,
+                    description=item.description,
+                    help_text=item.help_text,
+                    is_secret=item.is_secret,
+                )
+                for item in config_items
+            ]
+
         return ConfigGetResponse(
             service=service_name,
             config=config_data["config"],
             version=config_data["version"],
             updated_at=config_data["updated_at"],
             config_epoch=epoch.epoch_id,
+            fields=fields,
         )
     except HTTPException:
         raise

@@ -173,12 +173,12 @@
 ### Backend Support
 
 - [X] T079 [US2] Add complexity metadata to config_items table sync in database.py
-- [ ] T080 [US2] Update GET /api/config/services/{service} to include complexity metadata for each field
+- [X] T080 [US2] Update GET /api/config/services/{service} to include complexity metadata for each field
 
 ### Testing
 
-- [ ] T081 [P] [US2] Add test for complexity filtering in `apps/ui-web/frontend/tests/unit/ConfigEditor.spec.ts`
-- [ ] T082 [P] [US2] Add test for mode persistence in localStorage
+- [X] T081 [P] [US2] Add test for complexity filtering in `apps/ui-web/frontend/tests/unit/ConfigEditor.spec.ts`
+- [X] T082 [P] [US2] Add test for mode persistence in localStorage
 
 **Checkpoint**: User Story 2 complete - Simple/advanced mode toggle works, settings properly categorized
 
