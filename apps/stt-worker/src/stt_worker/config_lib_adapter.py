@@ -6,7 +6,6 @@ that import constants continue to work), and subscribes to runtime updates.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Callable
 

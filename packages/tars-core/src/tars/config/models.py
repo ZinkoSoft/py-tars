@@ -108,9 +108,9 @@ class STTWorkerConfig(BaseModel):
         description="Whisper model size (tiny, base, small, medium, large)",
         json_schema_extra={"complexity": "simple", "type": "enum"},
     )
-    stt_backend: Literal["whisper", "ws"] = Field(
+    stt_backend: Literal["whisper", "ws", "openai"] = Field(
         default="whisper",
-        description="STT backend (whisper=local, ws=WebSocket server)",
+        description="STT backend (whisper=local, ws=WebSocket server, openai=OpenAI API)",
         json_schema_extra={"complexity": "simple", "type": "enum"},
     )
     ws_url: str | None = Field(
