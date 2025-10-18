@@ -63,6 +63,9 @@ services:
       - "/dev/dri/renderD129:/dev/dri/renderD129"
       - "/proc/device-tree/compatible:/proc/device-tree/compatible:ro"
       - "/usr/lib/librknnrt.so:/usr/lib/librknnrt.so:ro"
+
+  # Config manager and Litestream don't need NPU overrides
+  # They use the base definitions from compose.yml
     # Updated command to indicate NPU mode
     command: ["echo 'NPU Wake activation: Waiting for STT service to stabilize...'; sleep 3; echo 'NPU Wake activation: Starting NPU-accelerated wake word detection'; exec python -m wake_activation"]
     # NPU-specific health check

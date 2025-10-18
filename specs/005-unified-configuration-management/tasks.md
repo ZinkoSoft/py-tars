@@ -18,16 +18,16 @@
 
 **Purpose**: Project initialization and basic structure for config-manager service and tars-core config library
 
-- [ ] T001 Create config-manager service directory structure at `apps/config-manager/` with src layout
-- [ ] T002 Create tars-core config module at `packages/tars-core/src/tars/config/`
-- [ ] T003 [P] Create pyproject.toml for config-manager service with FastAPI, aiosqlite, cryptography dependencies
-- [ ] T004 [P] Create Makefile for config-manager with standard targets (fmt, lint, test, check)
-- [ ] T005 [P] Create .env.example for config-manager with all required environment variables (keys, paths, etc.)
-- [ ] T006 [P] Create README.md for config-manager documenting MQTT topics, environment variables, development workflow
-- [ ] T007 [P] Create specialized Dockerfile at `docker/specialized/config-manager.Dockerfile`
-- [ ] T008 Update `ops/compose.yml` to add config-manager service with volume mounts and environment
-- [ ] T009 Update `ops/compose.npu.yml` to add config-manager service
-- [ ] T010 Create Litestream configuration at `ops/litestream.yml` for continuous backups
+- [X] T001 Create config-manager service directory structure at `apps/config-manager/` with src layout
+- [X] T002 Create tars-core config module at `packages/tars-core/src/tars/config/`
+- [X] T003 [P] Create pyproject.toml for config-manager service with FastAPI, aiosqlite, cryptography dependencies
+- [X] T004 [P] Create Makefile for config-manager with standard targets (fmt, lint, test, check)
+- [X] T005 [P] Create .env.example for config-manager with all required environment variables (keys, paths, etc.)
+- [X] T006 [P] Create README.md for config-manager documenting MQTT topics, environment variables, development workflow
+- [X] T007 [P] Create specialized Dockerfile at `docker/specialized/config-manager.Dockerfile`
+- [X] T008 Update `ops/compose.yml` to add config-manager service with volume mounts and environment
+- [X] T009 Update `ops/compose.npu.yml` to add config-manager service
+- [X] T010 Create Litestream configuration at `ops/litestream.yml` for continuous backups
 
 ---
 

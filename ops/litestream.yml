@@ -1,0 +1,33 @@
+# Litestream configuration for TARS config database continuous backup
+# https://litestream.io/reference/config/
+
+dbs:
+  - path: /data/config/config.db
+    replicas:
+      # S3-compatible storage (AWS S3, MinIO, etc.)
+      - type: s3
+        bucket: ${LITESTREAM_S3_BUCKET}
+        path: ${LITESTREAM_S3_PATH:-config-db}
+        endpoint: ${LITESTREAM_S3_ENDPOINT}
+        access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+        secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}
+        region: ${LITESTREAM_S3_REGION:-us-east-1}
+        
+        # Replication settings
+        sync-interval: 1s              # Sync every 1 second for near-real-time backup
+        snapshot-interval: 24h         # Full snapshot every 24 hours
+        retention: ${LITESTREAM_RETENTION_HOURS:-168}h  # Keep 7 days by default
+        retention-check-interval: 1h   # Check for old snapshots to delete every hour
+        
+        # Validation
+        validation-interval: 6h        # Validate backups every 6 hours
+        
+      # Optional: Local backup as fallback
+      - type: file
+        path: /data/backups/config-db
+        retention: 24h                 # Keep local backups for 24 hours only
+        sync-interval: 10s
+        snapshot-interval: 1h
+
+# Global settings
+addr: ":9090"                         # Prometheus metrics endpoint
