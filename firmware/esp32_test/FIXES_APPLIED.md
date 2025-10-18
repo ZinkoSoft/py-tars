@@ -14,7 +14,7 @@ This document describes the fixes applied to the ESP32 firmware to resolve servo
 - min=192 (labeled as backPort)
 - max=408 (labeled as forwardPort)
 
-But they should have been inverted to match the original configuration:
+But they should have been swapped to match the original configuration:
 - min=408 (forwardPort - forward position)
 - max=192 (backPort - back position)
 
@@ -33,8 +33,8 @@ Additionally, the `reverse=True` flag was incorrectly set, which would have doub
 ```
 
 **Verification**: 
-- Turn right: left leg moves back (343), right leg moves forward (345) → Robot turns RIGHT ✓
-- Turn left: left leg moves forward (255), right leg moves back (257) → Robot turns LEFT ✓
+- Turn right: left leg moves back, right leg moves forward → Robot turns RIGHT ✓
+- Turn left: left leg moves forward, right leg moves back → Robot turns LEFT ✓
 
 ### 2. Wave Button Moves Arm Backwards ✓
 
