@@ -21,7 +21,7 @@ import orjson
 from pydantic import BaseModel
 
 from tars.config.crypto import decrypt_secret_async, encrypt_secret_async
-from tars.config.models import ConfigItem, SchemaVersion, ServiceConfig
+from tars.config.models import ConfigEpochMetadata, ConfigItem, SchemaVersion, ServiceConfig
 from tars.config.types import ConfigType
 
 
@@ -230,6 +230,29 @@ class ConfigDatabase:
         """
         return str(uuid.uuid4())
 
+    async def get_config_epoch(self) -> ConfigEpochMetadata | None:
+        """Get current config epoch metadata.
+
+        Returns:
+            ConfigEpochMetadata if any service config exists, None otherwise
+        """
+        if not self._conn:
+            raise RuntimeError("Database not connected")
+
+        # Get epoch from any service config (all should have the same epoch)
+        async with self._conn.execute(
+            "SELECT config_epoch, updated_at FROM service_configs LIMIT 1"
+        ) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                return None
+
+            return ConfigEpochMetadata(
+                config_epoch=row[0],
+                schema_version=1,  # TODO: Get from schema_version table
+                created_at=datetime.fromisoformat(row[1]),
+            )
+
     async def validate_epoch(self, epoch: str) -> bool:
         """Validate epoch exists in database.
 
@@ -282,31 +305,41 @@ class ConfigDatabase:
         self,
         service: str,
         config: dict[str, Any],
-        version: int,
-        config_epoch: str,
+        expected_version: int | None = None,
         updated_by: str | None = None,
-    ) -> bool:
-        """Update service configuration with optimistic locking.
+    ) -> int:
+        """Update service configuration with optional optimistic locking.
 
         Args:
             service: Service name
             config: New configuration values
-            version: Expected current version (for optimistic locking)
-            config_epoch: Current epoch
+            expected_version: Expected current version for optimistic locking.
+                            If None, creates or updates without version checking.
             updated_by: User identifier
 
         Returns:
-            True if update succeeded, False if version conflict
+            New version number after update
+
+        Raises:
+            ValueError: If version conflict occurs (expected_version doesn't match current)
         """
         if not self._conn:
             raise RuntimeError("Database not connected")
 
-        # Check current version
+        # Get current config and epoch
         current = await self.get_service_config(service)
-        if current and current.version != version:
-            return False  # Version conflict
+        epoch_data = await self.get_config_epoch()
+        config_epoch = epoch_data.epoch_id if epoch_data else await self.create_epoch()
 
-        new_version = version + 1
+        # Check version if expected_version is specified
+        if expected_version is not None:
+            if current and current.version != expected_version:
+                raise ValueError(
+                    f"Version conflict: expected {expected_version}, got {current.version}"
+                )
+
+        # Calculate new version
+        new_version = (current.version + 1) if current else 1
         config_json = orjson.dumps(config).decode()
         updated_at = datetime.utcnow().isoformat()
 
@@ -318,7 +351,7 @@ class ConfigDatabase:
             (service, config_json, new_version, config_epoch, updated_at, updated_by),
         )
         await self._conn.commit()
-        return True
+        return new_version
 
     async def list_services(self) -> list[str]:
         """List all services with configurations.

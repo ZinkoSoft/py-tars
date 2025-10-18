@@ -127,12 +127,12 @@ async def list_services():
 
 
 @router.get("/services/{service_name}", response_model=ConfigGetResponse)
-async def get_service_config(service_name: str, include_fields: bool = False):
+async def get_service_config(service_name: str, include_fields: bool = True):
     """Get configuration for a specific service.
 
     Args:
         service_name: Name of the service
-        include_fields: Whether to include field metadata (default: False)
+        include_fields: Whether to include field metadata (default: True)
 
     Returns:
         Service configuration with version and metadata
@@ -170,10 +170,10 @@ async def get_service_config(service_name: str, include_fields: bool = False):
 
         return ConfigGetResponse(
             service=service_name,
-            config=config_data["config"],
-            version=config_data["version"],
-            updated_at=config_data["updated_at"],
-            config_epoch=epoch.epoch_id,
+            config=config_data.config,
+            version=config_data.version,
+            updated_at=config_data.updated_at.isoformat(),
+            config_epoch=epoch.config_epoch if epoch else "unknown",
             fields=fields,
         )
     except HTTPException:
@@ -224,16 +224,30 @@ async def update_service_config(service_name: str, request: ConfigUpdateRequest)
 
         # Get config epoch
         epoch = await service.database.get_config_epoch()
+        if not epoch:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Config epoch not found in database",
+            )
 
-        # Update LKG cache
-        await service.cache_manager.atomic_update_from_db(service.database)
+        # Update LKG cache - get all service configs first
+        services = await service.database.list_services()
+        service_configs = {}
+        for svc_name in services:
+            svc_data = await service.database.get_service_config(svc_name)
+            if svc_data:
+                service_configs[svc_name] = svc_data.config
+
+        await service.cache_manager.atomic_update_from_db(
+            service_configs, epoch.config_epoch
+        )
 
         # Publish MQTT update
         await service.mqtt_publisher.publish_config_update(
             service=service_name,
             config=request.config,
             version=new_version,
-            config_epoch=epoch.epoch_id,
+            config_epoch=epoch.config_epoch,
         )
 
         logger.info(
@@ -243,7 +257,7 @@ async def update_service_config(service_name: str, request: ConfigUpdateRequest)
         return ConfigUpdateResponse(
             success=True,
             version=new_version,
-            config_epoch=epoch.epoch_id,
+            config_epoch=epoch.config_epoch,
             message=f"Configuration updated to version {new_version}",
         )
 

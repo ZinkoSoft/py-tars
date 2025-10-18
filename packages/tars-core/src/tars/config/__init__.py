@@ -9,6 +9,11 @@ This module provides:
 """
 
 from tars.config.library import ConfigLibrary
+from tars.config.metadata import (
+    create_default_service_configs,
+    extract_field_metadata,
+    get_all_service_configs,
+)
 from tars.config.models import (
     ConfigComplexity,
     ConfigFieldMetadata,
@@ -26,4 +31,7 @@ __all__ = [
     "ConfigSource",
     "ConfigType",
     "ServiceConfig",
+    "create_default_service_configs",
+    "extract_field_metadata",
+    "get_all_service_configs",
 ]

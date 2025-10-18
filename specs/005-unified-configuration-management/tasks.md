@@ -163,6 +163,28 @@
 
 ### UI Enhancement for Complexity Filtering
 
+- [ ] T073 [P] [US2] Add complexity level indicator to ConfigField.vue (badge showing "Simple" or "Advanced")
+- [X] T074 [P] [US2] Create `apps/ui-web/frontend/src/components/ComplexityToggle.vue` for simple/advanced mode switch (implemented inline in ConfigTabs.vue)
+- [X] T075 [US2] Add complexity filtering logic to ConfigEditor.vue (filter fields based on current mode)
+- [X] T076 [US2] Add complexity level to all service config models in tars-core (mark commonly-used settings as SIMPLE)
+- [X] T077 [US2] Update ConfigTabs.vue to show ComplexityToggle component in header
+- [X] T078 [US2] Persist user's mode preference in localStorage (remember simple/advanced choice across sessions)
+
+### Backend Support
+
+- [X] T079 [US2] Add complexity metadata to config_items table sync in database.py
+- [X] T080 [US2] Update GET /api/config/services/{service} to include complexity metadata for each field
+
+---
+
+## Phase 4: User Story 2 - Organize Settings by Simplicity Level (Priority: P1)
+
+**Goal**: Provide simple/advanced mode toggle so casual users see only essential settings while power users see everything
+
+**Independent Test**: Load UI in simple mode (10-20 settings visible), toggle to advanced mode (all settings visible), filter works correctly
+
+### UI Enhancement for Complexity Filtering
+
 - [X] T073 [P] [US2] Add complexity level indicator to ConfigField.vue (badge showing "Simple" or "Advanced")
 - [X] T074 [P] [US2] Create `apps/ui-web/frontend/src/components/ComplexityToggle.vue` for simple/advanced mode switch (implemented inline in ConfigTabs.vue)
 - [X] T075 [US2] Add complexity filtering logic to ConfigEditor.vue (filter fields based on current mode)

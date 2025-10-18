@@ -61,10 +61,18 @@ class ConfigManagerService:
                 hmac_key_base64=self.config.hmac_key_base64,
             )
 
+            # Initialize database with default service configs if empty
+            logger.info("Checking database for existing services")
+            services = await self.database.list_services()
+            
+            if not services:
+                logger.info("Database is empty, initializing with default service configs")
+                await self._initialize_default_configs()
+                services = await self.database.list_services()
+                logger.info(f"Initialized {len(services)} services with default configurations")
+            
             # Sync cache with database
             logger.info("Syncing LKG cache with database")
-            # Get all services from database
-            services = await self.database.list_services()
             service_configs = {}
             config_epoch = None
             
@@ -76,19 +84,16 @@ class ConfigManagerService:
                     if config_epoch is None:
                         config_epoch = config_data.config_epoch
             
-            # If no services exist yet, create initial epoch
+            # If no epoch exists, create one
             if config_epoch is None:
                 config_epoch = await self.database.create_epoch()
                 logger.info(f"Created initial config epoch: {config_epoch}")
             
-            # Update cache (even if empty, to create the cache file)
+            # Update cache
             await self.cache_manager.atomic_update_from_db(
                 service_configs, config_epoch
             )
-            if service_configs:
-                logger.info(f"LKG cache synced with {len(service_configs)} services")
-            else:
-                logger.info("LKG cache initialized with empty configuration")
+            logger.info(f"LKG cache synced with {len(service_configs)} services")
 
             # Initialize MQTT publisher
             logger.info("Connecting to MQTT broker")
@@ -160,6 +165,47 @@ class ConfigManagerService:
 
         self._healthy = False
         logger.info("Config manager service shutdown complete")
+
+    async def _initialize_default_configs(self) -> None:
+        """Initialize database with default service configurations.
+
+        Creates service_configs entries with default values from Pydantic models
+        and syncs config_items table with field metadata.
+        """
+        from tars.config.metadata import (
+            create_default_service_configs,
+            extract_field_metadata,
+            get_all_service_configs,
+        )
+
+        if not self.database:
+            raise RuntimeError("Database not initialized")
+
+        # Get all service config models
+        all_configs = get_all_service_configs()
+        default_configs = create_default_service_configs()
+
+        # Get current epoch or create one
+        try:
+            epoch = await self.database.get_config_epoch()
+            config_epoch = epoch.config_epoch if epoch else await self.database.create_epoch()
+        except Exception:
+            # No epoch exists, create one
+            config_epoch = await self.database.create_epoch()
+
+        # Insert each service config
+        for service_name, config_dict in default_configs.items():
+            logger.info(f"Initializing {service_name} with default configuration")
+
+            # Insert service config
+            await self.database.update_service_config(
+                service=service_name, config=config_dict, expected_version=None
+            )
+
+            # Extract metadata and sync config_items
+            config_model = all_configs[service_name]
+            metadata = extract_field_metadata(config_model)
+            await self.database.sync_config_items(service_name, config_dict, metadata)
 
     @property
     def is_healthy(self) -> bool:
