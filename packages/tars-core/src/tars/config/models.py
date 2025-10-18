@@ -103,15 +103,60 @@ class STTWorkerConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    whisper_model: str = Field(default="base.en", description="Whisper model size")
-    stt_backend: Literal["whisper", "ws"] = Field(default="whisper")
-    ws_url: str | None = Field(None, description="WebSocket backend URL")
-    streaming_partials: bool = Field(default=False)
-    vad_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
-    vad_speech_pad_ms: int = Field(default=300, ge=0, le=1000)
-    vad_silence_duration_ms: int = Field(default=500, ge=0, le=2000)
-    sample_rate: int = Field(default=16000, gt=0)
-    channels: int = Field(default=1, ge=1, le=2)
+    whisper_model: str = Field(
+        default="base.en",
+        description="Whisper model size (tiny, base, small, medium, large)",
+        json_schema_extra={"complexity": "simple", "type": "enum"},
+    )
+    stt_backend: Literal["whisper", "ws"] = Field(
+        default="whisper",
+        description="STT backend (whisper=local, ws=WebSocket server)",
+        json_schema_extra={"complexity": "simple", "type": "enum"},
+    )
+    ws_url: str | None = Field(
+        None,
+        description="WebSocket backend URL (required if stt_backend=ws)",
+        json_schema_extra={"complexity": "advanced", "type": "string"},
+    )
+    streaming_partials: bool = Field(
+        default=False,
+        description="Enable streaming partial transcriptions",
+        json_schema_extra={"complexity": "advanced", "type": "boolean"},
+    )
+    vad_threshold: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Voice activity detection threshold (0.0-1.0)",
+        json_schema_extra={"complexity": "advanced", "type": "float"},
+    )
+    vad_speech_pad_ms: int = Field(
+        default=300,
+        ge=0,
+        le=1000,
+        description="Speech padding in milliseconds",
+        json_schema_extra={"complexity": "advanced", "type": "integer"},
+    )
+    vad_silence_duration_ms: int = Field(
+        default=500,
+        ge=0,
+        le=2000,
+        description="Silence duration before utterance end (ms)",
+        json_schema_extra={"complexity": "advanced", "type": "integer"},
+    )
+    sample_rate: int = Field(
+        default=16000,
+        gt=0,
+        description="Audio sample rate (Hz)",
+        json_schema_extra={"complexity": "advanced", "type": "integer"},
+    )
+    channels: int = Field(
+        default=1,
+        ge=1,
+        le=2,
+        description="Audio channels (1=mono, 2=stereo)",
+        json_schema_extra={"complexity": "advanced", "type": "integer"},
+    )
 
 
 class TTSWorkerConfig(BaseModel):
