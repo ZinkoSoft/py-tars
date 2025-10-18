@@ -99,9 +99,9 @@
 - [X] T037 [P] [US1] Create `apps/config-manager/src/config_manager/config.py` with ConfigManagerConfig (db_path, mqtt_url, api_port, etc.)
 - [X] T038 [P] [US1] Create `apps/config-manager/src/config_manager/service.py` with ConfigManagerService (initialize, health_check, shutdown)
 - [X] T039 [P] [US1] Create `apps/config-manager/src/config_manager/__main__.py` with FastAPI entry point and lifespan management
-- [ ] T040 [P] [US1] Add health check endpoint to api.py (GET /health → db_available, cache_available)
-- [ ] T041 [P] [US1] Add database initialization on startup (create schema if missing, generate keys if absent)
-- [ ] T042 [P] [US1] Add LKG cache initialization on startup (create empty cache if missing, load and verify if present)
+- [X] T040 [P] [US1] Add health check endpoint to api.py (GET /health → db_available, cache_available)
+- [X] T041 [P] [US1] Add database initialization on startup (create schema if missing, generate keys if absent)
+- [X] T042 [P] [US1] Add LKG cache initialization on startup (create empty cache if missing, load and verify if present)
 
 ### MQTT Integration (T043-T046)
 
@@ -151,22 +151,22 @@
 
 ### Integration & Validation
 
-- [ ] T063 [US1] Add client-side validation to ConfigField.vue (min/max ranges, regex patterns, enum constraints)
-- [ ] T064 [US1] Add save button with validation error display to ConfigEditor.vue
-- [ ] T065 [US1] Add success/error notifications to useConfig.ts for save operations
-- [ ] T066 [US1] Add real-time health status updates to service tabs (poll or WebSocket)
+- [X] T063 [US1] Add client-side validation to ConfigField.vue (min/max ranges, regex patterns, enum constraints)
+- [X] T064 [US1] Add save button with validation error display to ConfigEditor.vue
+- [X] T065 [US1] Add success/error notifications to useConfig.ts for save operations
+- [X] T066 [US1] Add real-time health status updates to service tabs (poll or WebSocket)
 
 ### Service Integration (Example: STT Worker)
 
-- [ ] T067 [US1] Update `apps/stt-worker/src/stt_worker/service.py` to use tars-core ConfigLibrary
-- [ ] T068 [US1] Add config update callback to stt-worker service.py (handle runtime config changes)
-- [ ] T069 [US1] Remove hardcoded config reading from stt-worker (rely on library for all config access)
+- [X] T067 [US1] Update `apps/stt-worker/src/stt_worker/service.py` to use tars-core ConfigLibrary
+- [X] T068 [US1] Add config update callback to stt-worker service.py (handle runtime config changes)
+- [X] T069 [US1] Remove hardcoded config reading from stt-worker (rely on library for all config access)
 
 ### Testing & Documentation
 
-- [ ] T070 [P] [US1] Create `apps/config-manager/tests/integration/test_crud_flow.py` for end-to-end config read/write
-- [ ] T071 [P] [US1] Create `apps/config-manager/tests/contract/test_mqtt_publishing.py` for MQTT message format validation
-- [ ] T072 [P] [US1] Add test scenario for quickstart.md validation (change TTS voice, verify persistence)
+- [X] T070 [P] [US1] Create `apps/config-manager/tests/integration/test_crud_flow.py` for end-to-end config read/write
+- [X] T071 [P] [US1] Create `apps/config-manager/tests/contract/test_mqtt_publishing.py` for MQTT message format validation
+- [X] T072 [P] [US1] Add test scenario for quickstart.md validation (change TTS voice, verify persistence)
 
 **Checkpoint**: User Story 1 complete - Basic config viewing and updating works end-to-end, services can read from DB and receive MQTT updates
 

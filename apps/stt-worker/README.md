@@ -27,7 +27,33 @@ python -m stt_worker
 
 ## Configuration
 
-All configuration is via environment variables. See `.env.example` for complete list.
+### Unified Configuration Management (Recommended)
+
+As of spec 005, STT worker integrates with the centralized **ConfigLibrary** for runtime configuration management:
+
+- **Initial load**: Configuration is loaded from the config database at startup
+- **Runtime updates**: Changes made via the Config Manager UI are applied live via MQTT (no restart required)
+- **Fallback**: If database is unavailable, falls back to Last-Known-Good (LKG) cache, then environment variables
+
+**Key fields** (defined in `tars.config.models.STTWorkerConfig`):
+- `whisper_model` - Whisper model size (e.g., "base.en", "small", "medium")
+- `stt_backend` - Backend type: "whisper" or "ws"
+- `ws_url` - WebSocket backend URL (when backend=ws)
+- `streaming_partials` - Enable partial transcriptions (bool)
+- `vad_threshold` - Voice activity detection threshold (0.0-1.0)
+- `sample_rate` - Audio sample rate in Hz
+- `channels` - Audio channels (1=mono, 2=stereo)
+
+Configuration can be edited via:
+1. **Config Manager UI** (recommended) - Web interface at `http://localhost:5173` (Config drawer)
+2. **Config Manager API** - REST API at `http://localhost:8081/api/config/services/stt-worker`
+3. **Environment variables** (legacy fallback)
+
+### Legacy Environment Variables
+
+All configuration is also available via environment variables. See `.env.example` for complete list.
+
+**Note**: Environment variables take precedence over database configuration during the migration period.
 
 ### Core Settings
 - `MQTT_URL` - MQTT broker URL (default: `mqtt://localhost:1883`)

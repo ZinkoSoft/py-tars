@@ -43,7 +43,7 @@
         </div>
 
         <!-- Health Indicator -->
-        <HealthIndicator :is-healthy="isHealthy" :last-update="lastHealthUpdate" />
+        <HealthIndicator :is-healthy="isHealthy" :last-update="lastUpdate" />
 
         <!-- Refresh Button -->
         <button @click="handleRefresh" class="btn-refresh" title="Refresh configuration">
@@ -69,18 +69,20 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
 import { useConfig } from '../composables/useConfig';
+import { useNotifications } from '../composables/useNotifications';
+import { useHealth } from '../composables/useHealth';
 import ConfigEditor from './ConfigEditor.vue';
 import HealthIndicator from './HealthIndicator.vue';
 import type { ServiceConfig } from '../types/config';
 
 // Composables
 const { services, currentConfig, loading, error, loadServices, loadConfig, updateConfig } = useConfig();
+const { notify } = useNotifications();
+const { isHealthy, lastUpdate } = useHealth(10000); // Poll every 10 seconds
 
 // State
 const selectedService = ref<string | null>(null);
 const complexity = ref<'simple' | 'advanced' | 'all'>('simple');
-const isHealthy = ref(true);
-const lastHealthUpdate = ref<Date>(new Date());
 
 // Computed
 const currentConfigData = computed(() => currentConfig.value);
@@ -105,6 +107,9 @@ async function handleSave(data: { config: Record<string, any>; version: number }
   if (result) {
     // Reload configuration to get latest version
     await loadConfig(selectedService.value);
+    notify.success('Configuration saved successfully!');
+  } else if (error.value) {
+    notify.error(error.value);
   }
 }
 

@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 from typing import Optional
 
 import orjson
-from aiomqtt import Client, MqttError
 
+from tars.adapters.mqtt_client import MQTTClient
 from tars.config.crypto import sign_message_async
 from tars.config.mqtt_models import ConfigHealthPayload, ConfigUpdatePayload
 
@@ -23,6 +21,8 @@ class MQTTPublisher:
 
     All configuration update messages are signed with Ed25519 to ensure
     authenticity. Clients verify signatures before applying updates.
+    
+    Uses the centralized tars-core MQTTClient for connection management.
     """
 
     def __init__(self, config: ConfigManagerConfig):
@@ -32,64 +32,39 @@ class MQTTPublisher:
             config: Service configuration
         """
         self.config = config
-        self.client: Optional[Client] = None
-        self._connected = False
-        self._reconnect_task: Optional[asyncio.Task] = None
+        self.client: Optional[MQTTClient] = None
 
     async def connect(self) -> None:
-        """Connect to MQTT broker with auto-reconnect."""
+        """Connect to MQTT broker with health monitoring."""
         logger.info(f"Connecting to MQTT broker: {self.config.mqtt_url}")
 
         try:
-            # Parse MQTT URL
-            from urllib.parse import urlparse
-
-            parsed = urlparse(self.config.mqtt_url)
-            hostname = parsed.hostname or "localhost"
-            port = parsed.port or 1883
-            username = parsed.username
-            password = parsed.password
-
-            self.client = Client(
-                hostname=hostname,
-                port=port,
-                username=username,
-                password=password,
-                clean_session=False,
+            # Create MQTTClient with health and heartbeat enabled
+            self.client = MQTTClient(
+                mqtt_url=self.config.mqtt_url,
                 client_id="config-manager",
+                enable_health=True,
+                enable_heartbeat=True,
+                heartbeat_interval=10.0,
             )
 
-            await self.client.__aenter__()
-            self._connected = True
+            await self.client.connect()
             logger.info("Connected to MQTT broker")
-
-            # Publish initial health status
-            await self.publish_health(ok=True, event="connected")
 
         except Exception as e:
             logger.error(f"Failed to connect to MQTT broker: {e}", exc_info=True)
-            self._connected = False
             raise
 
     async def disconnect(self) -> None:
         """Disconnect from MQTT broker."""
-        if self._reconnect_task:
-            self._reconnect_task.cancel()
+        if self.client:
             try:
-                await self._reconnect_task
-            except asyncio.CancelledError:
-                pass
-
-        if self.client and self._connected:
-            try:
-                # Publish offline health status
-                await self.publish_health(ok=False, event="disconnecting")
-                await self.client.__aexit__(None, None, None)
+                await self.client.shutdown()
                 logger.info("Disconnected from MQTT broker")
             except Exception as e:
                 logger.error(f"Error disconnecting from MQTT: {e}", exc_info=True)
             finally:
-                self._connected = False
+                self.client = None
 
     async def publish_config_update(
         self,
@@ -109,7 +84,7 @@ class MQTTPublisher:
         Raises:
             RuntimeError: If MQTT client not connected or signing fails
         """
-        if not self._connected or not self.client:
+        if not self.client or not self.client.connected:
             raise RuntimeError("MQTT client not connected")
 
         # Create payload
@@ -145,42 +120,41 @@ class MQTTPublisher:
         if signature:
             payload_with_sig["signature"] = signature
 
-        # Publish
+        # Publish using raw MQTT client (not envelope-wrapped)
         topic = self.config.mqtt_config_update_topic
         message = orjson.dumps(payload_with_sig)
 
         try:
-            await self.client.publish(topic, message, qos=1, retain=False)
+            # Access underlying asyncio-mqtt client for raw publish
+            assert self.client.client is not None
+            await self.client.client.publish(topic, message, qos=1, retain=False)
             logger.info(f"Published config update for {service} (v{version})")
-        except MqttError as e:
+        except Exception as e:
             logger.error(f"Failed to publish config update: {e}", exc_info=True)
             raise RuntimeError(f"MQTT publish failed: {e}") from e
 
     async def publish_health(
         self, ok: bool, event: Optional[str] = None, error: Optional[str] = None
     ) -> None:
-        """Publish health status (retained).
+        """Publish health status using MQTTClient's built-in health publishing.
 
         Args:
             ok: Whether service is healthy
             event: Optional event description
             error: Optional error message
         """
-        if not self._connected or not self.client:
+        if not self.client or not self.client.connected:
             logger.warning("Cannot publish health status - MQTT not connected")
             return
 
-        payload = ConfigHealthPayload(ok=ok, event=event, error=error)
-        topic = self.config.mqtt_health_topic
-        message = orjson.dumps(payload.model_dump(exclude_none=True))
-
         try:
-            await self.client.publish(topic, message, qos=1, retain=True)
+            # Use MQTTClient's publish_health method
+            await self.client.publish_health(ok=ok, event=event, err=error)
             logger.debug(f"Published health status: ok={ok}")
-        except MqttError as e:
+        except Exception as e:
             logger.error(f"Failed to publish health status: {e}", exc_info=True)
 
     @property
     def is_connected(self) -> bool:
         """Check if MQTT client is connected."""
-        return self._connected
+        return self.client is not None and self.client.connected

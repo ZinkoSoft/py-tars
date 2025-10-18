@@ -81,6 +81,7 @@
             :field="field"
             :model-value="pendingChanges[key] !== undefined ? pendingChanges[key] : config.config[key]"
             @update:model-value="(value) => handleFieldChange(key, value)"
+            @validation-error="(error) => handleValidationError(key, error)"
             :error-message="getFieldError(key)"
           />
         </div>
@@ -97,7 +98,10 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import ConfigField from './ConfigField.vue';
+import { useNotifications } from '../composables/useNotifications';
 import type { ServiceConfig, ConfigFieldMetadata, ValidationError } from '../types/config';
+
+const { notify } = useNotifications();
 
 interface Props {
   config: ServiceConfig | null;
@@ -177,86 +181,18 @@ function handleFieldChange(key: string, value: any): void {
 
   // Clear success message
   successMessage.value = null;
-
-  // Validate field
-  validateField(key, value);
 }
 
-function validateField(key: string, value: any): void {
-  const field = filteredFields.value[key];
-  if (!field) return;
-
+function handleValidationError(key: string, error: string | null): void {
   // Remove existing error for this field
-  validationErrors.value = validationErrors.value.filter(e => e.field !== key);
+  validationErrors.value = validationErrors.value.filter((e: ValidationError) => e.field !== key);
 
-  // Required check
-  if (field.required && (value === null || value === undefined || value === '')) {
+  // Add new error if present
+  if (error) {
     validationErrors.value.push({
       field: key,
-      message: 'This field is required',
+      message: error,
     });
-    return;
-  }
-
-  // Type-specific validation
-  if (field.validation) {
-    const { min, max, pattern, minLength, maxLength, allowed } = field.validation;
-
-    // Numeric range
-    if ((field.type === 'integer' || field.type === 'float') && typeof value === 'number') {
-      if (min !== undefined && value < min) {
-        validationErrors.value.push({
-          field: key,
-          message: `Value must be at least ${min}`,
-        });
-        return;
-      }
-      if (max !== undefined && value > max) {
-        validationErrors.value.push({
-          field: key,
-          message: `Value must be at most ${max}`,
-        });
-        return;
-      }
-    }
-
-    // String length
-    if (field.type === 'string' && typeof value === 'string') {
-      if (minLength !== undefined && value.length < minLength) {
-        validationErrors.value.push({
-          field: key,
-          message: `Must be at least ${minLength} characters`,
-        });
-        return;
-      }
-      if (maxLength !== undefined && value.length > maxLength) {
-        validationErrors.value.push({
-          field: key,
-          message: `Must be at most ${maxLength} characters`,
-        });
-        return;
-      }
-
-      // Regex pattern
-      if (pattern && !new RegExp(pattern).test(value)) {
-        validationErrors.value.push({
-          field: key,
-          message: 'Invalid format',
-        });
-        return;
-      }
-    }
-
-    // Enum validation
-    if (field.type === 'enum' && allowed) {
-      if (!allowed.includes(value)) {
-        validationErrors.value.push({
-          field: key,
-          message: `Must be one of: ${allowed.join(', ')}`,
-        });
-        return;
-      }
-    }
   }
 }
 
@@ -281,6 +217,9 @@ async function handleSave(): Promise<void> {
     // Clear pending changes on success
     pendingChanges.value = {};
     successMessage.value = 'Configuration saved successfully!';
+    
+    // Show success notification
+    notify.success('Configuration saved successfully!');
 
     // Auto-hide success message after 3 seconds
     setTimeout(() => {
@@ -288,6 +227,8 @@ async function handleSave(): Promise<void> {
     }, 3000);
   } catch (err) {
     console.error('Save failed:', err);
+    const errorMsg = err instanceof Error ? err.message : 'Failed to save configuration';
+    notify.error(errorMsg);
   } finally {
     saving.value = false;
   }
@@ -304,7 +245,7 @@ function reload(): void {
 }
 
 function getFieldError(key: string): string | undefined {
-  return validationErrors.value.find(e => e.field === key)?.message;
+  return validationErrors.value.find((e: ValidationError) => e.field === key)?.message;
 }
 
 function formatFieldKey(key: string): string {

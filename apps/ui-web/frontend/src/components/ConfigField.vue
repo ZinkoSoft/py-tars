@@ -113,7 +113,7 @@
     </div>
 
     <div v-if="hasError" class="field-error">
-      {{ errorMessage }}
+      {{ displayError }}
     </div>
 
     <div v-if="field.envOverride" class="field-warning">
@@ -123,7 +123,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import type { ConfigFieldMetadata } from '../types/config';
 
 interface Props {
@@ -134,12 +134,87 @@ interface Props {
 
 interface Emits {
   (e: 'update:modelValue', value: any): void;
+  (e: 'validation-error', error: string | null): void;
 }
 
 const props = defineProps<Props>();
 const emit = defineEmits<Emits>();
 
-const hasError = computed(() => !!props.errorMessage);
+const localError = ref<string | null>(null);
+
+const hasError = computed(() => !!props.errorMessage || !!localError.value);
+const displayError = computed(() => props.errorMessage || localError.value);
+
+function validateValue(value: any): string | null {
+  const validation = props.field.validation;
+  
+  if (!validation) {
+    return null;
+  }
+
+  // Required field validation
+  if (props.field.required && (value === null || value === undefined || value === '')) {
+    return 'This field is required';
+  }
+
+  // Type-specific validations
+  if (props.field.type === 'integer' || props.field.type === 'float') {
+    const numValue = typeof value === 'number' ? value : parseFloat(value);
+    
+    if (isNaN(numValue)) {
+      return `Must be a valid ${props.field.type}`;
+    }
+    
+    if (validation.min !== undefined && numValue < validation.min) {
+      return `Must be at least ${validation.min}`;
+    }
+    
+    if (validation.max !== undefined && numValue > validation.max) {
+      return `Must be at most ${validation.max}`;
+    }
+  }
+
+  // String validations
+  if (props.field.type === 'string' || props.field.type === 'secret' || props.field.type === 'path') {
+    const strValue = String(value);
+    
+    // Regex pattern validation
+    if (validation.pattern) {
+      const regex = new RegExp(validation.pattern);
+      if (!regex.test(strValue)) {
+        return validation.patternDescription || 'Invalid format';
+      }
+    }
+    
+    // Min/max length validation
+    if (validation.minLength !== undefined && strValue.length < validation.minLength) {
+      return `Must be at least ${validation.minLength} characters`;
+    }
+    
+    if (validation.maxLength !== undefined && strValue.length > validation.maxLength) {
+      return `Must be at most ${validation.maxLength} characters`;
+    }
+  }
+
+  // Enum validation
+  if (props.field.type === 'enum') {
+    if (validation.allowed && !validation.allowed.includes(value)) {
+      return `Must be one of: ${validation.allowed.join(', ')}`;
+    }
+  }
+
+  // Path validation
+  if (props.field.type === 'path') {
+    const strValue = String(value);
+    
+    // Basic path validation (Unix/Windows)
+    if (strValue && !strValue.match(/^[a-zA-Z]:|^\//)) {
+      return 'Must be an absolute path';
+    }
+  }
+
+  return null;
+}
 
 function handleInput(event: Event): void {
   const target = event.target as HTMLInputElement;
@@ -152,17 +227,35 @@ function handleInput(event: Event): void {
     value = parseFloat(value);
   }
 
+  // Validate
+  const error = validateValue(value);
+  localError.value = error;
+  emit('validation-error', error);
+
+  // Emit value even if invalid (parent decides what to do)
   emit('update:modelValue', value);
 }
 
 function handleCheckboxChange(event: Event): void {
   const target = event.target as HTMLInputElement;
-  emit('update:modelValue', target.checked);
+  const value = target.checked;
+  
+  const error = validateValue(value);
+  localError.value = error;
+  emit('validation-error', error);
+  
+  emit('update:modelValue', value);
 }
 
 function handleSelectChange(event: Event): void {
   const target = event.target as HTMLSelectElement;
-  emit('update:modelValue', target.value);
+  const value = target.value;
+  
+  const error = validateValue(value);
+  localError.value = error;
+  emit('validation-error', error);
+  
+  emit('update:modelValue', value);
 }
 
 function formatKey(key: string): string {

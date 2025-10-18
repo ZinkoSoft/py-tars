@@ -36,6 +36,8 @@ export interface ConfigValidation {
   max?: number;
   /** Regex pattern (for string types) */
   pattern?: string;
+  /** Human-readable description of the pattern (for error messages) */
+  patternDescription?: string;
   /** Allowed values (for enum types) */
   allowed?: string[];
   /** Minimum length (for string types) */

@@ -1,5 +1,20 @@
 from __future__ import annotations
 
+"""Configuration module for STT worker.
+
+DEPRECATION NOTICE:
+This module is being migrated to use tars.config.ConfigLibrary.
+Module-level constants are now populated at runtime by config_lib_adapter.py
+which loads configuration from the centralized database and subscribes to
+runtime updates via MQTT.
+
+New code should NOT add constants here. Instead, add fields to
+tars.config.models.STTWorkerConfig and access via ConfigLibrary.
+
+For existing code, module attributes are updated dynamically by the adapter,
+so imports will continue to work during the transition period.
+"""
+
 import os
 from typing import Set
 
@@ -15,6 +30,7 @@ AUDIO_FANOUT_PATH = os.getenv("AUDIO_FANOUT_PATH", "/tmp/tars/audio-fanout.sock"
 AUDIO_FANOUT_RATE = int(os.getenv("AUDIO_FANOUT_RATE", "16000"))
 AUDIO_DEVICE_NAME = os.getenv("AUDIO_DEVICE_NAME", "")
 SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", "16000"))
+CHANNELS = int(os.getenv("CHANNELS", "1"))
 CHUNK_DURATION_MS = int(os.getenv("CHUNK_DURATION_MS", "30"))
 VAD_AGGRESSIVENESS = int(os.getenv("VAD_AGGRESSIVENESS", "2"))
 SILENCE_THRESHOLD_MS = int(os.getenv("SILENCE_THRESHOLD_MS", "700"))
@@ -117,6 +133,7 @@ __all__ = [
     "AUDIO_FANOUT_RATE",
     "AUDIO_DEVICE_NAME",
     "SAMPLE_RATE",
+    "CHANNELS",
     "CHUNK_DURATION_MS",
     "VAD_AGGRESSIVENESS",
     "SILENCE_THRESHOLD_MS",

@@ -54,6 +54,7 @@ from .fft_ws import FFTWebSocketServer
 from .suppression import SuppressionEngine, SuppressionState
 from .transcriber import SpeechTranscriber
 from .vad import VADProcessor
+from .config_lib_adapter import initialize_and_subscribe, register_callback
 from tars.adapters.mqtt_client import MQTTClient  # type: ignore[import]
 from tars.contracts.envelope import Envelope  # type: ignore[import]
 from tars.contracts.v1 import (  # type: ignore[import]
@@ -127,6 +128,13 @@ class STTWorker:
         await self.mqtt.subscribe(TOPIC_TTS_SAY, self._handle_tts_say)
         await self.mqtt.subscribe(TOPIC_WAKE_MIC, self._handle_wake_mic)
         await self.mqtt.subscribe(TOPIC_WAKE_EVENT, self._handle_wake_event)
+        # Initialize ConfigLibrary adapter and subscribe to runtime updates
+        try:
+            await initialize_and_subscribe(mqtt_url=None)
+            # Register a synchronous callback to apply runtime config changes
+            register_callback(self._on_config_update)
+        except Exception:
+            logger.exception("ConfigLibrary initialization failed; continuing with env vars")
         self.audio_fanout = AudioFanoutPublisher(
             AUDIO_FANOUT_PATH,
             target_sample_rate=AUDIO_FANOUT_RATE,
@@ -221,6 +229,35 @@ class STTWorker:
         except ValidationError as exc:
             logger.error("Invalid %s payload: %s", model.__name__, exc)
             return None
+
+    def _on_config_update(self, new_cfg) -> None:
+        """Apply runtime configuration updates from ConfigLibrary.
+
+        This method is called synchronously by the adapter when an update is received.
+        Update runtime-only flags and schedule any necessary async tasks via the
+        event loop if needed.
+        """
+        try:
+            # Example: enable/disable streaming partials at runtime
+            try:
+                streaming = bool(getattr(new_cfg, "streaming_partials", False))
+            except Exception:
+                streaming = False
+
+            # STT_BACKEND may change - reflect in runtime flag
+            backend = getattr(new_cfg, "stt_backend", None)
+
+            # Update runtime fields on the next event loop tick to avoid thread issues
+            loop = asyncio.get_event_loop()
+
+            def apply():
+                # Update internal flag depending on backend and streaming
+                self._enable_partials = streaming and (backend not in {"ws", "openai"})
+                logger.info("Applied runtime config update: streaming_partials=%s, stt_backend=%s", streaming, backend)
+
+            loop.call_soon_threadsafe(apply)
+        except Exception:
+            logger.exception("Failed to apply config update")
 
     def _remember_tts_resume_state(self) -> None:
         if not self.audio_capture.is_muted and not self._resume_after_tts:

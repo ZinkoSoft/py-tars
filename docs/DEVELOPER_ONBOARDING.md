@@ -98,7 +98,9 @@ The pre-commit hook runs `make check` for any modified services.
 ### 6. Start Infrastructure
 
 ```bash
-# Start MQTT broker
+# Start MQTT broker and config-manager
+cd ops
+docker compose up -d mosquitto config-manager
 cd ops
 docker compose up -d mosquitto
 

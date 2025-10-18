@@ -9,6 +9,9 @@
       <ChatPanel />
     </main>
 
+    <!-- Toast Notifications -->
+    <ToastNotifications />
+
     <!-- Drawers -->
     <DrawerContainer
       :is-open="uiStore.activeDrawer === 'mic'"
@@ -66,6 +69,7 @@ import Header from './components/Header.vue';
 import Toolbar from './components/Toolbar.vue';
 import ChatPanel from './components/ChatPanel.vue';
 import DrawerContainer from './components/DrawerContainer.vue';
+import ToastNotifications from './components/ToastNotifications.vue';
 // Lazy load drawer components for better code splitting
 const MicrophoneDrawer = defineAsyncComponent(() => import('./drawers/MicrophoneDrawer.vue'));
 const MemoryDrawer = defineAsyncComponent(() => import('./drawers/MemoryDrawer.vue'));

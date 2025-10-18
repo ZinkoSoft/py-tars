@@ -51,7 +51,8 @@ class ConfigManagerService:
             # Initialize database
             logger.info(f"Opening database: {self.config.db_path}")
             self.database = ConfigDatabase(str(self.config.db_path))
-            await self.database.initialize()
+            await self.database.connect()
+            await self.database.initialize_schema()
 
             # Initialize cache manager
             logger.info(f"Initializing LKG cache: {self.config.lkg_cache_path}")
@@ -62,7 +63,30 @@ class ConfigManagerService:
 
             # Sync cache with database
             logger.info("Syncing LKG cache with database")
-            await self.cache_manager.atomic_update_from_db(self.database)
+            # Get all services from database
+            services = await self.database.list_services()
+            service_configs = {}
+            config_epoch = None
+            
+            for service_name in services:
+                config_data = await self.database.get_service_config(service_name)
+                if config_data:
+                    service_configs[service_name] = config_data.config
+                    # Get epoch from first service (all have same epoch)
+                    if config_epoch is None:
+                        config_epoch = config_data.config_epoch
+            
+            # If no services exist yet, create initial epoch
+            if config_epoch is None:
+                config_epoch = await self.database.create_epoch()
+                logger.info(f"Created initial config epoch: {config_epoch}")
+            
+            # Update cache
+            if service_configs:
+                await self.cache_manager.atomic_update_from_db(
+                    service_configs, config_epoch
+                )
+                logger.info(f"LKG cache synced with {len(service_configs)} services")
 
             # Initialize MQTT publisher
             logger.info("Connecting to MQTT broker")
