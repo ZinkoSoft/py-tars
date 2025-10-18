@@ -66,7 +66,8 @@ async def list_services():
     Returns:
         List of service names
     """
-    from ..main import service
+    from . import __main__
+    service = __main__.service
 
     if not service or not service.database:
         raise HTTPException(
@@ -95,7 +96,8 @@ async def get_service_config(service_name: str):
     Returns:
         Service configuration with version and metadata
     """
-    from ..main import service
+    from . import __main__
+    service = __main__.service
 
     if not service or not service.database:
         raise HTTPException(
@@ -145,7 +147,8 @@ async def update_service_config(service_name: str, request: ConfigUpdateRequest)
     Returns:
         Update response with new version
     """
-    from ..main import service
+    from . import __main__
+    service = __main__.service
 
     if not service or not service.database or not service.mqtt_publisher:
         raise HTTPException(

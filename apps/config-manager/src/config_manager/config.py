@@ -69,15 +69,15 @@ class ConfigManagerConfig(BaseModel):
 
     # REST API
     api_host: str = Field(
-        default_factory=lambda: os.getenv("CONFIG_API_HOST", "0.0.0.0"),
+        default_factory=lambda: os.getenv("CONFIG_MANAGER_HOST", "0.0.0.0"),
         description="API server host",
     )
     api_port: int = Field(
-        default_factory=lambda: int(os.getenv("CONFIG_API_PORT", "8081")),
+        default_factory=lambda: int(os.getenv("CONFIG_MANAGER_PORT", "8081")),
         description="API server port",
     )
     api_reload: bool = Field(
-        default_factory=lambda: os.getenv("CONFIG_API_RELOAD", "0") == "1",
+        default_factory=lambda: os.getenv("CONFIG_MANAGER_API_RELOAD", "0") == "1",
         description="Enable API auto-reload (dev only)",
     )
 

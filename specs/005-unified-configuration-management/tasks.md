@@ -118,24 +118,7 @@
 - [X] T050 [P] [US1] Add PUT /api/config/services/{service} endpoint (update config with optimistic locking)
 - [X] T051 [P] [US1] Add MQTT notification on config update (publish to config/update after successful PUT)
 - [X] T052 [P] [US1] Add LKG cache update on config change (atomic write after database update)
-- [ ] T053 [P] [US1] Add error handling and logging to all API endpoints (structured logs with correlation IDs)
-
-### MQTT Integration
-
-- [ ] T043 Create `apps/config-manager/src/config_manager/mqtt_handler.py` with MQTT client setup and connection management
-- [ ] T044 Add configuration update publishing to mqtt_handler.py (sign with Ed25519, publish to system/config/<service> with QoS 1 + retained)
-- [ ] T045 Add health status publishing to mqtt_handler.py (publish to system/health/config-manager with retained flag)
-- [ ] T046 Add signature verification for incoming MQTT messages to mqtt_handler.py (timestamp validation, replay attack prevention)
-
-### REST API (Basic CRUD)
-
-- [ ] T047 [P] [US1] Create `apps/config-manager/src/config_manager/api.py` with FastAPI router setup
-- [ ] T048 [P] [US1] Add GET /api/config/services endpoint to list all services
-- [ ] T049 [P] [US1] Add GET /api/config/services/{service} endpoint to retrieve service config
-- [ ] T050 [US1] Add PUT /api/config/services/{service} endpoint to update service config (depends on T048, T049)
-- [ ] T051 [US1] Add optimistic locking to PUT endpoint (version check, conflict detection)
-- [ ] T052 [US1] Add config validation to PUT endpoint (Pydantic model validation before persist)
-- [ ] T053 [US1] Add MQTT notification to PUT endpoint (publish signed update after successful save)
+- [X] T053 [P] [US1] Add error handling and logging to all API endpoints (structured logs with correlation IDs)
 
 ### Web UI - Service Tabs
 
@@ -180,16 +163,16 @@
 
 ### UI Enhancement for Complexity Filtering
 
-- [ ] T073 [P] [US2] Add complexity level indicator to ConfigField.vue (badge showing "Simple" or "Advanced")
-- [ ] T074 [P] [US2] Create `apps/ui-web/frontend/src/components/ComplexityToggle.vue` for simple/advanced mode switch
-- [ ] T075 [US2] Add complexity filtering logic to ConfigEditor.vue (filter fields based on current mode)
-- [ ] T076 [US2] Add complexity level to all service config models in tars-core (mark commonly-used settings as SIMPLE)
-- [ ] T077 [US2] Update ConfigTabs.vue to show ComplexityToggle component in header
-- [ ] T078 [US2] Persist user's mode preference in localStorage (remember simple/advanced choice across sessions)
+- [X] T073 [P] [US2] Add complexity level indicator to ConfigField.vue (badge showing "Simple" or "Advanced")
+- [X] T074 [P] [US2] Create `apps/ui-web/frontend/src/components/ComplexityToggle.vue` for simple/advanced mode switch (implemented inline in ConfigTabs.vue)
+- [X] T075 [US2] Add complexity filtering logic to ConfigEditor.vue (filter fields based on current mode)
+- [X] T076 [US2] Add complexity level to all service config models in tars-core (mark commonly-used settings as SIMPLE)
+- [X] T077 [US2] Update ConfigTabs.vue to show ComplexityToggle component in header
+- [X] T078 [US2] Persist user's mode preference in localStorage (remember simple/advanced choice across sessions)
 
 ### Backend Support
 
-- [ ] T079 [US2] Add complexity metadata to config_items table sync in database.py
+- [X] T079 [US2] Add complexity metadata to config_items table sync in database.py
 - [ ] T080 [US2] Update GET /api/config/services/{service} to include complexity metadata for each field
 
 ### Testing
