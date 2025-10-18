@@ -11,6 +11,7 @@
       <span v-if="mqttCount > 0" class="badge">{{ mqttCount }}</span>
     </button>
     <button class="btn" @click="$emit('open-drawer', 'camera')">Camera</button>
+    <button class="btn" @click="$emit('open-drawer', 'config')">Config</button>
   </div>
 </template>
 

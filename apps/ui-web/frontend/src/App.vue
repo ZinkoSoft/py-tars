@@ -49,6 +49,14 @@
     >
       <HealthDrawer />
     </DrawerContainer>
+
+    <DrawerContainer
+      :is-open="uiStore.activeDrawer === 'config'"
+      title="Configuration"
+      @close="uiStore.closeDrawer"
+    >
+      <ConfigDrawer />
+    </DrawerContainer>
   </div>
 </template>
 
@@ -64,6 +72,7 @@ const MemoryDrawer = defineAsyncComponent(() => import('./drawers/MemoryDrawer.v
 const MQTTStreamDrawer = defineAsyncComponent(() => import('./drawers/MQTTStreamDrawer.vue'));
 const CameraDrawer = defineAsyncComponent(() => import('./drawers/CameraDrawer.vue'));
 const HealthDrawer = defineAsyncComponent(() => import('./drawers/HealthDrawer.vue'));
+const ConfigDrawer = defineAsyncComponent(() => import('./drawers/ConfigDrawer.vue'));
 import { useWebSocketStore } from './stores/websocket';
 import { useChatStore } from './stores/chat';
 import { useUIStore } from './stores/ui';

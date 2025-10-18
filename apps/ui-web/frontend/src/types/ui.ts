@@ -9,7 +9,7 @@
 /**
  * Drawer types available in the application
  */
-export type DrawerType = 'mic' | 'memory' | 'stream' | 'camera' | 'health'
+export type DrawerType = 'mic' | 'memory' | 'stream' | 'camera' | 'health' | 'config'
 
 /**
  * Drawer visibility state
