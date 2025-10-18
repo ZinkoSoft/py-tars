@@ -12,7 +12,7 @@ from typing import AsyncGenerator, List, Tuple
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from tars.config.database import ConfigDatabase
-from tars.config.models import ConfigEpoch
+from tars.config.models import ConfigEpochMetadata
 
 
 @pytest.fixture

@@ -199,3 +199,51 @@ export interface ConfigEditorState {
   /** User's complexity mode preference */
   complexityMode: "simple" | "advanced";
 }
+
+/**
+ * Search request payload.
+ */
+export interface SearchRequest {
+  /** Search query string */
+  query: string;
+  /** Optional service name filter */
+  service_filter?: string;
+  /** Optional complexity filter (simple/advanced) */
+  complexity_filter?: string;
+  /** Maximum number of results (1-200, default 50) */
+  max_results?: number;
+}
+
+/**
+ * Single search result item.
+ */
+export interface SearchResultItem {
+  /** Service name */
+  service: string;
+  /** Configuration key */
+  key: string;
+  /** Current value (omitted for secrets) */
+  value?: string | null;
+  /** Value type */
+  type: string;
+  /** Complexity level */
+  complexity: string;
+  /** Description */
+  description: string;
+  /** Whether value is a secret */
+  is_secret: boolean;
+  /** Relevance score (0-1) */
+  match_score: number;
+}
+
+/**
+ * Search response payload.
+ */
+export interface SearchResponse {
+  /** Original search query */
+  query: string;
+  /** Matching configuration items */
+  results: SearchResultItem[];
+  /** Total number of results */
+  total_count: number;
+}

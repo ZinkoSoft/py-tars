@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from .api import router as config_router
 from .config import load_config
@@ -72,6 +73,16 @@ def create_app() -> FastAPI:
         description="Centralized configuration management for TARS voice assistant",
         version="0.1.0",
         lifespan=lifespan,
+    )
+
+    # Add CORS middleware to allow cross-origin requests from UI
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # Allow all origins in dev; restrict in production
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["*"],
     )
 
     # Include API router

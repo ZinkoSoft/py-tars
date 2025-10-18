@@ -10,7 +10,7 @@ Provides:
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -51,7 +51,7 @@ class LKGCacheManager:
             cache_data = {
                 "payload": service_configs,
                 "config_epoch": config_epoch,
-                "generated_at": datetime.utcnow().isoformat(),
+                "generated_at": datetime.now(UTC).isoformat(),
             }
 
             # Sign cache with HMAC

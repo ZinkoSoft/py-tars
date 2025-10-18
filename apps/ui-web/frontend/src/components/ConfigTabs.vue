@@ -1,5 +1,13 @@
 <template>
   <div class="config-tabs">
+    <!-- Search Bar -->
+    <ConfigSearch
+      v-model="searchQuery"
+      v-model:complexity="searchComplexity"
+      :result-count="searchResultCount"
+      @search="handleSearch"
+    />
+
     <!-- Tabs Header -->
     <div class="tabs-header">
       <div class="tabs-nav">
@@ -59,6 +67,7 @@
         :loading="loading"
         :error="error"
         :complexity-filter="complexity"
+        :search-query="searchQuery"
         @save="handleSave"
         @reload="handleReload"
       />
@@ -72,6 +81,7 @@ import { useConfig } from '../composables/useConfig';
 import { useNotifications } from '../composables/useNotifications';
 import { useHealth } from '../composables/useHealth';
 import ConfigEditor from './ConfigEditor.vue';
+import ConfigSearch from './ConfigSearch.vue';
 import HealthIndicator from './HealthIndicator.vue';
 import type { ServiceConfig } from '../types/config';
 
@@ -83,6 +93,11 @@ const { isHealthy, lastUpdate } = useHealth(10000); // Poll every 10 seconds
 // State
 const selectedService = ref<string | null>(null);
 const complexity = ref<'simple' | 'advanced' | 'all'>('simple');
+
+// Search state
+const searchQuery = ref('');
+const searchComplexity = ref<'simple' | 'advanced' | null>(null);
+const searchResultCount = ref(0);
 
 // Computed
 const currentConfigData = computed(() => currentConfig.value);
@@ -132,6 +147,30 @@ function formatServiceName(service: string): string {
     .split('-')
     .map(word => word.toUpperCase())
     .join(' ');
+}
+
+async function handleSearch(query: string): Promise<void> {
+  searchQuery.value = query;
+  
+  if (!query.trim()) {
+    // Clear search - reset to showing all configs
+    searchResultCount.value = 0;
+    return;
+  }
+  
+  // Call search API
+  const { searchConfigurations } = useConfig();
+  const results = await searchConfigurations(
+    query,
+    selectedService.value, // Filter by current service if selected
+    searchComplexity.value
+  );
+  
+  if (results) {
+    searchResultCount.value = results.total_count;
+  } else {
+    searchResultCount.value = 0;
+  }
 }
 
 // Lifecycle
@@ -286,8 +325,11 @@ watch(() => services.value, (newServices) => {
 /* Tabs Content */
 .tabs-content {
   flex: 1;
-  overflow: hidden;
+  min-height: 0;
+  overflow-y: auto;
   background: #fff;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Responsive */

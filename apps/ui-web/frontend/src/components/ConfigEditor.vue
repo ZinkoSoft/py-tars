@@ -33,11 +33,13 @@
         <div class="header-right">
           <button
             @click="handleSave"
-            :disabled="!hasChanges || saving || !isValid"
+            :disabled="!hasChanges || saving || !isValid || !canWrite"
             class="btn-save"
-            :class="{ 'btn-disabled': !hasChanges || saving || !isValid }"
+            :class="{ 'btn-disabled': !hasChanges || saving || !isValid || !canWrite }"
+            :title="!canWrite ? 'You do not have permission to save configuration' : ''"
           >
             <span v-if="saving">Saving...</span>
+            <span v-else-if="!canWrite">Read Only</span>
             <span v-else>{{ hasChanges ? 'Save Changes' : 'No Changes' }}</span>
           </button>
           <button
@@ -62,6 +64,13 @@
             <strong>{{ formatFieldKey(error.field) }}:</strong> {{ error.message }}
           </li>
         </ul>
+      </div>
+
+      <!-- Permission Warning -->
+      <div v-if="!canWrite" class="permission-warning">
+        <span class="warning-icon">🔒</span>
+        <strong>Read-Only Mode:</strong> You do not have permission to modify configuration.
+        Contact an administrator to request write access.
       </div>
 
       <!-- Success Message -->
@@ -102,12 +111,16 @@ import { useNotifications } from '../composables/useNotifications';
 import type { ServiceConfig, ConfigFieldMetadata, ValidationError } from '../types/config';
 
 const { notify } = useNotifications();
+import { useConfig } from '../composables/useConfig';
+
+const { canWrite } = useConfig();
 
 interface Props {
   config: ServiceConfig | null;
   loading: boolean;
   error: string | null;
   complexityFilter?: 'simple' | 'advanced' | 'all';
+  searchQuery?: string;
 }
 
 interface Emits {
@@ -117,6 +130,7 @@ interface Emits {
 
 const props = withDefaults(defineProps<Props>(), {
   complexityFilter: 'all',
+  searchQuery: '',
 });
 
 const emit = defineEmits<Emits>();
@@ -369,7 +383,7 @@ watch(() => props.config, () => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  min-height: 0; /* Allow flex child to shrink below content size */
 }
 
 .editor-header {
@@ -462,6 +476,23 @@ watch(() => props.config, () => {
   margin: 0;
   padding-left: 1.5rem;
   color: #c62828;
+}
+
+/* Permission Warning */
+.permission-warning {
+  margin: 1rem 1.5rem;
+  padding: 1rem;
+  background: #fff3e0;
+  border: 1px solid #ffb74d;
+  border-radius: 4px;
+  color: #ef6c00;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.warning-icon {
+  font-size: 1.25rem;
 }
 
 /* Success Message */

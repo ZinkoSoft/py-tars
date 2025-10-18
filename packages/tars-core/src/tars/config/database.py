@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +21,7 @@ import orjson
 from pydantic import BaseModel
 
 from tars.config.crypto import decrypt_secret_async, encrypt_secret_async
-from tars.config.models import ConfigEpochMetadata, ConfigItem, SchemaVersion, ServiceConfig
+from tars.config.models import ConfigEpochMetadata, ConfigHistory, ConfigItem, ConfigProfile, SchemaVersion, ServiceConfig
 from tars.config.types import ConfigType
 
 
@@ -80,6 +80,18 @@ CREATE TABLE IF NOT EXISTS config_history (
 );
 CREATE INDEX IF NOT EXISTS idx_config_history_service ON config_history(service);
 CREATE INDEX IF NOT EXISTS idx_config_history_time ON config_history(changed_at);
+
+-- Configuration profiles (named snapshots for quick switching)
+CREATE TABLE IF NOT EXISTS config_profiles (
+    profile_name TEXT PRIMARY KEY,
+    description TEXT,
+    config_snapshot_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    created_by TEXT,
+    updated_at TEXT NOT NULL,
+    updated_by TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_config_profiles_created ON config_profiles(created_at);
 
 -- Encrypted secrets (user-created, separate from .env secrets)
 CREATE TABLE IF NOT EXISTS encrypted_secrets (
@@ -215,7 +227,7 @@ class ConfigDatabase:
             INSERT OR REPLACE INTO schema_version (id, version, model_hash, updated_at)
             VALUES (1, ?, ?, ?)
             """,
-            (new_version, new_hash, datetime.utcnow().isoformat()),
+            (new_version, new_hash, datetime.now(UTC).isoformat()),
         )
         await self._conn.commit()
         return new_version
@@ -329,7 +341,7 @@ class ConfigDatabase:
         # Get current config and epoch
         current = await self.get_service_config(service)
         epoch_data = await self.get_config_epoch()
-        config_epoch = epoch_data.epoch_id if epoch_data else await self.create_epoch()
+        config_epoch = epoch_data.config_epoch if epoch_data else await self.create_epoch()
 
         # Check version if expected_version is specified
         if expected_version is not None:
@@ -341,7 +353,68 @@ class ConfigDatabase:
         # Calculate new version
         new_version = (current.version + 1) if current else 1
         config_json = orjson.dumps(config).decode()
-        updated_at = datetime.utcnow().isoformat()
+        updated_at = datetime.now(UTC).isoformat()
+
+        # Record history: compare old and new config
+        if current:
+            # Track changes for history
+            old_config = current.config
+            for key, new_value in config.items():
+                old_value = old_config.get(key)
+                if old_value != new_value:
+                    # Record change in history
+                    await self._conn.execute(
+                        """
+                        INSERT INTO config_history (service, key, old_value_json, new_value_json, changed_at, changed_by, change_reason)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            service,
+                            key,
+                            orjson.dumps(old_value).decode() if old_value is not None else None,
+                            orjson.dumps(new_value).decode(),
+                            updated_at,
+                            updated_by,
+                            None,  # change_reason - can be added to API later
+                        ),
+                    )
+            
+            # Check for deleted keys
+            for key in old_config:
+                if key not in config:
+                    await self._conn.execute(
+                        """
+                        INSERT INTO config_history (service, key, old_value_json, new_value_json, changed_at, changed_by, change_reason)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            service,
+                            key,
+                            orjson.dumps(old_config[key]).decode(),
+                            orjson.dumps(None).decode(),
+                            updated_at,
+                            updated_by,
+                            "Key deleted",
+                        ),
+                    )
+        else:
+            # New service config - record all keys as new
+            for key, value in config.items():
+                await self._conn.execute(
+                    """
+                    INSERT INTO config_history (service, key, old_value_json, new_value_json, changed_at, changed_by, change_reason)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        service,
+                        key,
+                        None,
+                        orjson.dumps(value).decode(),
+                        updated_at,
+                        updated_by,
+                        "Initial configuration",
+                    ),
+                )
 
         await self._conn.execute(
             """
@@ -402,7 +475,7 @@ class ConfigDatabase:
                     meta.get("description", ""),
                     meta.get("help_text", ""),
                     1 if meta.get("is_secret", False) else 0,
-                    datetime.utcnow().isoformat(),
+                    datetime.now(UTC).isoformat(),
                 ),
             )
 
@@ -493,7 +566,7 @@ class ConfigDatabase:
             raise RuntimeError("Database not connected")
 
         encrypted_value = await encrypt_secret_async(plaintext, master_key_base64)
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(UTC).isoformat()
 
         await self._conn.execute(
             """
@@ -546,3 +619,274 @@ class ConfigDatabase:
         ) as cursor:
             rows = await cursor.fetchall()
             return [(row[0], row[1]) for row in rows]
+
+    # ===== Configuration Profiles (Named Snapshots) =====
+
+    async def save_profile(self, profile: ConfigProfile) -> None:
+        """Save or update a configuration profile.
+
+        Args:
+            profile: Profile to save with complete config snapshot
+        """
+        if not self._conn:
+            raise RuntimeError("Database not connected")
+
+        now = datetime.now(UTC).isoformat()
+        config_json = orjson.dumps(profile.config_snapshot).decode()
+
+        await self._conn.execute(
+            """
+            INSERT OR REPLACE INTO config_profiles 
+            (profile_name, description, config_snapshot_json, created_at, created_by, updated_at, updated_by)
+            VALUES (?, ?, ?, 
+                    COALESCE((SELECT created_at FROM config_profiles WHERE profile_name = ?), ?),
+                    COALESCE((SELECT created_by FROM config_profiles WHERE profile_name = ?), ?),
+                    ?, ?)
+            """,
+            (
+                profile.profile_name,
+                profile.description,
+                config_json,
+                profile.profile_name,  # For COALESCE created_at
+                now,  # Default created_at if new
+                profile.profile_name,  # For COALESCE created_by
+                profile.created_by,  # Default created_by if new
+                now,  # updated_at (always current time)
+                profile.updated_by,
+            ),
+        )
+        await self._conn.commit()
+
+    async def list_profiles(self) -> list[ConfigProfile]:
+        """List all saved configuration profiles.
+
+        Returns:
+            List of ConfigProfile objects (without full config snapshot for performance)
+        """
+        if not self._conn:
+            raise RuntimeError("Database not connected")
+
+        async with self._conn.execute(
+            """
+            SELECT profile_name, description, created_at, created_by, updated_at, updated_by
+            FROM config_profiles 
+            ORDER BY updated_at DESC
+            """
+        ) as cursor:
+            rows = await cursor.fetchall()
+            profiles = []
+            for row in rows:
+                profiles.append(
+                    ConfigProfile(
+                        profile_name=row[0],
+                        description=row[1],
+                        config_snapshot={},  # Empty for list view
+                        created_at=datetime.fromisoformat(row[2]),
+                        created_by=row[3],
+                        updated_at=datetime.fromisoformat(row[4]),
+                        updated_by=row[5],
+                    )
+                )
+            return profiles
+
+    async def get_profile(self, profile_name: str) -> ConfigProfile | None:
+        """Get a specific configuration profile by name.
+
+        Args:
+            profile_name: Name of the profile to retrieve
+
+        Returns:
+            ConfigProfile with full config snapshot or None if not found
+        """
+        if not self._conn:
+            raise RuntimeError("Database not connected")
+
+        async with self._conn.execute(
+            """
+            SELECT profile_name, description, config_snapshot_json, 
+                   created_at, created_by, updated_at, updated_by
+            FROM config_profiles 
+            WHERE profile_name = ?
+            """,
+            (profile_name,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                config_snapshot = orjson.loads(row[2])
+                return ConfigProfile(
+                    profile_name=row[0],
+                    description=row[1],
+                    config_snapshot=config_snapshot,
+                    created_at=datetime.fromisoformat(row[3]),
+                    created_by=row[4],
+                    updated_at=datetime.fromisoformat(row[5]),
+                    updated_by=row[6],
+                )
+            return None
+
+    async def delete_profile(self, profile_name: str) -> bool:
+        """Delete a configuration profile.
+
+        Args:
+            profile_name: Name of the profile to delete
+
+        Returns:
+            True if profile was deleted, False if it didn't exist
+        """
+        if not self._conn:
+            raise RuntimeError("Database not connected")
+
+        cursor = await self._conn.execute(
+            "DELETE FROM config_profiles WHERE profile_name = ?", (profile_name,)
+        )
+        await self._conn.commit()
+        return cursor.rowcount > 0
+
+    async def load_profile(self, profile_name: str, epoch: str, loaded_by: str | None = None) -> dict[str, ServiceConfig]:
+        """Load a profile and convert to ServiceConfig objects ready for activation.
+
+        Args:
+            profile_name: Name of the profile to load
+            epoch: Current config epoch to assign to loaded configs
+            loaded_by: User identifier for audit trail
+
+        Returns:
+            Dictionary mapping service name to ServiceConfig
+
+        Raises:
+            ValueError: If profile not found
+        """
+        profile = await self.get_profile(profile_name)
+        if not profile:
+            raise ValueError(f"Profile '{profile_name}' not found")
+
+        service_configs = {}
+        for service, config in profile.config_snapshot.items():
+            service_configs[service] = ServiceConfig(
+                service=service,
+                config=config,
+                version=1,  # Will be updated when applied
+                updated_at=datetime.now(UTC),
+                config_epoch=epoch,
+            )
+
+        return service_configs
+
+    # ===== Configuration History =====
+
+    async def get_config_history(
+        self,
+        service: str | None = None,
+        key: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        limit: int = 100,
+    ) -> list[ConfigHistory]:
+        """Get configuration change history with optional filters.
+
+        Args:
+            service: Filter by service name (optional)
+            key: Filter by configuration key (optional)
+            start_date: Filter by changes after this date (optional)
+            end_date: Filter by changes before this date (optional)
+            limit: Maximum number of history entries to return (default 100)
+
+        Returns:
+            List of ConfigHistory entries, most recent first
+        """
+        if not self._conn:
+            raise RuntimeError("Database not connected")
+
+        # Build query dynamically based on filters
+        conditions = []
+        params = []
+
+        if service:
+            conditions.append("service = ?")
+            params.append(service)
+        
+        if key:
+            conditions.append("key = ?")
+            params.append(key)
+        
+        if start_date:
+            conditions.append("changed_at >= ?")
+            params.append(start_date.isoformat())
+        
+        if end_date:
+            conditions.append("changed_at <= ?")
+            params.append(end_date.isoformat())
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.append(limit)
+
+        query = f"""
+            SELECT id, service, key, old_value_json, new_value_json, changed_at, changed_by, change_reason
+            FROM config_history
+            {where_clause}
+            ORDER BY changed_at DESC, id DESC
+            LIMIT ?
+        """
+
+        async with self._conn.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+            return [
+                ConfigHistory(
+                    id=row[0],
+                    service=row[1],
+                    key=row[2],
+                    old_value_json=row[3],
+                    new_value_json=row[4],
+                    changed_at=datetime.fromisoformat(row[5]),
+                    changed_by=row[6],
+                    change_reason=row[7],
+                )
+                for row in rows
+            ]
+
+    async def get_service_history(
+        self,
+        service: str,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        limit: int = 100,
+    ) -> list[ConfigHistory]:
+        """Get change history for a specific service.
+
+        Args:
+            service: Service name
+            start_date: Filter by changes after this date (optional)
+            end_date: Filter by changes before this date (optional)
+            limit: Maximum number of history entries to return
+
+        Returns:
+            List of ConfigHistory entries for the service
+        """
+        return await self.get_config_history(
+            service=service,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
+
+    async def get_key_history(
+        self,
+        service: str,
+        key: str,
+        limit: int = 50,
+    ) -> list[ConfigHistory]:
+        """Get change history for a specific configuration key.
+
+        Args:
+            service: Service name
+            key: Configuration key
+            limit: Maximum number of history entries to return
+
+        Returns:
+            List of ConfigHistory entries for the key
+        """
+        return await self.get_config_history(
+            service=service,
+            key=key,
+            limit=limit,
+        )

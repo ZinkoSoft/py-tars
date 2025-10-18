@@ -214,11 +214,20 @@ async def proxy_health() -> JSONResponse:
 
 
 @app.get("/api/config/services")
-async def proxy_get_services() -> JSONResponse:
+async def proxy_get_services(request: Request) -> JSONResponse:
     """Proxy GET /api/config/services to config-manager."""
     try:
+        # Forward authentication headers
+        headers = {}
+        if "x-api-token" in request.headers:
+            headers["X-API-Token"] = request.headers["x-api-token"]
+        
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{config.config_manager_url}/api/config/services", timeout=10.0)
+            response = await client.get(
+                f"{config.config_manager_url}/api/config/services",
+                headers=headers,
+                timeout=10.0
+            )
             return JSONResponse(content=response.json(), status_code=response.status_code)
     except Exception as e:
         logger.error("Failed to proxy GET /api/config/services: %s", e)
@@ -226,14 +235,19 @@ async def proxy_get_services() -> JSONResponse:
 
 
 @app.get("/api/config/services/{service_name}")
-async def proxy_get_service_config(service_name: str, include_fields: bool = False) -> JSONResponse:
+async def proxy_get_service_config(service_name: str, include_fields: bool = False, request: Request = None) -> JSONResponse:
     """Proxy GET /api/config/services/{service_name} to config-manager."""
     try:
+        # Forward authentication headers
+        headers = {}
+        if request and "x-api-token" in request.headers:
+            headers["X-API-Token"] = request.headers["x-api-token"]
+        
         async with httpx.AsyncClient() as client:
             url = f"{config.config_manager_url}/api/config/services/{service_name}"
             if include_fields:
                 url += "?include_fields=true"
-            response = await client.get(url, timeout=10.0)
+            response = await client.get(url, headers=headers, timeout=10.0)
             return JSONResponse(content=response.json(), status_code=response.status_code)
     except Exception as e:
         logger.error("Failed to proxy GET /api/config/services/%s: %s", service_name, e)
@@ -247,10 +261,18 @@ async def proxy_put_service_config(service_name: str, request: Request) -> JSONR
         # Get request body as JSON
         body = await request.json()
         
+        # Forward authentication headers
+        headers = {}
+        if "x-api-token" in request.headers:
+            headers["X-API-Token"] = request.headers["x-api-token"]
+        if "x-csrf-token" in request.headers:
+            headers["X-CSRF-Token"] = request.headers["x-csrf-token"]
+        
         async with httpx.AsyncClient() as client:
             response = await client.put(
                 f"{config.config_manager_url}/api/config/services/{service_name}",
                 json=body,
+                headers=headers,
                 timeout=10.0
             )
             return JSONResponse(content=response.json(), status_code=response.status_code)

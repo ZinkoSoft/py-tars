@@ -9,6 +9,7 @@ from typing import Optional
 from tars.config.cache import LKGCacheManager
 from tars.config.database import ConfigDatabase
 
+from .auth import initialize_token_store
 from .config import ConfigManagerConfig
 from .mqtt import MQTTPublisher
 
@@ -48,6 +49,11 @@ class ConfigManagerService:
         logger.info("Initializing config manager service")
 
         try:
+            # Initialize token store for API authentication
+            logger.info("Initializing API token store")
+            token_store = initialize_token_store()
+            logger.info(f"Token store initialized with {len(token_store._tokens)} tokens")
+            
             # Initialize database
             logger.info(f"Opening database: {self.config.db_path}")
             self.database = ConfigDatabase(str(self.config.db_path))
