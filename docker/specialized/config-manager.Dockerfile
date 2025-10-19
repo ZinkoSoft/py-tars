@@ -16,6 +16,10 @@ WORKDIR /app
 COPY packages/tars-core /app/packages/tars-core
 COPY apps/config-manager /app/apps/config-manager
 
+# Copy configuration metadata
+RUN mkdir -p /etc/tars
+COPY ops/config-metadata.yml /etc/tars/config-metadata.yml
+
 # Install tars-core package
 RUN pip install --no-cache-dir -e /app/packages/tars-core
 

@@ -7,7 +7,6 @@
           <span v-if="field.required" class="required-indicator">*</span>
         </label>
         <button 
-          v-if="field.examples || field.helpText"
           @click="showHelpModal = true" 
           class="help-button"
           type="button"

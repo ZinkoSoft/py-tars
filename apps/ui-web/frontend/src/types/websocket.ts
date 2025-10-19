@@ -148,7 +148,14 @@ export function parseWebSocketMessage(data: string | ArrayBuffer | Blob): WebSoc
  * Constructs WebSocket URL based on current page protocol and host
  */
 export function buildWebSocketUrl(path: string = '/ws'): string {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  // In development mode (Vite dev server), use the backend server IP
+  const isDev = import.meta.env.DEV
+  
+  if (isDev) {
+    return `ws://192.168.1.205:5010${path}`
+  }
+  
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'  
   const host = window.location.host
   return `${protocol}//${host}${path}`
 }

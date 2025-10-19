@@ -14,6 +14,10 @@ import type {
   ServiceConfig,
   SearchRequest,
   SearchResponse,
+  ConfigFieldMetadata,
+  ConfigType,
+  ConfigComplexity,
+  ConfigSource,
 } from "../types/config";
 
 // API base URL - adjust for your deployment
@@ -251,13 +255,38 @@ export function useConfig() {
 
       const data: ConfigGetResponse = await response.json();
 
-      // Convert snake_case to camelCase for TypeScript
+      // Convert snake_case to camelCase and map fields metadata
+      const fields: ConfigFieldMetadata[] | undefined = data.fields?.map(field => {
+        const metadata: ConfigFieldMetadata = {
+          key: field.key,
+          value: data.config[field.key],
+          type: field.type as ConfigType,
+          complexity: field.complexity as ConfigComplexity,
+          description: field.description,
+          helpText: field.help_text || undefined,
+          examples: field.examples || undefined,
+          required: false, // Not provided by API currently
+          source: 'database' as ConfigSource,
+          envOverride: false, // Not provided by API currently
+        };
+
+        // For enum types, populate validation.allowed from examples
+        if (field.type === 'enum' && field.examples && field.examples.length > 0) {
+          metadata.validation = {
+            allowed: field.examples,
+          };
+        }
+
+        return metadata;
+      });
+
       const config: ServiceConfig = {
         service: data.service,
         config: data.config,
         version: data.version,
         updatedAt: data.updated_at,
         configEpoch: data.config_epoch,
+        fields,
       };
 
       currentConfig.value = config;

@@ -169,7 +169,15 @@ async def index() -> HTMLResponse:
     if INDEX_HTML_PATH and INDEX_HTML_PATH.exists():
         try:
             with open(INDEX_HTML_PATH, "r", encoding="utf-8") as f:
-                return HTMLResponse(f.read())
+                content = f.read()
+                return HTMLResponse(
+                    content,
+                    headers={
+                        "Cache-Control": "no-cache, no-store, must-revalidate",
+                        "Pragma": "no-cache",
+                        "Expires": "0"
+                    }
+                )
         except Exception as e:
             logger.error(f"Failed to serve index.html: {e}")
             return HTMLResponse("<h1>TARS Web UI - Error loading frontend</h1>", status_code=500)

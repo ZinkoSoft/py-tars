@@ -1,0 +1,119 @@
+# Configuration Metadata for TARS Services
+# 
+# This file provides human-readable descriptions, help text, and examples
+# for all configuration fields across all services. It's loaded by config-manager
+# at startup to populate the UI with proper documentation.
+#
+# Structure:
+#   service-name:
+#     field_name:
+#       description: Short one-line description (shown next to field)
+#       help_text: Detailed explanation with usage guidance
+#       examples: List of example values (used for enum dropdowns)
+
+stt-worker:
+  whisper_model:
+    description: "Whisper model size for speech transcription"
+    help_text: "Larger models are more accurate but slower. Recommended: base.en for English-only, small for multilingual."
+    examples:
+      - "base.en"
+      - "small"
+      - "medium"
+      - "large-v2"
+      - "large-v3"
+  
+  stt_backend:
+    description: "Speech-to-text backend implementation"
+    help_text: "Choose 'whisper' for local Faster-Whisper, 'ws' for WebSocket offload (Jetson/NPU), or 'openai' for cloud API."
+    examples:
+      - "whisper"
+      - "ws"
+      - "openai"
+  
+  ws_url:
+    description: "WebSocket backend URL for offloaded transcription"
+    help_text: "Only used when stt_backend=ws. Points to a Faster-Whisper WebSocket server (typically on Jetson/NPU)."
+    examples:
+      - "ws://192.168.1.100:9000/stt"
+      - "ws://jetson.local:9000/stt"
+  
+  sample_rate:
+    description: "Audio sample rate in Hz"
+    help_text: "Standard sample rate for microphone capture. Whisper expects 16000 Hz."
+    examples:
+      - "16000"
+      - "48000"
+  
+  vad_aggressiveness:
+    description: "Voice Activity Detection sensitivity (0-3)"
+    help_text: "Higher values are more aggressive at filtering non-speech. 3 = most aggressive, 0 = least aggressive."
+    examples:
+      - "0"
+      - "1"
+      - "2"
+      - "3"
+  
+  vad_threshold:
+    description: "VAD probability threshold (0.0-1.0)"
+    help_text: "Minimum probability score to consider audio as speech. Lower = more sensitive to quiet speech."
+    examples:
+      - "0.3"
+      - "0.5"
+      - "0.7"
+  
+  vad_speech_pad_ms:
+    description: "Padding duration in milliseconds before speech detection"
+    help_text: "Add this much audio before detected speech starts to avoid cutting off the beginning of words."
+    examples:
+      - "200"
+      - "300"
+      - "500"
+  
+  vad_silence_duration_ms:
+    description: "Silence duration in milliseconds to end speech"
+    help_text: "Wait this long after speech ends before finalizing the utterance. Longer values avoid mid-sentence cuts."
+    examples:
+      - "500"
+      - "700"
+      - "1000"
+  
+  streaming_partials:
+    description: "Enable streaming partial transcriptions"
+    help_text: "When enabled, publishes intermediate transcripts during speech. Disable with WebSocket backend to reduce overhead."
+    examples:
+      - "false"
+      - "true"
+  
+  post_publish_cooldown_ms:
+    description: "Cooldown period after publishing a transcript"
+    help_text: "Minimum time to wait after publishing before accepting new audio. Prevents duplicate rapid-fire transcripts."
+    examples:
+      - "400"
+      - "500"
+      - "1000"
+  
+  channels:
+    description: "Audio channels (1=mono, 2=stereo)"
+    help_text: "Whisper expects mono audio. Use 1 unless you have a specific need for stereo."
+    examples:
+      - "1"
+      - "2"
+
+# Add more services as needed:
+# tts-worker:
+#   piper_voice:
+#     description: "Piper voice model name"
+#     help_text: "..."
+#     examples: [...]
+# 
+# router:
+#   ...
+# 
+# llm-worker:
+#   ...
+# 
+# memory-worker:
+#   ...
+# 
+# wake-activation:
+#   ...

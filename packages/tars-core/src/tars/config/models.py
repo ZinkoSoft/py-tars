@@ -57,6 +57,7 @@ class ConfigItem(BaseModel):
     complexity: ConfigComplexity = Field(...)
     description: str = Field(...)
     help_text: str = Field(default="")
+    examples: list[str] = Field(default_factory=list, description="Example values")
     is_secret: bool = Field(default=False)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     updated_by: str | None = Field(None, description="User identifier")

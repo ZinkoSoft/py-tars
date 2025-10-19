@@ -208,9 +208,9 @@ class ConfigManagerService:
                 service=service_name, config=config_dict, expected_version=None
             )
 
-            # Extract metadata and sync config_items
+            # Extract metadata and sync config_items (with service_name for custom metadata)
             config_model = all_configs[service_name]
-            metadata = extract_field_metadata(config_model)
+            metadata = extract_field_metadata(config_model, service_name)
             await self.database.sync_config_items(service_name, config_dict, metadata)
 
     @property

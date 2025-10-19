@@ -11,6 +11,7 @@ Provides:
 from __future__ import annotations
 
 import hashlib
+import logging
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,6 +24,8 @@ from pydantic import BaseModel
 from tars.config.crypto import decrypt_secret_async, encrypt_secret_async
 from tars.config.models import ConfigEpochMetadata, ConfigHistory, ConfigItem, ConfigProfile, SchemaVersion, ServiceConfig
 from tars.config.types import ConfigType
+
+logger = logging.getLogger(__name__)
 
 
 # SQL Schema Definitions
@@ -57,6 +60,7 @@ CREATE TABLE IF NOT EXISTS config_items (
     complexity TEXT NOT NULL,
     description TEXT NOT NULL,
     help_text TEXT,
+    examples TEXT,
     is_secret INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL,
     updated_by TEXT,
@@ -151,6 +155,25 @@ class ConfigDatabase:
 
         await self._conn.executescript(SCHEMA_SQL)
         await self._conn.commit()
+        
+        # Migration: Add examples column if it doesn't exist
+        await self._migrate_add_examples_column()
+
+    async def _migrate_add_examples_column(self) -> None:
+        """Add examples column to config_items if it doesn't exist."""
+        if not self._conn:
+            raise RuntimeError("Database not connected")
+        
+        # Check if examples column exists
+        async with self._conn.execute("PRAGMA table_info(config_items)") as cursor:
+            columns = await cursor.fetchall()
+            column_names = [col[1] for col in columns]
+            
+            if "examples" not in column_names:
+                logger.info("Migrating database: adding examples column to config_items")
+                await self._conn.execute("ALTER TABLE config_items ADD COLUMN examples TEXT")
+                await self._conn.commit()
+                logger.info("Migration complete: examples column added")
 
     async def close(self) -> None:
         """Close database connection."""
@@ -461,10 +484,11 @@ class ConfigDatabase:
         for key, value in config.items():
             meta = metadata.get(key, {})
             value_json = orjson.dumps(value).decode()
+            examples_json = orjson.dumps(meta.get("examples", [])).decode() if meta.get("examples") else None
             await self._conn.execute(
                 """
-                INSERT INTO config_items (service, key, value_json, type, complexity, description, help_text, is_secret, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO config_items (service, key, value_json, type, complexity, description, help_text, examples, is_secret, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     service,
@@ -474,6 +498,7 @@ class ConfigDatabase:
                     meta.get("complexity", "simple"),
                     meta.get("description", ""),
                     meta.get("help_text", ""),
+                    examples_json,
                     1 if meta.get("is_secret", False) else 0,
                     datetime.now(UTC).isoformat(),
                 ),
@@ -502,7 +527,7 @@ class ConfigDatabase:
         if not self._conn:
             raise RuntimeError("Database not connected")
 
-        sql = "SELECT id, service, key, value_json, type, complexity, description, help_text, is_secret, updated_at, updated_by FROM config_items WHERE 1=1"
+        sql = "SELECT id, service, key, value_json, type, complexity, description, help_text, examples, is_secret, updated_at, updated_by FROM config_items WHERE 1=1"
         params: list[Any] = []
 
         if query:
@@ -536,9 +561,10 @@ class ConfigDatabase:
                     complexity=row[5],  # type: ignore
                     description=row[6],
                     help_text=row[7] or "",
-                    is_secret=bool(row[8]),
-                    updated_at=datetime.fromisoformat(row[9]),
-                    updated_by=row[10],
+                    examples=orjson.loads(row[8]) if row[8] else [],
+                    is_secret=bool(row[9]),
+                    updated_at=datetime.fromisoformat(row[10]),
+                    updated_by=row[11],
                 )
                 for row in rows
             ]

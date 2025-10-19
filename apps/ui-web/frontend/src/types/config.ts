@@ -62,6 +62,8 @@ export interface ConfigFieldMetadata {
   description: string;
   /** Optional help text with usage examples */
   helpText?: string;
+  /** Example values */
+  examples?: string[];
   /** Validation constraints */
   validation?: ConfigValidation;
   /** Whether field is required */
@@ -70,6 +72,10 @@ export interface ConfigFieldMetadata {
   source: ConfigSource;
   /** Whether value is overridden by environment variable */
   envOverride: boolean;
+  /** Environment variable name (if overridden) */
+  envVar?: string;
+  /** Default value */
+  default?: any;
 }
 
 /**
@@ -112,6 +118,16 @@ export interface ConfigGetResponse {
   updated_at: string;
   /** Current configuration epoch */
   config_epoch: string;
+  /** Field metadata with descriptions, help text, examples */
+  fields: Array<{
+    key: string;
+    type: string;
+    complexity: string;
+    description: string;
+    help_text: string | null;
+    examples: string[] | null;
+    is_secret: boolean;
+  }>;
 }
 
 /**

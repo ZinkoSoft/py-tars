@@ -2,21 +2,35 @@
 
 from __future__ import annotations
 
+import importlib
+import logging
+from pathlib import Path
 from typing import Any
 
+import yaml
 from pydantic import BaseModel
 
 from tars.config.types import ConfigComplexity, ConfigType
 
+logger = logging.getLogger(__name__)
 
-def extract_field_metadata(config_model: type[BaseModel]) -> dict[str, dict[str, Any]]:
+# Cache for loaded YAML metadata
+_METADATA_CACHE: dict[str, dict[str, dict[str, Any]]] | None = None
+_METADATA_FILE_PATH = Path("/etc/tars/config-metadata.yml")
+
+
+def extract_field_metadata(
+    config_model: type[BaseModel], service_name: str | None = None
+) -> dict[str, dict[str, Any]]:
     """Extract metadata from Pydantic model fields.
 
     Extracts complexity level, type, description, and validation constraints from
-    Field definitions and json_schema_extra annotations.
+    Field definitions and json_schema_extra annotations. If service_name is provided,
+    also attempts to load additional metadata from {service_name}/config_metadata.py.
 
     Args:
         config_model: Pydantic model class (e.g., STTWorkerConfig)
+        service_name: Service name (e.g., 'stt-worker') to load custom metadata
 
     Returns:
         Dictionary mapping field_name -> metadata dict with keys:
@@ -24,6 +38,7 @@ def extract_field_metadata(config_model: type[BaseModel]) -> dict[str, dict[str,
         - complexity: 'simple' or 'advanced' (default: 'simple')
         - description: Field description from Field(description=...) or json_schema_extra
         - help_text: Optional detailed help text
+        - examples: List of example values
         - is_secret: Whether field is a secret (bool)
         - validation_min: Minimum value for numeric types (if applicable)
         - validation_max: Maximum value for numeric types (if applicable)
@@ -32,13 +47,18 @@ def extract_field_metadata(config_model: type[BaseModel]) -> dict[str, dict[str,
 
     Example:
         >>> from tars.config.models import STTWorkerConfig
-        >>> metadata = extract_field_metadata(STTWorkerConfig)
+        >>> metadata = extract_field_metadata(STTWorkerConfig, 'stt-worker')
         >>> metadata['whisper_model']['complexity']
         'simple'
         >>> metadata['vad_threshold']['type']
         'float'
     """
     metadata = {}
+    
+    # Try to load custom metadata from service config_metadata.py
+    custom_metadata = {}
+    if service_name:
+        custom_metadata = _load_service_metadata(service_name)
 
     for field_name, field_info in config_model.model_fields.items():
         field_meta: dict[str, Any] = {}
@@ -68,6 +88,21 @@ def extract_field_metadata(config_model: type[BaseModel]) -> dict[str, dict[str,
         field_meta["help_text"] = ""
         if isinstance(json_extra, dict) and "help_text" in json_extra:
             field_meta["help_text"] = json_extra["help_text"]
+        
+        # Examples: from json_schema_extra if available
+        field_meta["examples"] = []
+        if isinstance(json_extra, dict) and "examples" in json_extra:
+            field_meta["examples"] = json_extra["examples"]
+
+        # Merge with custom metadata if available (custom metadata takes precedence)
+        if field_name in custom_metadata:
+            custom = custom_metadata[field_name]
+            if "description" in custom:
+                field_meta["description"] = custom["description"]
+            if "help_text" in custom:
+                field_meta["help_text"] = custom["help_text"]
+            if "examples" in custom:
+                field_meta["examples"] = custom["examples"]
 
         # Secret detection: field name contains 'key', 'secret', 'password', 'token'
         secret_keywords = ["key", "secret", "password", "token", "credential"]
@@ -191,3 +226,55 @@ def create_default_service_configs() -> dict[str, dict[str, Any]]:
         service_configs[service_name] = instance.model_dump()
 
     return service_configs
+
+
+def _load_service_metadata(service_name: str) -> dict[str, dict[str, Any]]:
+    """Load custom metadata from YAML configuration file.
+    
+    Args:
+        service_name: Service name (e.g., 'stt-worker')
+    
+    Returns:
+        Dictionary mapping field_name -> metadata dict, or empty dict if not found
+    """
+    global _METADATA_CACHE
+    
+    # Load and cache YAML file on first access
+    if _METADATA_CACHE is None:
+        _METADATA_CACHE = _load_yaml_metadata()
+    
+    # Return metadata for this service
+    service_metadata = _METADATA_CACHE.get(service_name, {})
+    if service_metadata:
+        logger.debug(f"Loaded metadata for {service_name} with {len(service_metadata)} fields from YAML")
+    
+    return service_metadata
+
+
+def _load_yaml_metadata() -> dict[str, dict[str, dict[str, Any]]]:
+    """Load all service metadata from YAML file.
+    
+    Returns:
+        Dictionary mapping service_name -> field_name -> metadata dict
+    """
+    try:
+        if not _METADATA_FILE_PATH.exists():
+            logger.warning(f"Metadata file not found: {_METADATA_FILE_PATH}")
+            return {}
+        
+        with open(_METADATA_FILE_PATH, 'r') as f:
+            data = yaml.safe_load(f)
+        
+        if not isinstance(data, dict):
+            logger.error(f"Invalid metadata file format: expected dict, got {type(data)}")
+            return {}
+        
+        logger.info(f"Loaded metadata for {len(data)} services from {_METADATA_FILE_PATH}")
+        return data
+        
+    except yaml.YAMLError as e:
+        logger.error(f"Failed to parse YAML metadata file: {e}", exc_info=True)
+        return {}
+    except Exception as e:
+        logger.error(f"Error loading metadata file: {e}", exc_info=True)
+        return {}

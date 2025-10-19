@@ -152,6 +152,7 @@ class ConfigFieldMetadataResponse(BaseModel):
     complexity: str = Field(description="Complexity level (simple or advanced)")
     description: str = Field(description="Human-readable description")
     help_text: Optional[str] = Field(default=None, description="Optional help text")
+    examples: Optional[List[str]] = Field(default=None, description="Example values")
     is_secret: bool = Field(default=False, description="Whether value is a secret")
 
 
@@ -501,6 +502,7 @@ async def get_service_config(
                     complexity=item.complexity,
                     description=item.description,
                     help_text=item.help_text,
+                    examples=item.examples if hasattr(item, 'examples') and item.examples else None,
                     is_secret=item.is_secret,
                 )
                 for item in config_items
