@@ -105,7 +105,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import ConfigField from './ConfigField.vue';
 import { useNotifications } from '../composables/useNotifications';
 import type { ServiceConfig, ConfigFieldMetadata, ValidationError } from '../types/config';
@@ -113,7 +113,12 @@ import type { ServiceConfig, ConfigFieldMetadata, ValidationError } from '../typ
 const { notify } = useNotifications();
 import { useConfig } from '../composables/useConfig';
 
-const { canWrite } = useConfig();
+const { canWrite, detectUserRole } = useConfig();
+
+// Ensure user role is detected on mount
+onMounted(async () => {
+  await detectUserRole();
+});
 
 interface Props {
   config: ServiceConfig | null;

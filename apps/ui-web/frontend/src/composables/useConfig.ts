@@ -96,7 +96,20 @@ export function useConfig() {
   const hasServices = computed(() => services.value.length > 0);
   const hasConfig = computed(() => currentConfig.value !== null);
   const canWrite = computed(() => {
-    if (!userRole.value) return false;
+    console.log('validating can write')
+    if (!userRole.value) {
+      console.log('canWrite: FALSE - no userRole');
+      return false;
+    }
+    console.log('user role is there', JSON.stringify(userRole.value))
+    
+    const hasWritePermission = userRole.value.permissions.includes("config.write");
+    const isAdmin = userRole.value.role === "admin";
+    
+    console.log('hasWritePermission:', hasWritePermission);
+    console.log('isAdmin:', isAdmin);
+    console.log('canWrite result:', hasWritePermission || isAdmin);
+    
     return (
       userRole.value.permissions.includes("config.write") ||
       userRole.value.role === "admin"
@@ -154,36 +167,53 @@ export function useConfig() {
    * For now, we infer role from successful API calls.
    */
   async function detectUserRole(): Promise<void> {
-    // Try to fetch services to determine if user has read access
+    console.log('[detectUserRole] Starting role detection...');
+    
+    // Try to fetch user info from the /me endpoint
     try {
-      const response = await fetch(`${API_BASE_URL}/services`, {
+      const apiToken = getApiToken();
+      console.log('[detectUserRole] API Token:', apiToken ? 'present' : 'missing');
+      
+      if (!apiToken) {
+        console.log('[detectUserRole] No token found, setting userRole to null');
+        userRole.value = null;
+        error.value = "No API token found. Please set an API token to continue.";
+        return;
+      }
+
+      console.log('[detectUserRole] Calling /me endpoint...');
+      const response = await fetch(`${API_BASE_URL}/me`, {
         headers: buildHeaders(),
       });
 
+      console.log('[detectUserRole] Response status:', response.status);
+
       if (response.ok) {
-        // User has at least read access
-        // In a real implementation, the API would return role info
-        // For now, we assume write access if token is present
-        const apiToken = getApiToken();
+        const data = await response.json();
+        console.log('[detectUserRole] User data received:', data);
+        
         userRole.value = {
-          name: "User",
-          role: apiToken ? "config.write" : "config.read",
-          permissions: apiToken
-            ? ["config.read", "config.write"]
-            : ["config.read"],
+          name: data.name,
+          role: data.role,
+          permissions: data.permissions,
         };
+        console.log('[detectUserRole] userRole.value set to:', userRole.value);
+        error.value = null;
       } else if (response.status === 401) {
+        console.log('[detectUserRole] 401 Unauthorized');
         userRole.value = null;
-        error.value = "Authentication required. Please provide an API token.";
+        error.value = "Authentication required. Please provide a valid API token.";
       } else if (response.status === 403) {
+        console.log('[detectUserRole] 403 Forbidden - read-only access');
         userRole.value = {
           name: "User",
           role: "config.read",
           permissions: ["config.read"],
         };
+        error.value = "Insufficient permissions.";
       }
     } catch (err) {
-      console.error("Failed to detect user role:", err);
+      console.error("[detectUserRole] Error:", err);
     }
   }
 

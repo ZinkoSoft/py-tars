@@ -350,6 +350,26 @@ async def get_csrf_token(
     )
 
 
+@router.get("/me")
+async def get_current_user(
+    token: APIToken = Depends(get_current_token),
+):
+    """Get current user information including role and permissions.
+    
+    Returns:
+        User role and permissions
+    """
+    from .auth import ROLE_PERMISSIONS
+    
+    permissions = ROLE_PERMISSIONS.get(token.role, [])
+    
+    return {
+        "name": token.name,
+        "role": token.role.value,
+        "permissions": [p.value for p in permissions],
+    }
+
+
 @router.get("/services", response_model=ServiceListResponse)
 async def list_services(
     token: APIToken = Depends(require_permissions(Permission.CONFIG_READ)),
