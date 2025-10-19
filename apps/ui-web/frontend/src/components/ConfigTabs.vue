@@ -8,19 +8,29 @@
       @search="handleSearch"
     />
 
-    <!-- Tabs Header -->
+    <!-- Header with Service Selector and Controls -->
     <div class="tabs-header">
-      <div class="tabs-nav">
-        <button
-          v-for="service in services"
-          :key="service"
-          @click="selectService(service)"
-          class="tab-button"
-          :class="{ 'tab-active': selectedService === service }"
-        >
-          {{ formatServiceName(service) }}
+      <!-- Service Selector (Hamburger Menu) -->
+      <div class="service-selector">
+        <button class="hamburger-btn" @click="toggleServiceMenu" title="Select service">
+          <span class="hamburger-icon">☰</span>
         </button>
+        <h2 class="current-service-title">{{ formatServiceName(selectedService || '') }}</h2>
+        
+        <!-- Service Dropdown Menu -->
+        <div v-if="showServiceMenu" class="service-menu">
+          <button
+            v-for="service in services"
+            :key="service"
+            @click="selectServiceFromMenu(service)"
+            class="service-menu-item"
+            :class="{ 'active': selectedService === service }"
+          >
+            {{ formatServiceName(service) }}
+          </button>
+        </div>
       </div>
+
       <div class="tabs-controls">
         <!-- Complexity Filter -->
         <div class="complexity-toggle">
@@ -93,19 +103,26 @@ const { isHealthy, lastUpdate } = useHealth(10000); // Poll every 10 seconds
 // State
 const selectedService = ref<string | null>(null);
 const complexity = ref<'simple' | 'advanced' | 'all'>('simple');
+const showServiceMenu = ref(false);
 
 // Search state
 const searchQuery = ref('');
 const searchComplexity = ref<'simple' | 'advanced' | null>(null);
 const searchResultCount = ref(0);
 
-// Computed
-const currentConfigData = computed(() => currentConfig.value);
-
 // Methods
+function toggleServiceMenu(): void {
+  showServiceMenu.value = !showServiceMenu.value;
+}
+
 async function selectService(service: string): Promise<void> {
   selectedService.value = service;
   await loadConfig(service);
+}
+
+async function selectServiceFromMenu(service: string): Promise<void> {
+  await selectService(service);
+  showServiceMenu.value = false;
 }
 
 function setComplexity(level: 'simple' | 'advanced' | 'all'): void {
@@ -205,7 +222,7 @@ watch(() => services.value, (newServices) => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: #fff;
+  background: var(--vscode-editor-background);
 }
 
 /* Tabs Header */
@@ -214,42 +231,96 @@ watch(() => services.value, (newServices) => {
   justify-content: space-between;
   align-items: center;
   padding: 0.75rem 1rem;
-  border-bottom: 2px solid #e0e0e0;
-  background: #fafafa;
+  border-bottom: 1px solid var(--vscode-sideBar-border);
+  background: var(--vscode-sideBar-background);
   gap: 1rem;
   flex-wrap: wrap;
 }
 
-.tabs-nav {
+/* Service Selector with Hamburger Menu */
+.service-selector {
+  position: relative;
   display: flex;
-  gap: 0.5rem;
-  overflow-x: auto;
+  align-items: center;
+  gap: 0.75rem;
   flex: 1;
   min-width: 0;
 }
 
-.tab-button {
-  padding: 0.5rem 1rem;
-  background: #fff;
-  border: 1px solid #ddd;
-  border-radius: 4px 4px 0 0;
+.hamburger-btn {
+  padding: 0.5rem;
+  background: var(--vscode-button-secondaryBackground);
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 4px;
   cursor: pointer;
-  font-weight: 500;
-  font-size: 0.875rem;
-  white-space: nowrap;
+  color: var(--vscode-button-secondaryForeground);
   transition: all 0.2s;
-  color: #666;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 40px;
 }
 
-.tab-button:hover {
-  background: #f5f5f5;
-  border-color: #bbb;
+.hamburger-btn:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
 }
 
-.tab-button.tab-active {
-  background: #2196f3;
+.hamburger-icon {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.current-service-title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--vscode-editor-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Service Dropdown Menu */
+.service-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 0.5rem;
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  min-width: 200px;
+  max-height: 400px;
+  overflow-y: auto;
+  z-index: 1000;
+}
+
+.service-menu-item {
+  display: block;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--vscode-sideBar-foreground);
+  font-size: 0.9375rem;
+  transition: all 0.2s;
+  border-bottom: 1px solid var(--vscode-input-border);
+}
+
+.service-menu-item:last-child {
+  border-bottom: none;
+}
+
+.service-menu-item:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.service-menu-item.active {
+  background: var(--vscode-list-activeSelectionBackground);
   color: white;
-  border-color: #2196f3;
   font-weight: 600;
 }
 
@@ -262,8 +333,8 @@ watch(() => services.value, (newServices) => {
 /* Complexity Toggle */
 .complexity-toggle {
   display: flex;
-  background: #fff;
-  border: 1px solid #ddd;
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border);
   border-radius: 4px;
   overflow: hidden;
 }
@@ -271,13 +342,13 @@ watch(() => services.value, (newServices) => {
 .complexity-btn {
   padding: 0.375rem 0.75rem;
   border: none;
-  background: #fff;
+  background: var(--vscode-input-background);
   cursor: pointer;
   font-size: 0.8125rem;
   font-weight: 500;
-  color: #666;
+  color: var(--vscode-input-foreground);
   transition: all 0.2s;
-  border-right: 1px solid #ddd;
+  border-right: 1px solid var(--vscode-input-border);
 }
 
 .complexity-btn:last-child {
@@ -285,22 +356,23 @@ watch(() => services.value, (newServices) => {
 }
 
 .complexity-btn:hover {
-  background: #f5f5f5;
+  background: var(--vscode-button-secondaryHoverBackground);
 }
 
 .complexity-btn.active {
-  background: #4caf50;
-  color: white;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
   font-weight: 600;
 }
 
 /* Refresh Button */
 .btn-refresh {
   padding: 0.375rem 0.75rem;
-  background: #fff;
-  border: 1px solid #ddd;
+  background: var(--vscode-button-secondaryBackground);
+  border: 1px solid var(--vscode-input-border);
   border-radius: 4px;
   cursor: pointer;
+  color: var(--vscode-button-secondaryForeground);
   transition: all 0.2s;
   display: flex;
   align-items: center;
@@ -308,8 +380,7 @@ watch(() => services.value, (newServices) => {
 }
 
 .btn-refresh:hover {
-  background: #f5f5f5;
-  border-color: #bbb;
+  background: var(--vscode-button-secondaryHoverBackground);
 }
 
 .refresh-icon {
@@ -327,7 +398,7 @@ watch(() => services.value, (newServices) => {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  background: #fff;
+  background: var(--vscode-editor-background);
   display: flex;
   flex-direction: column;
 }

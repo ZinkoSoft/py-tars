@@ -1,17 +1,14 @@
 <template>
   <div class="config-drawer">
     <ApiTokenPrompt @token-set="handleTokenSet" />
-    <Panel title="Service Configuration">
-      <div class="config-container">
-        <ConfigTabs :key="configKey" />
-      </div>
-    </Panel>
+    <div class="config-container">
+      <ConfigTabs :key="configKey" />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import Panel from '../components/Panel.vue';
 import ConfigTabs from '../components/ConfigTabs.vue';
 import ApiTokenPrompt from '../components/ApiTokenPrompt.vue';
 
@@ -30,6 +27,7 @@ function handleTokenSet() {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: var(--vscode-editor-background);
 }
 
 .config-container {
@@ -37,22 +35,5 @@ function handleTokenSet() {
   min-height: 0;
   display: flex;
   flex-direction: column;
-}
-
-/* Override Panel styles to make it fill space and scroll */
-:deep(.panel) {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-:deep(.panel__content) {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  padding: 0;
 }
 </style>

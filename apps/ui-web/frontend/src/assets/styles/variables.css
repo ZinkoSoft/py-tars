@@ -40,6 +40,32 @@
   --radius-lg: 12px;
   --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-size-xs: 12px;
+
+  /* VSCode-like dark theme for config UI */
+  --vscode-editor-background: #1e1e1e;
+  --vscode-editor-foreground: #d4d4d4;
+  --vscode-input-background: #2d2d30;
+  --vscode-input-foreground: #cccccc;
+  --vscode-input-border: #3c3c3c;
+  --vscode-input-placeholderForeground: #717171;
+  --vscode-focusBorder: #007acc;
+  --vscode-button-background: #0e639c;
+  --vscode-button-foreground: #ffffff;
+  --vscode-button-hoverBackground: #1177bb;
+  --vscode-button-secondaryBackground: #3a3d41;
+  --vscode-button-secondaryForeground: #cccccc;
+  --vscode-button-secondaryHoverBackground: #45494e;
+  --vscode-button-border: transparent;
+  --vscode-editorWidget-background: #252526;
+  --vscode-toolbar-hoverBackground: #3a3d41;
+  --vscode-descriptionForeground: #9d9d9d;
+  --vscode-errorForeground: #f48771;
+  --vscode-list-hoverBackground: #2a2d2e;
+  --vscode-list-activeSelectionBackground: #094771;
+  --vscode-sideBar-background: #252526;
+  --vscode-sideBar-foreground: #cccccc;
+  --vscode-sideBar-border: #3c3c3c;
+  --vscode-statusBar-background: #007acc;
 }
 
 /* Global resets */

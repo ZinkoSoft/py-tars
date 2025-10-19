@@ -301,6 +301,7 @@ watch(() => props.config, () => {
   height: 100%;
   display: flex;
   flex-direction: column;
+  background: var(--vscode-editor-background);
 }
 
 /* Loading State */
@@ -310,14 +311,14 @@ watch(() => props.config, () => {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #666;
+  color: var(--vscode-descriptionForeground);
 }
 
 .spinner {
   width: 40px;
   height: 40px;
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #2196f3;
+  border: 4px solid var(--vscode-input-border);
+  border-top: 4px solid var(--vscode-statusBar-background);
   border-radius: 50%;
   animation: spin 1s linear infinite;
   margin-bottom: 1rem;
@@ -337,6 +338,7 @@ watch(() => props.config, () => {
   height: 100%;
   padding: 2rem;
   text-align: center;
+  color: var(--vscode-editor-foreground);
 }
 
 .error-icon {
@@ -345,19 +347,19 @@ watch(() => props.config, () => {
 }
 
 .error-state h3 {
-  color: #d32f2f;
+  color: var(--vscode-errorForeground);
   margin-bottom: 0.5rem;
 }
 
 .error-state p {
-  color: #666;
+  color: var(--vscode-descriptionForeground);
   margin-bottom: 1rem;
 }
 
 .btn-retry {
   padding: 0.5rem 1.5rem;
-  background: #2196f3;
-  color: white;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
   border: none;
   border-radius: 4px;
   cursor: pointer;
@@ -365,7 +367,7 @@ watch(() => props.config, () => {
 }
 
 .btn-retry:hover {
-  background: #1976d2;
+  background: var(--vscode-button-hoverBackground);
 }
 
 /* Empty State */
@@ -374,7 +376,7 @@ watch(() => props.config, () => {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #999;
+  color: var(--vscode-descriptionForeground);
   font-size: 1.1rem;
 }
 
@@ -391,28 +393,29 @@ watch(() => props.config, () => {
   justify-content: space-between;
   align-items: flex-start;
   padding: 1.5rem;
-  border-bottom: 2px solid #e0e0e0;
-  background: #fafafa;
+  border-bottom: 1px solid var(--vscode-sideBar-border);
+  background: var(--vscode-sideBar-background);
 }
 
 .header-left h2 {
   margin: 0 0 0.5rem 0;
   font-size: 1.5rem;
-  color: #333;
+  color: var(--vscode-editor-foreground);
 }
 
 .meta-info {
   display: flex;
   gap: 1rem;
   font-size: 0.875rem;
-  color: #666;
+  color: var(--vscode-descriptionForeground);
 }
 
 .version-badge {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
   padding: 0.25rem 0.75rem;
-  background: #e3f2fd;
-  color: #1976d2;
-  border-radius: 4px;
+  border-radius: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
 }
 
@@ -432,35 +435,37 @@ watch(() => props.config, () => {
 }
 
 .btn-save {
-  background: #4caf50;
-  color: white;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
 }
 
-.btn-save:hover:not(.btn-disabled) {
-  background: #388e3c;
+.btn-save:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground);
 }
 
-.btn-save.btn-disabled {
-  background: #ccc;
+.btn-save:disabled,
+.btn-disabled {
+  background: var(--vscode-button-secondaryBackground);
   cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .btn-reset {
-  background: #f5f5f5;
-  color: #333;
-  border: 1px solid #ddd;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border);
 }
 
 .btn-reset:hover {
-  background: #e0e0e0;
+  background: var(--vscode-button-secondaryHoverBackground);
 }
 
 /* Validation Errors */
 .validation-errors {
   margin: 1rem 1.5rem;
   padding: 1rem;
-  background: #ffebee;
-  border: 1px solid #ef5350;
+  background: rgba(244, 71, 71, 0.1);
+  border: 1px solid var(--vscode-errorForeground);
   border-radius: 4px;
 }
 
@@ -469,22 +474,23 @@ watch(() => props.config, () => {
   align-items: center;
   gap: 0.5rem;
   margin-bottom: 0.5rem;
-  color: #d32f2f;
+  color: var(--vscode-errorForeground);
 }
 
 .errors-list {
   margin: 0;
   padding-left: 1.5rem;
-  color: #c62828;
+  color: var(--vscode-errorForeground);
 }
 
 /* Permission Warning */
 .permission-warning {
   margin: 1rem 1.5rem;
   padding: 1rem;
-  background: #fff3e0;
-  border: 1px solid #ffb74d;
+  background: rgba(255, 152, 0, 0.1);
+  border: 1px solid #ff9800;
   border-radius: 4px;
+  color: var(--vscode-editor-foreground);
   color: #ef6c00;
   display: flex;
   align-items: center;
@@ -499,10 +505,10 @@ watch(() => props.config, () => {
 .success-message {
   margin: 1rem 1.5rem;
   padding: 1rem;
-  background: #e8f5e9;
+  background: rgba(102, 187, 106, 0.1);
   border: 1px solid #66bb6a;
   border-radius: 4px;
-  color: #2e7d32;
+  color: #66bb6a;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -529,7 +535,7 @@ watch(() => props.config, () => {
   align-items: center;
   justify-content: center;
   height: 200px;
-  color: #999;
+  color: var(--vscode-descriptionForeground);
   font-size: 1.1rem;
 }
 </style>
