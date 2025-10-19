@@ -32,6 +32,13 @@
         </div>
         <div class="header-right">
           <button
+            @click="showHistoryModal = true"
+            class="btn-history"
+            title="View configuration change history"
+          >
+            📜 History
+          </button>
+          <button
             @click="handleSave"
             :disabled="!hasChanges || saving || !isValid || !canWrite"
             class="btn-save"
@@ -101,12 +108,24 @@
         <p>No configuration fields match the current filter.</p>
       </div>
     </div>
+
+    <!-- History Modal -->
+    <div v-if="showHistoryModal" class="modal-backdrop" @click.self="showHistoryModal = false">
+      <div class="modal-content">
+        <ConfigHistory
+          :service="config.service"
+          @close="showHistoryModal = false"
+          @restored="handleRestored"
+        />
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
 import ConfigField from './ConfigField.vue';
+import ConfigHistory from './ConfigHistory.vue';
 import { useNotifications } from '../composables/useNotifications';
 import type { ServiceConfig, ConfigFieldMetadata, ValidationError } from '../types/config';
 
@@ -145,6 +164,7 @@ const pendingChanges = ref<Record<string, any>>({});
 const validationErrors = ref<ValidationError[]>([]);
 const saving = ref(false);
 const successMessage = ref<string | null>(null);
+const showHistoryModal = ref(false);
 
 // Computed
 const hasChanges = computed(() => Object.keys(pendingChanges.value).length > 0);
@@ -257,6 +277,13 @@ function handleReset(): void {
   pendingChanges.value = {};
   validationErrors.value = [];
   successMessage.value = null;
+}
+
+function handleRestored(): void {
+  showHistoryModal.value = false;
+  // Reload the config to reflect restored values
+  emit('reload');
+  notify.success('Configuration restored successfully');
 }
 
 function reload(): void {
@@ -430,13 +457,24 @@ watch(() => props.config, () => {
 }
 
 .btn-save,
-.btn-reset {
+.btn-reset,
+.btn-history {
   padding: 0.625rem 1.25rem;
   border: none;
   border-radius: 4px;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.2s;
+}
+
+.btn-history {
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border);
+}
+
+.btn-history:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
 }
 
 .btn-save {
@@ -542,5 +580,30 @@ watch(() => props.config, () => {
   height: 200px;
   color: var(--vscode-descriptionForeground);
   font-size: 1.1rem;
+}
+
+/* History Modal */
+.modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  width: 90%;
+  max-width: 1200px;
+  max-height: 90vh;
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
 </style>

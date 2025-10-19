@@ -461,6 +461,88 @@ export function useConfig() {
   }
 
   /**
+   * Get configuration change history.
+   */
+  async function getHistory(params: {
+    service: string;
+    key?: string;
+    start_date?: string;
+    end_date?: string;
+    limit?: number;
+  }): Promise<any[]> {
+    loading.value = true;
+    error.value = null;
+
+    try {
+      const queryParams = new URLSearchParams();
+      queryParams.append("service", params.service);
+      if (params.key) queryParams.append("key", params.key);
+      if (params.start_date) queryParams.append("start_date", params.start_date);
+      if (params.end_date) queryParams.append("end_date", params.end_date);
+      if (params.limit) queryParams.append("limit", params.limit.toString());
+
+      const response = await fetch(`${API_BASE_URL}/history?${queryParams}`, {
+        headers: buildHeaders(),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data.entries || [];
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : "Failed to load history";
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  /**
+   * Restore configuration from history entries.
+   */
+  async function restoreHistory(service: string, historyEntries: number[]): Promise<void> {
+    loading.value = true;
+    error.value = null;
+
+    try {
+      // Get CSRF token
+      const csrfToken = await getCsrfToken();
+      if (!csrfToken) {
+        throw new Error("Failed to obtain CSRF token");
+      }
+
+      const response = await fetch(`${API_BASE_URL}/history/restore`, {
+        method: "POST",
+        headers: {
+          ...buildHeaders(),
+          "X-CSRF-Token": csrfToken,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          service,
+          history_entries: historyEntries,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log("Restore successful:", data);
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : "Failed to restore configuration";
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  /**
    * Clear current state.
    */
   function reset(): void {
@@ -488,6 +570,8 @@ export function useConfig() {
     loadConfig,
     updateConfig,
     searchConfigurations,
+    getHistory,
+    restoreHistory,
     reset,
     detectUserRole,
     setApiToken: (token: string) => {

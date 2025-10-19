@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
+from typing import Any, List, Optional
 
+import orjson
 from fastapi import APIRouter, HTTPException, Header, Depends, status
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -1072,7 +1073,7 @@ async def get_config_history(
         List of history entries, most recent first
     """
     # Permission check
-    if not has_permission(token.role, Permission.CONFIG_READ):
+    if not has_permission(token, Permission.CONFIG_READ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Insufficient permissions: config.read required",
@@ -1182,7 +1183,7 @@ async def restore_from_history(
     await validate_csrf_header(x_csrf_token)
 
     # Permission check
-    if not has_permission(token.role, Permission.CONFIG_WRITE):
+    if not has_permission(token, Permission.CONFIG_WRITE):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Insufficient permissions: config.write required",

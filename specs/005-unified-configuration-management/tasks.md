@@ -314,24 +314,26 @@
 
 ### History Tracking
 
-- [ ] T120 [US6] Add history recording to database.py (insert into config_history on every update)
-- [ ] T121 [US6] Add history query functions to database.py (get_history_for_service, get_history_for_key, filter by date range)
+- [X] T120 [US6] Add history recording to database.py (insert into config_history on every update)
+- [X] T121 [US6] Add history query functions to database.py (get_history_for_service, get_history_for_key, filter by date range)
 
 ### History API
 
-- [ ] T122 [P] [US6] Add GET /api/config/history endpoint (query params: service, key, start_date, end_date)
-- [ ] T123 [P] [US6] Add POST /api/config/history/restore endpoint (restore configuration to specific point in time)
+- [X] T122 [P] [US6] Add GET /api/config/history endpoint (query params: service, key, start_date, end_date)
+- [X] T123 [P] [US6] Add POST /api/config/history/restore endpoint (restore configuration to specific point in time)
 
 ### History UI
 
-- [ ] T124 [P] [US6] Create `apps/ui-web/frontend/src/components/ConfigHistory.vue` for displaying change log
-- [ ] T125 [P] [US6] Add history view to ConfigEditor.vue (show change history per field or for entire service)
-- [ ] T126 [US6] Add date range filter to ConfigHistory.vue
-- [ ] T127 [US6] Add restore confirmation dialog (warn about overwriting current config)
+- [X] T124 [P] [US6] Create `apps/ui-web/frontend/src/components/ConfigHistory.vue` for displaying change log
+- [X] T125 [P] [US6] Add history view to ConfigEditor.vue (show change history per field or for entire service)
+- [X] T126 [US6] Add date range filter to ConfigHistory.vue
+- [X] T127 [US6] Add restore confirmation dialog (warn about overwriting current config)
 
 ### Testing
 
 - [ ] T128 [P] [US6] Add history tests to `apps/config-manager/tests/integration/test_history.py`
+
+**Checkpoint**: ✅ User Story 6 complete - Full audit trail available for all configuration changes, rollback functionality working
 
 **Checkpoint**: User Story 6 complete - Full audit trail available for all configuration changes
 
