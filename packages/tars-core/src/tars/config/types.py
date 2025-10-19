@@ -21,6 +21,7 @@ class ConfigType(str, Enum):
     BOOLEAN = "boolean"
     ENUM = "enum"
     PATH = "path"
+    URL = "url"
     SECRET = "secret"
 
 

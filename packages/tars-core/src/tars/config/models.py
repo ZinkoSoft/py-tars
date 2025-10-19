@@ -204,13 +204,23 @@ class TTSWorkerConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # Voice and Provider Settings
     piper_voice: str = Field(
         default="en_US-lessac-medium",
         min_length=1,
-        max_length=100,
-        description="Piper voice model name",
+        max_length=200,
+        description="Piper voice model name or path",
         json_schema_extra={"complexity": "simple", "type": "string"},
     )
+    tts_provider: str = Field(
+        default="piper",
+        min_length=1,
+        max_length=50,
+        description="TTS provider (piper, elevenlabs)",
+        json_schema_extra={"complexity": "simple", "type": "enum", "examples": ["piper", "elevenlabs"]},
+    )
+    
+    # Streaming and Pipeline Settings
     tts_streaming: bool = Field(
         default=False,
         description="Enable streaming TTS output",
@@ -218,9 +228,23 @@ class TTSWorkerConfig(BaseModel):
     )
     tts_pipeline: bool = Field(
         default=True,
-        description="Enable TTS pipeline processing",
+        description="Enable TTS pipeline processing (sentence-by-sentence)",
         json_schema_extra={"complexity": "advanced", "type": "boolean"},
     )
+    tts_simpleaudio: bool = Field(
+        default=False,
+        description="Use simpleaudio instead of paplay/aplay",
+        json_schema_extra={"complexity": "advanced", "type": "boolean"},
+    )
+    tts_concurrency: int = Field(
+        default=1,
+        ge=1,
+        le=10,
+        description="Number of concurrent synthesis workers",
+        json_schema_extra={"complexity": "advanced", "type": "integer"},
+    )
+    
+    # Aggregation Settings
     tts_aggregate_by_utt: bool = Field(
         default=True,
         description="Aggregate TTS output by utterance ID",
@@ -233,6 +257,46 @@ class TTSWorkerConfig(BaseModel):
         description="Timeout for utterance aggregation (seconds)",
         json_schema_extra={"complexity": "advanced", "type": "float"},
     )
+    tts_aggregate: bool = Field(
+        default=True,
+        description="Aggregate consecutive messages with same utt_id",
+        json_schema_extra={"complexity": "advanced", "type": "boolean"},
+    )
+    tts_aggregate_debounce_ms: int = Field(
+        default=150,
+        ge=0,
+        le=5000,
+        description="Debounce time for aggregation (milliseconds)",
+        json_schema_extra={"complexity": "advanced", "type": "integer"},
+    )
+    tts_aggregate_single_wav: bool = Field(
+        default=True,
+        description="Synthesize aggregated text as single WAV",
+        json_schema_extra={"complexity": "advanced", "type": "boolean"},
+    )
+    
+    # Wake Cache Settings
+    tts_wake_cache_enable: bool = Field(
+        default=True,
+        description="Enable caching of wake acknowledgements",
+        json_schema_extra={"complexity": "simple", "type": "boolean"},
+    )
+    tts_wake_cache_dir: str = Field(
+        default="data/tts-cache",
+        min_length=1,
+        max_length=500,
+        description="Directory for cached TTS audio files",
+        json_schema_extra={"complexity": "advanced", "type": "path"},
+    )
+    tts_wake_cache_max: int = Field(
+        default=16,
+        ge=0,
+        le=1000,
+        description="Maximum number of cached TTS files",
+        json_schema_extra={"complexity": "advanced", "type": "integer"},
+    )
+    
+    # Audio Settings
     volume_percent: int = Field(
         default=100,
         ge=0,
@@ -240,6 +304,58 @@ class TTSWorkerConfig(BaseModel):
         description="Output volume percentage (0-200%)",
         json_schema_extra={"complexity": "simple", "type": "integer"},
     )
+    
+    # ElevenLabs Settings
+    eleven_api_base: str = Field(
+        default="https://api.elevenlabs.io/v1",
+        min_length=1,
+        max_length=500,
+        description="ElevenLabs API base URL",
+        json_schema_extra={"complexity": "advanced", "type": "url"},
+    )
+    eleven_api_key: str = Field(
+        default="",
+        max_length=500,
+        description="ElevenLabs API key",
+        json_schema_extra={"complexity": "simple", "type": "secret"},
+    )
+    eleven_voice_id: str = Field(
+        default="",
+        max_length=200,
+        description="ElevenLabs voice ID",
+        json_schema_extra={"complexity": "simple", "type": "string"},
+    )
+    eleven_model_id: str = Field(
+        default="eleven_multilingual_v2",
+        min_length=1,
+        max_length=100,
+        description="ElevenLabs model ID",
+        json_schema_extra={"complexity": "advanced", "type": "string"},
+    )
+    eleven_optimize_streaming: int = Field(
+        default=0,
+        ge=0,
+        le=3,
+        description="ElevenLabs streaming optimization level (0-3)",
+        json_schema_extra={"complexity": "advanced", "type": "integer"},
+    )
+    
+    @field_validator("tts_provider")
+    @classmethod
+    def validate_provider(cls, v: str) -> str:
+        """Validate TTS provider is supported."""
+        allowed = {"piper", "elevenlabs"}
+        if v.lower() not in allowed:
+            raise ValueError(f"TTS provider must be one of: {', '.join(allowed)}")
+        return v.lower()
+    
+    @field_validator("eleven_api_base")
+    @classmethod
+    def validate_api_base(cls, v: str) -> str:
+        """Validate API base URL."""
+        if v and not v.startswith(("http://", "https://")):
+            raise ValueError("API base URL must start with http:// or https://")
+        return v
 
 
 class RouterConfig(BaseModel):
@@ -247,6 +363,7 @@ class RouterConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # Streaming settings
     router_llm_tts_stream: bool = Field(
         default=True,
         description="Enable streaming from LLM to TTS",
@@ -276,6 +393,55 @@ class RouterConfig(BaseModel):
         min_length=1,
         max_length=200,
         description="Regex pattern for sentence boundaries",
+        json_schema_extra={"complexity": "advanced", "type": "string"},
+    )
+    
+    # Wake activation settings
+    router_wake_window_sec: float = Field(
+        default=8.0,
+        ge=1.0,
+        le=60.0,
+        description="Time window (seconds) after wake word to accept speech",
+        json_schema_extra={"complexity": "simple", "type": "float"},
+    )
+    router_wake_ack_enabled: bool = Field(
+        default=True,
+        description="Enable acknowledgment response after wake word",
+        json_schema_extra={"complexity": "simple", "type": "boolean"},
+    )
+    router_wake_ack_text: str = Field(
+        default="Yes?",
+        min_length=0,
+        max_length=100,
+        description="Default acknowledgment text",
+        json_schema_extra={"complexity": "simple", "type": "string"},
+    )
+    router_wake_ack_choices: str = Field(
+        default="Hmm?|Huh?|Yes?",
+        min_length=0,
+        max_length=500,
+        description="Pipe-separated list of random acknowledgment choices",
+        json_schema_extra={"complexity": "advanced", "type": "string"},
+    )
+    
+    # Live mode settings
+    router_live_mode_default: bool = Field(
+        default=False,
+        description="Start in live mode (no wake word required)",
+        json_schema_extra={"complexity": "simple", "type": "boolean"},
+    )
+    router_live_mode_enter_phrase: str = Field(
+        default="enter live mode",
+        min_length=1,
+        max_length=100,
+        description="Phrase to activate live mode",
+        json_schema_extra={"complexity": "advanced", "type": "string"},
+    )
+    router_live_mode_exit_phrase: str = Field(
+        default="exit live mode",
+        min_length=1,
+        max_length=100,
+        description="Phrase to deactivate live mode",
         json_schema_extra={"complexity": "advanced", "type": "string"},
     )
     

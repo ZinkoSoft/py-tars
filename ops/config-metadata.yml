@@ -99,21 +99,252 @@ stt-worker:
       - "1"
       - "2"
 
+tts-worker:
+  piper_voice:
+    description: "Piper voice model name or path"
+    help_text: "Name of the Piper voice model (e.g., en_US-lessac-medium) or absolute path to a custom .onnx model file."
+    examples:
+      - "en_US-lessac-medium"
+      - "en_US-amy-medium"
+      - "en_GB-alan-medium"
+      - "/voices/TARS.onnx"
+  
+  tts_provider:
+    description: "TTS provider (piper or elevenlabs)"
+    help_text: "Choose 'piper' for local offline synthesis (fast, free) or 'elevenlabs' for cloud-based synthesis (higher quality, requires API key)."
+    examples:
+      - "piper"
+      - "elevenlabs"
+  
+  tts_streaming:
+    description: "Enable streaming TTS output"
+    help_text: "Stream audio in real-time as it's synthesized. Reduces latency but may cause audio artifacts. Default: false for reliability."
+    examples:
+      - "false"
+      - "true"
+  
+  tts_pipeline:
+    description: "Enable sentence-by-sentence synthesis"
+    help_text: "Synthesize and play sentences one at a time instead of waiting for entire text. Reduces time-to-first-audio."
+    examples:
+      - "true"
+      - "false"
+  
+  tts_simpleaudio:
+    description: "Use simpleaudio for playback"
+    help_text: "Use Python simpleaudio library instead of paplay/aplay system commands. May improve compatibility on some systems."
+    examples:
+      - "false"
+      - "true"
+  
+  tts_concurrency:
+    description: "Number of concurrent synthesis workers"
+    help_text: "When pipeline mode is enabled, this many sentences can be synthesized in parallel. Higher values reduce total latency but use more CPU."
+    examples:
+      - "1"
+      - "2"
+      - "4"
+  
+  tts_aggregate_by_utt:
+    description: "Aggregate messages by utterance ID"
+    help_text: "Group multiple TTS messages with the same utterance ID to reduce pauses between sentences from the same response."
+    examples:
+      - "true"
+      - "false"
+  
+  tts_aggregate_timeout_sec:
+    description: "Utterance aggregation timeout (seconds)"
+    help_text: "Maximum time to wait for more messages with the same utterance ID before synthesizing. Balances latency vs. completeness."
+    examples:
+      - "1.0"
+      - "2.0"
+      - "5.0"
+  
+  tts_aggregate:
+    description: "Enable message aggregation"
+    help_text: "Combine consecutive TTS messages with the same utterance ID into a single audio file. Reduces gaps between sentences."
+    examples:
+      - "true"
+      - "false"
+  
+  tts_aggregate_debounce_ms:
+    description: "Debounce time for aggregation (ms)"
+    help_text: "Wait this long after receiving a message before synthesizing, in case more messages arrive with the same ID."
+    examples:
+      - "100"
+      - "150"
+      - "300"
+  
+  tts_aggregate_single_wav:
+    description: "Synthesize aggregated text as single WAV"
+    help_text: "When aggregating, combine all text into one synthesis call instead of multiple. Eliminates inter-sentence gaps entirely."
+    examples:
+      - "true"
+      - "false"
+  
+  tts_wake_cache_enable:
+    description: "Enable wake acknowledgement caching"
+    help_text: "Pre-synthesize and cache common wake acknowledgements ('Yes?', 'I'm listening', etc.) for instant playback."
+    examples:
+      - "true"
+      - "false"
+  
+  tts_wake_cache_dir:
+    description: "Directory for cached TTS audio files"
+    help_text: "Where to store pre-synthesized wake acknowledgements and common phrases. Relative to container root or absolute path."
+    examples:
+      - "data/tts-cache"
+      - "/data/config/tts-cache"
+  
+  tts_wake_cache_max:
+    description: "Maximum number of cached TTS files"
+    help_text: "LRU cache size for wake acknowledgements. Higher values allow more phrases but use more disk space."
+    examples:
+      - "8"
+      - "16"
+      - "32"
+  
+  volume_percent:
+    description: "Output volume percentage"
+    help_text: "Audio output volume level. 100 = normal, >100 = amplified (may clip), <100 = quieter."
+    examples:
+      - "80"
+      - "100"
+      - "120"
+  
+  eleven_api_base:
+    description: "ElevenLabs API base URL"
+    help_text: "Base URL for ElevenLabs API. Only change if using a proxy or self-hosted alternative."
+    examples:
+      - "https://api.elevenlabs.io/v1"
+  
+  eleven_api_key:
+    description: "ElevenLabs API key"
+    help_text: "Your ElevenLabs API key. Required when tts_provider=elevenlabs. Get yours at https://elevenlabs.io"
+    examples:
+      - "sk-..."
+  
+  eleven_voice_id:
+    description: "ElevenLabs voice ID"
+    help_text: "ID of the ElevenLabs voice to use. Find voice IDs in your ElevenLabs dashboard. Required when using ElevenLabs provider."
+    examples:
+      - "21m00Tcm4TlvDq8ikWAM"
+      - "pNInz6obpgDQGcFmaJgB"
+  
+  eleven_model_id:
+    description: "ElevenLabs model ID"
+    help_text: "ElevenLabs model to use. 'eleven_multilingual_v2' supports 29 languages. 'eleven_monolingual_v1' is English-only but faster."
+    examples:
+      - "eleven_multilingual_v2"
+      - "eleven_monolingual_v1"
+      - "eleven_turbo_v2"
+  
+  eleven_optimize_streaming:
+    description: "ElevenLabs streaming optimization level"
+    help_text: "Latency optimization level (0-3). Higher = lower latency but may reduce quality. 0 = no optimization, 3 = maximum optimization."
+    examples:
+      - "0"
+      - "1"
+      - "2"
+      - "3"
+
+router:
+  router_llm_tts_stream:
+    description: "Enable streaming from LLM to TTS"
+    help_text: "When enabled, LLM responses stream directly to TTS sentence-by-sentence for lower latency. Disable to wait for complete response before speaking."
+    examples:
+      - "true"
+      - "false"
+  
+  router_stream_min_chars:
+    description: "Minimum characters before sending to TTS"
+    help_text: "Buffer at least this many characters before flushing to TTS. Lower = faster response, higher = fewer audio gaps."
+    examples:
+      - "30"
+      - "60"
+      - "100"
+  
+  router_stream_max_chars:
+    description: "Maximum characters before forcing flush to TTS"
+    help_text: "Force flush to TTS after this many characters even if no sentence boundary found. Prevents infinite buffering."
+    examples:
+      - "150"
+      - "200"
+      - "300"
+  
+  router_stream_boundary_only:
+    description: "Only flush on sentence boundaries"
+    help_text: "When true, only send complete sentences to TTS. When false, may send partial sentences at stream_max_chars threshold."
+    examples:
+      - "true"
+      - "false"
+  
+  router_stream_boundary_regex:
+    description: "Regex pattern for sentence boundaries"
+    help_text: "Regular expression to detect sentence endings. Default handles periods, question marks, exclamation points, and ellipsis."
+    examples:
+      - "[.!?…]+[\"')\\]]?\\s"
+      - "[.!?]+\\s+"
+  
+  router_wake_window_sec:
+    description: "Time window after wake word to accept speech"
+    help_text: "How many seconds after saying 'Hey TARS' you have to speak before the wake session expires. Increase if you speak slowly or have long sentences."
+    examples:
+      - "8.0"
+      - "15.0"
+      - "20.0"
+      - "30.0"
+  
+  router_wake_ack_enabled:
+    description: "Enable acknowledgment response after wake word"
+    help_text: "When enabled, TARS responds with an acknowledgment ('Yes?', 'Hmm?') immediately after hearing the wake word to confirm it's listening."
+    examples:
+      - "true"
+      - "false"
+  
+  router_wake_ack_text:
+    description: "Default acknowledgment text"
+    help_text: "The text to speak when acknowledging wake word detection. Can be a single phrase or will be randomly chosen from wake_ack_choices."
+    examples:
+      - "Yes?"
+      - "I'm listening"
+      - "Go ahead"
+  
+  router_wake_ack_choices:
+    description: "Random acknowledgment choices (pipe-separated)"
+    help_text: "List of acknowledgment phrases separated by '|'. One is randomly chosen each time. Adds variety to responses."
+    examples:
+      - "Hmm?|Huh?|Yes?"
+      - "Yes?|I'm listening|Go ahead"
+      - "Yes?"
+  
+  router_live_mode_default:
+    description: "Start in live mode (no wake word required)"
+    help_text: "When enabled, TARS processes all speech without requiring 'Hey TARS' wake word first. Useful for continuous conversation or testing."
+    examples:
+      - "false"
+      - "true"
+  
+  router_live_mode_enter_phrase:
+    description: "Phrase to activate live mode"
+    help_text: "Say this phrase to enter live mode where wake word is not required. Case-insensitive."
+    examples:
+      - "enter live mode"
+      - "start live mode"
+      - "always listen"
+  
+  router_live_mode_exit_phrase:
+    description: "Phrase to deactivate live mode"
+    help_text: "Say this phrase to exit live mode and return to wake-word-only mode. Case-insensitive."
+    examples:
+      - "exit live mode"
+      - "stop live mode"
+      - "stop listening"
+
 # Add more services as needed:
-# tts-worker:
-#   piper_voice:
-#     description: "Piper voice model name"
-#     help_text: "..."
-#     examples: [...]
-# 
-# router:
-#   ...
-# 
 # llm-worker:
 #   ...
 # 
 # memory-worker:
 #   ...
 # 
-# wake-activation:
-#   ...

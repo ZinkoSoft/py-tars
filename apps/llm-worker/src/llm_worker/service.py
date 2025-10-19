@@ -167,56 +167,71 @@ class LLMService:
         }
 
     async def run(self):
-        """Main service loop: connect to MQTT, subscribe, and handle messages via individual handlers."""
-        try:
-            # Connect to MQTT broker
-            await self.mqtt_client.connect()
-            logger.info("Connected to MQTT broker")
-
-            # Subscribe to all topics with individual handlers
-            await self.mqtt_client.subscribe(TOPIC_CHARACTER_CURRENT, self._handle_character_current)
-            await self.mqtt_client.subscribe(TOPIC_CHARACTER_RESULT, self._handle_character_result)
-            await self.mqtt_client.subscribe(TOPIC_LLM_REQUEST, self._handle_llm_request)
-
-            if RAG_ENABLED:
-                await self.mqtt_client.subscribe(TOPIC_MEMORY_RESULTS, self._handle_memory_results, qos=1)
-                logger.info("RAG enabled - subscribed to memory/results")
-
-            if TOOL_CALLING_ENABLED:
-                await self.mqtt_client.subscribe(TOPIC_TOOLS_REGISTRY, self._handle_tools_registry)
-                await self.mqtt_client.subscribe(TOPIC_TOOL_CALL_RESULT, self._handle_tool_result)
-                logger.info("Tool calling enabled - subscribed to tool topics")
-
-            # Request initial character state
+        """Main service loop with automatic MQTT reconnection."""
+        backoff = 1.0
+        max_backoff = 30.0
+        
+        while True:
             try:
-                await self.mqtt_client.publish_event(
-                    topic=TOPIC_CHARACTER_GET,
-                    event_type="memory.character.get",
-                    data={"section": None},
-                    qos=0,
-                )
-                logger.info("Requested character/get on startup")
-            except Exception:
-                logger.debug("character/get publish failed (may be offline)")
+                # Connect to MQTT broker
+                await self.mqtt_client.connect()
+                logger.info("Connected to MQTT broker")
 
-            # CRITICAL: Small delay to allow retained messages to arrive
-            await asyncio.sleep(0.5)
+                # Subscribe to all topics with individual handlers
+                await self.mqtt_client.subscribe(TOPIC_CHARACTER_CURRENT, self._handle_character_current)
+                await self.mqtt_client.subscribe(TOPIC_CHARACTER_RESULT, self._handle_character_result)
+                await self.mqtt_client.subscribe(TOPIC_LLM_REQUEST, self._handle_llm_request)
 
-            # Warm up memory service if RAG is enabled
-            if RAG_ENABLED:
-                asyncio.create_task(self._warmup_memory())
-                asyncio.create_task(self._periodic_metrics_logging())
+                if RAG_ENABLED:
+                    await self.mqtt_client.subscribe(TOPIC_MEMORY_RESULTS, self._handle_memory_results, qos=1)
+                    logger.info("RAG enabled - subscribed to memory/results")
 
-            logger.info("LLM worker ready - processing messages via subscription handlers")
+                if TOOL_CALLING_ENABLED:
+                    await self.mqtt_client.subscribe(TOPIC_TOOLS_REGISTRY, self._handle_tools_registry)
+                    await self.mqtt_client.subscribe(TOPIC_TOOL_CALL_RESULT, self._handle_tool_result)
+                    logger.info("Tool calling enabled - subscribed to tool topics")
 
-            # Keep service running (centralized client handles message dispatch)
-            await asyncio.Event().wait()
+                # Request initial character state
+                try:
+                    await self.mqtt_client.publish_event(
+                        topic=TOPIC_CHARACTER_GET,
+                        event_type="memory.character.get",
+                        data={"section": None},
+                        qos=0,
+                    )
+                    logger.info("Requested character/get on startup")
+                except Exception:
+                    logger.debug("character/get publish failed (may be offline)")
 
-        except Exception as e:
-            logger.error("LLM worker error: %s", e, exc_info=True)
-        finally:
-            await self.mqtt_client.shutdown()
-            logger.info("LLM worker shutdown complete")
+                # CRITICAL: Small delay to allow retained messages to arrive
+                await asyncio.sleep(0.5)
+
+                # Warm up memory service if RAG is enabled
+                if RAG_ENABLED:
+                    asyncio.create_task(self._warmup_memory())
+                    asyncio.create_task(self._periodic_metrics_logging())
+
+                logger.info("LLM worker ready - processing messages via subscription handlers")
+
+                # Reset backoff on successful connection
+                backoff = 1.0
+
+                # Keep service running until connection fails
+                await self.mqtt_client.wait_for_disconnect()
+
+            except asyncio.CancelledError:
+                logger.info("LLM worker shutdown requested")
+                raise
+            except Exception as e:
+                logger.warning("MQTT disconnected: %s; reconnecting in %.1fs...", e, backoff)
+            finally:
+                await self.mqtt_client.shutdown()
+            
+            # Exponential backoff before reconnect
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2.0, max_backoff)
+        
+        logger.info("LLM worker shutdown complete")
 
     # --- Subscription Handlers ---
 

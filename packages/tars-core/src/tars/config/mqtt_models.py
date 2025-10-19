@@ -13,13 +13,13 @@ class ConfigUpdatePayload(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    version: int = Field(..., description="Message format version")
     service: str = Field(..., description="Target service")
     config: dict[str, Any] = Field(..., description="Complete service configuration")
-    checksum: str = Field(..., description="SHA256 of config JSON")
+    version: int = Field(..., description="Configuration version")
     config_epoch: str = Field(..., description="Database epoch")
+    checksum: str | None = Field(None, description="SHA256 of config JSON")
+    signature: str | None = Field(None, description="Ed25519 signature (base64)")
     issued_at: datetime = Field(default_factory=datetime.utcnow)
-    signature: str = Field(..., description="Ed25519 signature (base64)")
 
 
 class ConfigHealthPayload(BaseModel):

@@ -33,8 +33,8 @@ class RouterSettings:
     online_announce: bool = True
     online_text: str = "System online."
     tts_voice: str = "piper/en_US/amy"
-    topic_health_tts: str = "system/health/tts"
-    topic_health_stt: str = "system/health/stt"
+    topic_health_tts: str = "system/health/tars-tts"
+    topic_health_stt: str = "system/health/tars-stt"
     topic_health_router: str = "system/health/router"
     topic_stt_final: str = TOPIC_STT_FINAL
     topic_tts_say: str = TOPIC_TTS_SAY
