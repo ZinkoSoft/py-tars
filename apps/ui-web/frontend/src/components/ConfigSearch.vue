@@ -100,15 +100,11 @@ watch(() => props.modelValue, (newValue) => {
 </script>
 
 <style scoped>
-.config-search {
-  margin-bottom: 1rem;
-}
 
 .search-container {
   background: var(--vscode-input-background);
   border: 1px solid var(--vscode-input-border);
   border-radius: 6px;
-  padding: 0.75rem;
 }
 
 .search-input-wrapper {
