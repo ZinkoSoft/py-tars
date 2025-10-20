@@ -45,13 +45,13 @@ def make_leg_targets(height_pct, left_pct, right_pct):
     
     if left_pct is not None and left_pct != 0:
         targets[1] = percent_to_pulse(left_pct,
-                                      SERVO_CALIBRATION[1]["min"],  # forwardStarboard
-                                      SERVO_CALIBRATION[1]["max"])  # backStarboard
+                                      SERVO_CALIBRATION[1]["min"],  # forwardStarboard (left leg forward)
+                                      SERVO_CALIBRATION[1]["max"])  # backStarboard (left leg back)
     
     if right_pct is not None and right_pct != 0:
         targets[2] = percent_to_pulse(right_pct,
-                                      SERVO_CALIBRATION[2]["min"],  # backPort
-                                      SERVO_CALIBRATION[2]["max"])  # forwardPort
+                                      SERVO_CALIBRATION[2]["min"],  # forwardPort (right leg forward)
+                                      SERVO_CALIBRATION[2]["max"])  # backPort (right leg back)
     
     return targets
 
@@ -100,10 +100,18 @@ PRESETS = {
     "reset_positions": {
         "description": "Reset all servos to neutral positions",
         "steps": [
+            # Step 1: Raise torso up first
             {"targets": make_leg_targets(20, 0, 0), "speed": 0.8, "delay_after": 0.2},
+            # Step 2: Move hands to neutral
+            {"targets": make_arm_targets(0, 0, 1, 0, 0, 1), "speed": 0.7, "delay_after": 0.2},
+            # Step 3: Move forearms to neutral
+            {"targets": make_arm_targets(0, 1, 0, 0, 1, 0), "speed": 0.7, "delay_after": 0.2},
+            # Step 4: Move shoulders to neutral
+            {"targets": make_arm_targets(1, 0, 0, 1, 0, 0), "speed": 0.7, "delay_after": 0.2},
+            # Step 5: Move legs to neutral
             {"targets": make_leg_targets(30, 50, 50), "speed": 0.8, "delay_after": 0.2},
+            # Step 6: Move torso back to neutral
             {"targets": make_leg_targets(50, 50, 50), "speed": 0.8, "delay_after": 0.5},
-            {"targets": make_arm_targets(1, 1, 1, 1, 1, 1), "speed": 0.7, "delay_after": 0.5},
         ]
     },
     
