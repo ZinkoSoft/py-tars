@@ -2,11 +2,74 @@
 
 from __future__ import annotations
 
+import base64
 import os
 from pathlib import Path
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+def _load_signature_private_key() -> Optional[str]:
+    """Load signature private key from file or environment.
+    
+    Tries in order:
+    1. /run/secrets/signature_private_key.pem (Docker secret mount)
+    2. /etc/tars/secrets/signature_private_key.pem (volume mount)
+    3. CONFIG_SIGNATURE_PRIVATE_KEY_B64 (base64-encoded env var)
+    4. CONFIG_SIGNATURE_PRIVATE_KEY (plain PEM env var)
+    """
+    # Try Docker secrets mount
+    secret_path = Path("/run/secrets/signature_private_key.pem")
+    if secret_path.exists():
+        return secret_path.read_text()
+    
+    # Try volume mount
+    volume_path = Path("/etc/tars/secrets/signature_private_key.pem")
+    if volume_path.exists():
+        return volume_path.read_text()
+    
+    # Try base64-encoded env var
+    b64_key = os.getenv("CONFIG_SIGNATURE_PRIVATE_KEY_B64")
+    if b64_key:
+        try:
+            return base64.b64decode(b64_key).decode("utf-8")
+        except Exception:
+            pass
+    
+    # Fall back to plain PEM env var
+    return os.getenv("CONFIG_SIGNATURE_PRIVATE_KEY")
+
+
+def _load_signature_public_key() -> Optional[str]:
+    """Load signature public key from file or environment.
+    
+    Tries in order:
+    1. /run/secrets/signature_public_key.pem (Docker secret mount)
+    2. /etc/tars/secrets/signature_public_key.pem (volume mount)
+    3. CONFIG_SIGNATURE_PUBLIC_KEY_B64 (base64-encoded env var)
+    4. CONFIG_SIGNATURE_PUBLIC_KEY (plain PEM env var)
+    """
+    # Try Docker secrets mount
+    secret_path = Path("/run/secrets/signature_public_key.pem")
+    if secret_path.exists():
+        return secret_path.read_text()
+    
+    # Try volume mount
+    volume_path = Path("/etc/tars/secrets/signature_public_key.pem")
+    if volume_path.exists():
+        return volume_path.read_text()
+    
+    # Try base64-encoded env var
+    b64_key = os.getenv("CONFIG_SIGNATURE_PUBLIC_KEY_B64")
+    if b64_key:
+        try:
+            return base64.b64decode(b64_key).decode("utf-8")
+        except Exception:
+            pass
+    
+    # Fall back to plain PEM env var
+    return os.getenv("CONFIG_SIGNATURE_PUBLIC_KEY")
 
 
 class ConfigManagerConfig(BaseModel):
@@ -44,11 +107,11 @@ class ConfigManagerConfig(BaseModel):
 
     # Ed25519 signing keys
     signature_private_key: Optional[str] = Field(
-        default_factory=lambda: os.getenv("CONFIG_SIGNATURE_PRIVATE_KEY"),
+        default_factory=_load_signature_private_key,
         description="PEM-encoded Ed25519 private key for MQTT message signing",
     )
     signature_public_key: Optional[str] = Field(
-        default_factory=lambda: os.getenv("CONFIG_SIGNATURE_PUBLIC_KEY"),
+        default_factory=_load_signature_public_key,
         description="PEM-encoded Ed25519 public key for signature verification",
     )
 

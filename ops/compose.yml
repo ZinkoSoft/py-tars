@@ -105,6 +105,7 @@ services:
       - /run/user/1000/pulse:/run/user/1000/pulse:ro
       - ../data/tts-cache:/data/tts-cache
       - ..:/workspace:ro
+      - ./secrets:/etc/tars/secrets:ro
 
   stt:
     build:
@@ -168,6 +169,7 @@ services:
       - ../docker/asoundrc:/etc/asound.conf:ro
       - wake-cache:/tmp/tars
       - ..:/workspace:ro
+      - ./secrets:/etc/tars/secrets:ro
 
   wake-activation:
     build:
@@ -449,6 +451,7 @@ services:
     volumes:
       - ..:/workspace:ro
       - config-db:/data/config
+      - ./secrets:/etc/tars/secrets:ro
     depends_on:
       mqtt:
         condition: service_started

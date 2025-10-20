@@ -83,9 +83,10 @@ class ConfigLibrary:
             cache_path or os.getenv("CONFIG_LKG_CACHE_PATH", "/data/config/config.lkg.json")
         )
         self.mqtt_url = mqtt_url or os.getenv("MQTT_URL", "mqtt://localhost:1883")
-        self.signature_public_key = signature_public_key or os.getenv(
-            "CONFIG_SIGNATURE_PUBLIC_KEY", ""
-        )
+        
+        # Support both plain PEM and base64-encoded PEM for signature public key
+        self.signature_public_key = signature_public_key or self._load_signature_key()
+        
         self.hmac_key_base64 = hmac_key_base64 or os.getenv("LKG_HMAC_KEY_BASE64", "")
 
         self._db: ConfigDatabase | None = None
@@ -95,6 +96,39 @@ class ConfigLibrary:
         self._update_callbacks: dict[type[BaseModel], ConfigUpdateCallback] = {}
         self._read_only_mode = False
         self._mqtt_task: asyncio.Task[None] | None = None
+    
+    def _load_signature_key(self) -> str:
+        """Load signature public key from file or environment.
+        
+        Tries in order:
+        1. /run/secrets/signature_public_key.pem (Docker secret mount)
+        2. /etc/tars/secrets/signature_public_key.pem (volume mount)
+        3. CONFIG_SIGNATURE_PUBLIC_KEY_B64 (base64-encoded env var)
+        4. CONFIG_SIGNATURE_PUBLIC_KEY (plain PEM env var)
+        """
+        import base64
+        from pathlib import Path
+        
+        # Try Docker secrets mount
+        secret_path = Path("/run/secrets/signature_public_key.pem")
+        if secret_path.exists():
+            return secret_path.read_text()
+        
+        # Try volume mount
+        volume_path = Path("/etc/tars/secrets/signature_public_key.pem")
+        if volume_path.exists():
+            return volume_path.read_text()
+        
+        # Try base64-encoded env var
+        b64_key = os.getenv("CONFIG_SIGNATURE_PUBLIC_KEY_B64", "")
+        if b64_key:
+            try:
+                return base64.b64decode(b64_key).decode("utf-8")
+            except Exception as e:
+                logger.warning(f"Failed to decode CONFIG_SIGNATURE_PUBLIC_KEY_B64: {e}")
+        
+        # Fall back to plain PEM env var
+        return os.getenv("CONFIG_SIGNATURE_PUBLIC_KEY", "")
 
     async def initialize(self) -> None:
         """Initialize database and cache connections.
