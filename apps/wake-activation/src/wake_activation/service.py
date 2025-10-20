@@ -106,7 +106,7 @@ class WakeActivationService:
         self._active_interrupt: InterruptContext | None = None
 
     async def run(self) -> None:
-        """Run the wake activation event loop until cancelled."""
+        """Run the wake activation event loop with automatic MQTT reconnection."""
 
         # Convert string log level to logging constant
         log_level = getattr(logging, self.cfg.log_level.upper(), logging.INFO)
@@ -114,25 +114,81 @@ class WakeActivationService:
             level=log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
         )
 
-        mqtt_client = MQTTClient(self.cfg.mqtt_url, "wake-activation", enable_health=True)
-        self.log.info("Connecting to MQTT %s", self.cfg.mqtt_url)
-        await mqtt_client.connect()
+        backoff = 1.0
+        max_backoff = 30.0
+        
+        while not self._stop_event.is_set():
+            mqtt_client = MQTTClient(self.cfg.mqtt_url, "wake-activation", enable_health=True)
+            self.log.info("Connecting to MQTT %s", self.cfg.mqtt_url)
+            
+            try:
+                await mqtt_client.connect()
 
+                # Wait for STT health before starting if enabled
+                if self.cfg.wait_for_stt_health:
+                    await self._wait_for_stt_health(mqtt_client)
+
+                await self._publish_health(mqtt_client)
+                
+                # Reset backoff on successful connection
+                backoff = 1.0
+                
+                async with TaskGroup() as tg:
+                    tg.create_task(self._health_loop(mqtt_client))
+                    tg.create_task(self._tts_status_loop(mqtt_client))
+                    tg.create_task(self._stt_final_loop(mqtt_client))
+                    tg.create_task(self._inference_loop(mqtt_client))
+                    # Wait for either stop signal or connection failure
+                    tg.create_task(self._wait_for_stop_or_disconnect(mqtt_client))
+            
+            except asyncio.CancelledError:
+                self.log.info("Wake activation shutdown requested")
+                raise
+            except Exception as exc:
+                if not self._stop_event.is_set():
+                    self.log.warning("MQTT disconnected: %s; reconnecting in %.1fs...", exc, backoff)
+            finally:
+                await mqtt_client.shutdown()
+            
+            # Exit loop if stop requested
+            if self._stop_event.is_set():
+                break
+            
+            # Exponential backoff before reconnect
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2.0, max_backoff)
+    
+    async def _wait_for_stop_or_disconnect(self, mqtt_client: MQTTClient) -> None:
+        """Wait for stop signal or MQTT disconnect, whichever comes first."""
+        stop_task = asyncio.create_task(self._stop_event.wait())
+        disconnect_task = asyncio.create_task(mqtt_client.wait_for_disconnect())
+        
         try:
-            # Wait for STT health before starting if enabled
-            if self.cfg.wait_for_stt_health:
-                await self._wait_for_stt_health(mqtt_client)
-
-            await self._publish_health(mqtt_client)
-            async with TaskGroup() as tg:
-                tg.create_task(self._health_loop(mqtt_client))
-                tg.create_task(self._tts_status_loop(mqtt_client))
-                tg.create_task(self._stt_final_loop(mqtt_client))
-                tg.create_task(self._inference_loop(mqtt_client))
-                await self._stop_event.wait()
-                self.log.info("Stop signal received; shutting down wake activation service")
-        finally:
-            await mqtt_client.shutdown()
+            done, pending = await asyncio.wait(
+                [stop_task, disconnect_task],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            
+            # Cancel pending task
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            
+            # Check which completed
+            for task in done:
+                if task == stop_task:
+                    self.log.info("Stop signal received; shutting down wake activation service")
+                else:
+                    # Disconnect task completed - re-raise the exception
+                    await task
+        except Exception:
+            # Cancel both tasks on error
+            stop_task.cancel()
+            disconnect_task.cancel()
+            raise
 
     async def stop(self) -> None:
         """Request cooperative shutdown."""

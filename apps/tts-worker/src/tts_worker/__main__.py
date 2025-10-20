@@ -12,10 +12,12 @@ from .config import (
     ELEVEN_VOICE_ID,
     ELEVEN_MODEL_ID,
     ELEVEN_OPTIMIZE_STREAMING,
+    MQTT_URL,
 )
 from .piper_synth import PiperSynth
 from .service import TTSService
 from external_services.eleven_labs import ElevenLabsTTS
+from . import config_lib_adapter
 
 
 def _setup_logging() -> None:
@@ -64,6 +66,14 @@ def _build_service() -> tuple[TTSService, PiperSynth | None]:
 
 async def _async_main() -> None:
     _setup_logging()
+    
+    # Initialize config library and subscribe to MQTT updates
+    try:
+        await config_lib_adapter.initialize_and_subscribe(mqtt_url=MQTT_URL)
+        logging.info("Config library initialized - will receive MQTT updates")
+    except Exception as e:
+        logging.warning("Failed to initialize config library: %s - using env vars only", e)
+    
     service: TTSService
     fallback: PiperSynth | None = None
     try:
@@ -74,7 +84,12 @@ async def _async_main() -> None:
         )
         final_synth = fallback or PiperSynth(PIPER_VOICE)
         service = TTSService(final_synth)
-    await service.run()
+    
+    try:
+        await service.run()
+    finally:
+        # Clean up config library on shutdown
+        await config_lib_adapter.close()
 
 
 def main() -> None:

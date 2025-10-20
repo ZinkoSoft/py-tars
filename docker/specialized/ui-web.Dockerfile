@@ -25,6 +25,9 @@ ARG SERVICE_PATH=apps/ui-web
 
 WORKDIR /app
 
+# Copy tars-core first (dependency of ui-web)
+COPY packages/tars-core /app/packages/tars-core
+
 # Copy backend package configuration and source code
 COPY ${SERVICE_PATH}/pyproject.toml ./
 COPY ${SERVICE_PATH}/src ./src
@@ -32,8 +35,9 @@ COPY ${SERVICE_PATH}/src ./src
 # Copy built frontend from builder stage
 COPY --from=frontend-builder /workspace/frontend/dist ./frontend/dist
 
-# Install the package
-RUN pip install --no-cache-dir -e .
+# Install tars-core first, then the package
+RUN pip install --no-cache-dir -e /app/packages/tars-core && \
+    pip install --no-cache-dir -e .
 
 ENV MQTT_URL="mqtt://tars:pass@127.0.0.1:1883"
 

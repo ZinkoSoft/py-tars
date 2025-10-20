@@ -3,7 +3,7 @@ import asyncio
 import logging
 from pathlib import Path
 from typing import Set, Any, Dict
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from tars.adapters.mqtt_client import MQTTClient  # type: ignore[import]
@@ -99,11 +99,10 @@ async def mqtt_bridge_task() -> None:
         config.health_topic,
         # Camera frames now served via MJPEG over HTTP, not MQTT
     ]
-    # Use centralized MQTT client with subscription handlers
-    mqtt_url = config.mqtt_url
-    mqtt_client = MQTTClient(mqtt_url, "ui-web", enable_health=False)
-    async def _make_handler(topic: str):
-        async def _handler(payload: bytes) -> None:
+    
+    # Create message handler factory for each topic (closure captures topic name)
+    def make_handler(topic: str):
+        async def handler(payload: bytes) -> None:
             try:
                 payload_data: Any
                 if isinstance(payload, (bytes, bytearray, str)):
@@ -120,71 +119,43 @@ async def mqtt_bridge_task() -> None:
                 except Exception:
                     pass
 
-            # Log health messages for debugging
+            # Cache and log health messages (mimics MQTT retained message behavior)
             if topic.startswith("system/health/"):
                 logger.info("Health message: %s -> %s", topic, payload_data)
+                await manager.cache_health(topic, payload_data)
 
+            logger.debug(f"Forwarding {topic}")
             await manager.broadcast({"topic": topic, "payload": payload_data})
+        
+        return handler
 
-        return _handler
-
+    # Use centralized MQTT client with reconnection support
     while True:
+        mqtt_client = None
         try:
             logger.info(f"Connecting to MQTT {config.mqtt_host}:{config.mqtt_port}")
-            async with mqtt.Client(
-                hostname=config.mqtt_host,
-                port=config.mqtt_port,
-                username=config.mqtt_username,
-                password=config.mqtt_password,
-            ) as client:
-                logger.info("Connected to MQTT, subscribing topics")
-                async with client.messages() as messages:
-                    for t in topics:
-                        await client.subscribe(t)
-                        logger.info(f"Subscribed to {t}")
-                    async for msg in messages:
-                        payload_data: Any
-                        try:
-                            if isinstance(msg.payload, (bytes, bytearray, str)):
-                                payload_data = orjson.loads(msg.payload)
-                            else:
-                                payload_data = {"raw": str(msg.payload)}
-                        except Exception:
-                            payload_data = {
-                                "raw": (
-                                    msg.payload.decode(errors="ignore")
-                                    if isinstance(msg.payload, (bytes, bytearray))
-                                    else str(msg.payload)
-                                )
-                            }
-                        # Normalize topic to a string for browser clients
-                        topic_obj = getattr(msg, "topic", None)
-                        if isinstance(topic_obj, (bytes, bytearray)):
-                            topic_str = topic_obj.decode("utf-8", "ignore")
-                        elif isinstance(topic_obj, str):
-                            topic_str = topic_obj
-                        else:
-                            topic_str = getattr(topic_obj, "value", str(topic_obj))
-                        # Keep a copy of memory/results for REST consumers
-                        if topic_str == config.memory_results_topic:
-                            try:
-                                # payload has shape { query, results: [{document, score}], k }
-                                globals()["_last_memory_results"] = payload_data
-                            except Exception:
-                                pass
-                        # Cache and log health messages (mimics MQTT retained message behavior)
-                        if topic_str.startswith("system/health/"):
-                            logger.info(f"Health message: {topic_str} -> {payload_data}")
-                            await manager.cache_health(topic_str, payload_data)
-                        logger.debug(f"Forwarding {topic_str}")
-                        await manager.broadcast({"topic": topic_str, "payload": payload_data})
+            mqtt_url = config.mqtt_url
+            mqtt_client = MQTTClient(mqtt_url, "ui-web", enable_health=False)
+            await mqtt_client.connect()
+            
+            logger.info("Connected to MQTT, subscribing topics")
+            for topic in topics:
+                await mqtt_client.subscribe(topic, make_handler(topic))
+                logger.info(f"Subscribed to {topic}")
+            
+            # Keep connection alive and process messages
+            # MQTTClient handles reconnection internally
+            while True:
+                await asyncio.sleep(1.0)
+                
         except Exception as e:
             logger.error("MQTT bridge error: %s", e)
-            try:
-                await mqtt_client.shutdown()
-            except Exception:
-                pass
-            await asyncio.sleep(1.0)
+            if mqtt_client:
+                try:
+                    await mqtt_client.shutdown()
+                except Exception:
+                    pass
+            await asyncio.sleep(5.0)  # Wait before reconnecting
 
 
 @app.on_event("startup")
@@ -198,7 +169,15 @@ async def index() -> HTMLResponse:
     if INDEX_HTML_PATH and INDEX_HTML_PATH.exists():
         try:
             with open(INDEX_HTML_PATH, "r", encoding="utf-8") as f:
-                return HTMLResponse(f.read())
+                content = f.read()
+                return HTMLResponse(
+                    content,
+                    headers={
+                        "Cache-Control": "no-cache, no-store, must-revalidate",
+                        "Pragma": "no-cache",
+                        "Expires": "0"
+                    }
+                )
         except Exception as e:
             logger.error(f"Failed to serve index.html: {e}")
             return HTMLResponse("<h1>TARS Web UI - Error loading frontend</h1>", status_code=500)
@@ -214,16 +193,100 @@ async def api_memory(q: str = "*", k: int = 25) -> JSONResponse:
     most recent memory/results snapshot cached by the bridge.
     """
     try:
-        async with mqtt.Client(
-            hostname=config.mqtt_host,
-            port=config.mqtt_port,
-            username=config.mqtt_username,
-            password=config.mqtt_password,
-        ) as client:
-            await client.publish(config.memory_query_topic, orjson.dumps({"text": q, "top_k": k}))
+        # Create temporary MQTT client for one-off publish
+        mqtt_url = config.mqtt_url
+        temp_client = MQTTClient(mqtt_url, "ui-web-api", enable_health=False)
+        await temp_client.connect()
+        try:
+            await temp_client.publish(config.memory_query_topic, orjson.dumps({"text": q, "top_k": k}))
+        finally:
+            await temp_client.shutdown()
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
     return JSONResponse(_last_memory_results or {"results": [], "query": q, "k": k})
+
+
+# --- Config Manager Proxy Endpoints ---
+import httpx
+
+@app.get("/health")
+async def proxy_health() -> JSONResponse:
+    """Proxy health check to config-manager service."""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{config.config_manager_url}/health", timeout=5.0)
+            return JSONResponse(content=response.json(), status_code=response.status_code)
+    except Exception as e:
+        logger.error("Failed to proxy health check: %s", e)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=503)
+
+
+@app.get("/api/config/services")
+async def proxy_get_services(request: Request) -> JSONResponse:
+    """Proxy GET /api/config/services to config-manager."""
+    try:
+        # Forward authentication headers
+        headers = {}
+        if "x-api-token" in request.headers:
+            headers["X-API-Token"] = request.headers["x-api-token"]
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{config.config_manager_url}/api/config/services",
+                headers=headers,
+                timeout=10.0
+            )
+            return JSONResponse(content=response.json(), status_code=response.status_code)
+    except Exception as e:
+        logger.error("Failed to proxy GET /api/config/services: %s", e)
+        return JSONResponse({"error": str(e)}, status_code=503)
+
+
+@app.get("/api/config/services/{service_name}")
+async def proxy_get_service_config(service_name: str, include_fields: bool = False, request: Request = None) -> JSONResponse:
+    """Proxy GET /api/config/services/{service_name} to config-manager."""
+    try:
+        # Forward authentication headers
+        headers = {}
+        if request and "x-api-token" in request.headers:
+            headers["X-API-Token"] = request.headers["x-api-token"]
+        
+        async with httpx.AsyncClient() as client:
+            url = f"{config.config_manager_url}/api/config/services/{service_name}"
+            if include_fields:
+                url += "?include_fields=true"
+            response = await client.get(url, headers=headers, timeout=10.0)
+            return JSONResponse(content=response.json(), status_code=response.status_code)
+    except Exception as e:
+        logger.error("Failed to proxy GET /api/config/services/%s: %s", service_name, e)
+        return JSONResponse({"error": str(e)}, status_code=503)
+
+
+@app.put("/api/config/services/{service_name}")
+async def proxy_put_service_config(service_name: str, request: Request) -> JSONResponse:
+    """Proxy PUT /api/config/services/{service_name} to config-manager."""
+    try:
+        # Get request body as JSON
+        body = await request.json()
+        
+        # Forward authentication headers
+        headers = {}
+        if "x-api-token" in request.headers:
+            headers["X-API-Token"] = request.headers["x-api-token"]
+        if "x-csrf-token" in request.headers:
+            headers["X-CSRF-Token"] = request.headers["x-csrf-token"]
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.put(
+                f"{config.config_manager_url}/api/config/services/{service_name}",
+                json=body,
+                headers=headers,
+                timeout=10.0
+            )
+            return JSONResponse(content=response.json(), status_code=response.status_code)
+    except Exception as e:
+        logger.error("Failed to proxy PUT /api/config/services/%s: %s", service_name, e)
+        return JSONResponse({"error": str(e)}, status_code=503)
 
 
 @app.websocket("/ws")

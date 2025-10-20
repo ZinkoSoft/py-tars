@@ -211,33 +211,48 @@ class MemoryService:
             logger.warning("Could not reconcile embedding dimensions", exc_info=True)
 
     async def run(self) -> None:
-        """Main service loop with subscription-based message handling."""
-        try:
-            # Connect to MQTT broker
-            await self.mqtt_client.connect()
-            logger.info("Connected to MQTT broker")
+        """Main service loop with automatic MQTT reconnection."""
+        backoff = 1.0
+        max_backoff = 30.0
+        
+        while True:
+            try:
+                # Connect to MQTT broker
+                await self.mqtt_client.connect()
+                logger.info("Connected to MQTT broker")
 
-            # Publish initial health and character state
-            await self._publish_health_initial()
-            await self._publish_character_current_initial()
+                # Publish initial health and character state
+                await self._publish_health_initial()
+                await self._publish_character_current_initial()
 
-            # Subscribe to all topics with individual handlers
-            await self.mqtt_client.subscribe(TOPIC_QUERY, self._handle_query_message)
-            await self.mqtt_client.subscribe(TOPIC_CHAR_GET, self._handle_char_get_message)
-            await self.mqtt_client.subscribe(TOPIC_CHAR_UPDATE, self._handle_char_update_message)
-            await self.mqtt_client.subscribe(TOPIC_STT_FINAL, self._handle_ingest_message)
-            await self.mqtt_client.subscribe(TOPIC_TTS_SAY, self._handle_ingest_message)
+                # Subscribe to all topics with individual handlers
+                await self.mqtt_client.subscribe(TOPIC_QUERY, self._handle_query_message)
+                await self.mqtt_client.subscribe(TOPIC_CHAR_GET, self._handle_char_get_message)
+                await self.mqtt_client.subscribe(TOPIC_CHAR_UPDATE, self._handle_char_update_message)
+                await self.mqtt_client.subscribe(TOPIC_STT_FINAL, self._handle_ingest_message)
+                await self.mqtt_client.subscribe(TOPIC_TTS_SAY, self._handle_ingest_message)
 
-            logger.info("Memory worker ready - processing messages via subscription handlers")
+                logger.info("Memory worker ready - processing messages via subscription handlers")
 
-            # Keep service running (centralized client handles message dispatch)
-            await asyncio.Event().wait()
+                # Reset backoff on successful connection
+                backoff = 1.0
 
-        except Exception as exc:  # pragma: no cover - network layer
-            logger.error("Memory worker error: %s", exc, exc_info=True)
-        finally:
-            await self.mqtt_client.shutdown()
-            logger.info("Memory worker shutdown complete")
+                # Keep service running until connection fails
+                await self.mqtt_client.wait_for_disconnect()
+
+            except asyncio.CancelledError:
+                logger.info("Memory worker shutdown requested")
+                raise
+            except Exception as exc:  # pragma: no cover - network layer
+                logger.warning("MQTT disconnected: %s; reconnecting in %.1fs...", exc, backoff)
+            finally:
+                await self.mqtt_client.shutdown()
+            
+            # Exponential backoff before reconnect
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2.0, max_backoff)
+        
+        logger.info("Memory worker shutdown complete")
 
     # --- Initial publish helpers ---
 

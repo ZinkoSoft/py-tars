@@ -451,6 +451,22 @@ class MQTTClient:
         if self._config.enable_health:
             await self.publish_health(ok=True, event="ready")
 
+    async def wait_for_disconnect(self) -> None:
+        """Wait until the MQTT connection fails.
+        
+        This method waits for the dispatch task to fail, which indicates
+        the MQTT connection has been lost. Services should call this instead
+        of `asyncio.Event().wait()` to enable automatic reconnection.
+        
+        Raises:
+            Exception: When the dispatch task fails (connection lost)
+        """
+        if not self._dispatch_task:
+            raise RuntimeError("Not connected - call connect() first")
+        
+        # Wait for dispatch task to complete (it only completes on error)
+        await self._dispatch_task
+
     async def disconnect(self) -> None:
         """Disconnect from MQTT broker and stop background tasks.
         
@@ -731,6 +747,8 @@ class MQTTClient:
             raise
         except Exception as e:
             logger.error("Message dispatch error: %s", e, exc_info=True)
+            # Re-raise to trigger reconnection in service loop
+            raise
 
     async def _heartbeat_loop(self) -> None:
         """Background task to publish application-level heartbeat.
@@ -750,8 +768,17 @@ class MQTTClient:
                 
                 # Watchdog: check for stale connection
                 if last_publish and (now - last_publish > 3 * self._config.heartbeat_interval):
-                    logger.warning("Heartbeat watchdog: connection may be stale")
-                    # TODO: Trigger reconnection in Phase 4
+                    logger.warning("Heartbeat watchdog: connection may be stale, triggering reconnection")
+                    self._connected = False
+                    if self._client:
+                        try:
+                            await self._client.__aexit__(None, None, None)
+                        except Exception as e:
+                            logger.debug("Error during forced disconnect: %s", e)
+                        self._client = None
+                    # Wait a bit before next iteration which will reconnect
+                    await asyncio.sleep(1.0)
+                    continue
                 
                 # Publish heartbeat
                 try:

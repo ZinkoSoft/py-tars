@@ -41,7 +41,7 @@ class WakeActivationConfig:
     idle_timeout_sec: float = field(
         default_factory=lambda: float(os.getenv("WAKE_IDLE_TIMEOUT_SEC", "3.0"))
     )
-    health_topic: str = field(default_factory=lambda: os.getenv("WAKE_HEALTH_TOPIC", "wake/health"))
+    health_topic: str = field(default_factory=lambda: os.getenv("WAKE_HEALTH_TOPIC", "system/health/wake-activation"))
     wake_event_topic: str = field(
         default_factory=lambda: os.getenv("WAKE_EVENT_TOPIC", TOPIC_WAKE_EVENT)
     )
@@ -86,7 +86,7 @@ class WakeActivationConfig:
 
     # Health monitoring
     stt_health_topic: str = field(
-        default_factory=lambda: os.getenv("WAKE_STT_HEALTH_TOPIC", "system/health/stt")
+        default_factory=lambda: os.getenv("WAKE_STT_HEALTH_TOPIC", "system/health/tars-stt")
     )
     wait_for_stt_health: bool = field(
         default_factory=lambda: os.getenv("WAKE_WAIT_FOR_STT_HEALTH", "1").lower()

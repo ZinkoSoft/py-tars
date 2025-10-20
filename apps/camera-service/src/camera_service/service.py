@@ -31,18 +31,12 @@ class CameraService:
         self.http: StreamingServer | None = None
 
     async def start(self) -> None:
-        """Initialize all components and start capture loop."""
+        """Initialize all components with automatic MQTT reconnection."""
+        backoff = 1.0
+        max_backoff = 30.0
+        
+        # Initialize camera and HTTP once (outside reconnection loop)
         try:
-            # Initialize MQTT
-            self.mqtt = MQTTClient(
-                self.cfg.mqtt.url,
-                client_id="tars-camera",
-                enable_health=True,
-                enable_heartbeat=True,
-            )
-            await self.mqtt.connect()
-
-            # Initialize camera
             self.camera = CameraCapture(
                 self.cfg.camera.device_index,
                 self.cfg.camera.width,
@@ -51,33 +45,81 @@ class CameraService:
             )
             self.camera.open()
 
-            # Initialize HTTP streaming
             self.http = StreamingServer(
                 self.cfg.http.host,
                 self.cfg.http.port,
                 self.cfg.camera.fps,
             )
             self.http.start()
-
-            # Centralized client handles health automatically on connect
-            logger.info("Camera service health published automatically by centralized client")
-
-            self.running = True
+            
             logger.info(
-                f"Camera service started: {self.cfg.camera.width}x{self.cfg.camera.height} "
+                f"Camera hardware initialized: {self.cfg.camera.width}x{self.cfg.camera.height} "
                 f"@ {self.cfg.camera.fps}fps, device {self.cfg.camera.device_index}, "
                 f"backend {self.camera.backend}, HTTP on {self.cfg.http.host}:{self.cfg.http.port}"
             )
-
-            # Run capture loop
-            await self._capture_loop()
-
         except Exception as e:
-            logger.error(f"Failed to start camera service: {e}")
-            if self.mqtt:
-                # Centralized client will publish health=false automatically on error
-                await self.mqtt.shutdown()
+            logger.error(f"Failed to initialize camera hardware: {e}")
             raise
+        
+        # MQTT reconnection loop
+        while self.running or not self.running:  # Run until explicitly stopped
+            try:
+                # Initialize MQTT
+                self.mqtt = MQTTClient(
+                    self.cfg.mqtt.url,
+                    client_id="tars-camera",
+                    enable_health=True,
+                    enable_heartbeat=True,
+                )
+                await self.mqtt.connect()
+
+                # Centralized client handles health automatically on connect
+                logger.info("Camera service MQTT connected - health published automatically")
+
+                self.running = True
+                
+                # Reset backoff on successful connection
+                backoff = 1.0
+
+                # Run capture loop and wait for disconnect
+                capture_task = asyncio.create_task(self._capture_loop())
+                disconnect_task = asyncio.create_task(self.mqtt.wait_for_disconnect())
+                
+                # Wait for either task to complete
+                done, pending = await asyncio.wait(
+                    [capture_task, disconnect_task],
+                    return_when=asyncio.FIRST_COMPLETED
+                )
+                
+                # Cancel pending task
+                for task in pending:
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                
+                # Re-raise exception from completed task if any
+                for task in done:
+                    if not task.cancelled():
+                        task.result()  # This will raise if there was an exception
+
+            except asyncio.CancelledError:
+                logger.info("Camera service shutdown requested")
+                raise
+            except Exception as e:
+                logger.warning(f"Camera MQTT disconnected: {e}; reconnecting in {backoff:.1f}s...")
+            finally:
+                if self.mqtt:
+                    await self.mqtt.shutdown()
+                    self.mqtt = None
+            
+            # Exponential backoff before reconnect
+            if self.running:
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2.0, max_backoff)
+            else:
+                break
 
     async def stop(self) -> None:
         """Stop service and cleanup resources."""

@@ -1,0 +1,34 @@
+# Litestream configuration for TARS config database continuous backup
+# https://litestream.io/reference/config/
+
+dbs:
+  - path: /data/config/config.db
+    replicas:
+      # S3-compatible storage (AWS S3, MinIO, etc.) - DISABLED until configured
+      # Uncomment and configure environment variables to enable S3 backups:
+      # - LITESTREAM_S3_BUCKET
+      # - LITESTREAM_S3_ENDPOINT  
+      # - LITESTREAM_ACCESS_KEY_ID
+      # - LITESTREAM_SECRET_ACCESS_KEY
+      # - type: s3
+      #   bucket: ${LITESTREAM_S3_BUCKET}
+      #   path: ${LITESTREAM_S3_PATH:-config-db}
+      #   endpoint: ${LITESTREAM_S3_ENDPOINT}
+      #   access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+      #   secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}
+      #   region: ${LITESTREAM_S3_REGION:-us-east-1}
+      #   sync-interval: 1s
+      #   snapshot-interval: 24h
+      #   retention: ${LITESTREAM_RETENTION_HOURS:-168}h
+      #   retention-check-interval: 1h
+      #   validation-interval: 6h
+        
+      # Local backup (single replica for now)
+      - type: file
+        path: /data/backups/config-db
+        retention: 168h                # Keep 7 days of backups
+        sync-interval: 10s
+        snapshot-interval: 1h
+
+# Global settings
+addr: ":9090"                         # Prometheus metrics endpoint

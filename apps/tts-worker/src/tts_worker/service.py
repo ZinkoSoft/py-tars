@@ -184,49 +184,54 @@ class TTSService:
             logger.warning("Failed to publish TTS %s status", event)
 
     async def run(self) -> None:
-        logger.info("Connecting to MQTT %s", MQTT_URL)
-        try:
-            self._mqtt_client = MQTTClient(MQTT_URL, "tars-tts", enable_health=True)
-            await self._mqtt_client.connect()
-            
-            logger.info("Connected to MQTT as tars-tts")
-            await self._publish_event(
-                EVENT_TYPE_HEALTH_TTS, HealthPing(ok=True, event="ready"), retain=True
-            )
-            
-            # Set up subscriptions
-            async def handle_say(payload: bytes) -> None:
-                say = self._decode_event(payload, TtsSay, event_type=EVENT_TYPE_SAY)
-                if say is None:
-                    return
-                callbacks = self._build_callbacks(self._mqtt_client)  # type: ignore
-                await self._domain.handle_say(say, callbacks)
-            
-            async def handle_control(payload: bytes) -> None:
-                try:
-                    data = json.loads(payload)
-                except json.JSONDecodeError as exc:
-                    logger.warning("Invalid tts/control payload: %s", exc)
-                    return
-                try:
-                    control = TTSControlMessage.from_dict(data)
-                except ValueError as exc:
-                    logger.warning("Invalid tts/control payload: %s", exc)
-                    return
-                callbacks = self._build_callbacks(self._mqtt_client)  # type: ignore
-                await self._domain.handle_control(control, callbacks)
-            
-            await self._mqtt_client.subscribe(SAY_TOPIC, handle_say, qos=1)
-            await self._mqtt_client.subscribe(CONTROL_TOPIC, handle_control, qos=1)
-            
-            logger.info(
-                "Subscribed to %s and %s, ready to process messages", SAY_TOPIC, CONTROL_TOPIC
-            )
-            
-            # Preload wake cache
-            logger.debug("Starting phrase cache preload task")
+        """Main service loop with automatic MQTT reconnection."""
+        backoff = 1.0
+        max_backoff = 30.0
+        
+        while True:
+            logger.info("Connecting to MQTT %s", MQTT_URL)
             preload_task: asyncio.Task[None] | None = None
+            
             try:
+                self._mqtt_client = MQTTClient(MQTT_URL, "tars-tts", enable_health=True)
+                await self._mqtt_client.connect()
+                
+                logger.info("Connected to MQTT as tars-tts")
+                await self._publish_event(
+                    EVENT_TYPE_HEALTH_TTS, HealthPing(ok=True, event="ready"), retain=True
+                )
+                
+                # Set up subscriptions
+                async def handle_say(payload: bytes) -> None:
+                    say = self._decode_event(payload, TtsSay, event_type=EVENT_TYPE_SAY)
+                    if say is None:
+                        return
+                    callbacks = self._build_callbacks(self._mqtt_client)  # type: ignore
+                    await self._domain.handle_say(say, callbacks)
+                
+                async def handle_control(payload: bytes) -> None:
+                    try:
+                        data = json.loads(payload)
+                    except json.JSONDecodeError as exc:
+                        logger.warning("Invalid tts/control payload: %s", exc)
+                        return
+                    try:
+                        control = TTSControlMessage.from_dict(data)
+                    except ValueError as exc:
+                        logger.warning("Invalid tts/control payload: %s", exc)
+                        return
+                    callbacks = self._build_callbacks(self._mqtt_client)  # type: ignore
+                    await self._domain.handle_control(control, callbacks)
+                
+                await self._mqtt_client.subscribe(SAY_TOPIC, handle_say, qos=1)
+                await self._mqtt_client.subscribe(CONTROL_TOPIC, handle_control, qos=1)
+                
+                logger.info(
+                    "Subscribed to %s and %s, ready to process messages", SAY_TOPIC, CONTROL_TOPIC
+                )
+                
+                # Preload wake cache
+                logger.debug("Starting phrase cache preload task")
                 preload_task = asyncio.create_task(self._domain.preload_wake_cache())
 
                 def _handle_preload_result(task: asyncio.Task[None]) -> None:
@@ -241,16 +246,30 @@ class TTSService:
 
                 preload_task.add_done_callback(_handle_preload_result)
 
-                # Keep service running
-                await asyncio.Event().wait()
+                # Reset backoff on successful connection
+                backoff = 1.0
                 
+                # Keep service running until connection fails
+                await self._mqtt_client.wait_for_disconnect()
+                
+            except asyncio.CancelledError:
+                logger.info("TTS worker shutdown requested")
+                raise
+            except Exception as exc:
+                logger.warning("MQTT disconnected: %s; reconnecting in %.1fs...", exc, backoff)
             finally:
+                # Cleanup preload task
                 if preload_task is not None and not preload_task.done():
                     preload_task.cancel()
                     with suppress(asyncio.CancelledError):
                         await preload_task
-                await self._mqtt_client.shutdown()
-        except Exception as exc:
-            logger.info("MQTT disconnected: %s; shutting down gracefully", exc)
-        finally:
-            self._publisher = None
+                
+                # Shutdown MQTT client
+                if self._mqtt_client:
+                    await self._mqtt_client.shutdown()
+                    self._mqtt_client = None
+                self._publisher = None
+            
+            # Exponential backoff before reconnect
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2.0, max_backoff)

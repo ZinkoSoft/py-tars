@@ -119,6 +119,9 @@ ops/mosquitto-config/passwd
 ops/mosquitto-config/mosquitto.conf
 ops/mosquitto-data/*
 
+# Secrets (Ed25519 keys for MQTT signing)
+ops/secrets/*.pem
+
 # Memory Worker data
 data/*
 

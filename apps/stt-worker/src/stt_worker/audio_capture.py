@@ -56,6 +56,7 @@ class AudioCapture:
         self.post_unmute_guard_until: float = 0.0
         self.sample_rate = SAMPLE_RATE
         self.frame_size = int(SAMPLE_RATE * CHUNK_DURATION_MS / 1000)
+        self.device_index: Optional[int] = None  # Store for stream recreation
         self.fanout: Optional[AudioFanoutPublisher] = None
 
     def register_fanout(self, fanout: AudioFanoutPublisher) -> None:
@@ -266,6 +267,7 @@ class AudioCapture:
         )
         self.sample_rate = sample_rate
         self.frame_size = frame_size
+        self.device_index = device_index  # Store for potential stream recreation
         self.is_recording = True
         threading.Thread(target=self._capture_loop, daemon=True).start()
         logger.info("Audio capture started")
@@ -273,19 +275,92 @@ class AudioCapture:
             logger.info("Microphone starting muted; waiting for wake control to unmute")
 
     def _capture_loop(self) -> None:
+        max_retries = 3
+        retry_count = 0
+        retry_delay = 2.0
+        
         while self.is_recording:
             try:
                 if not self.stream:
-                    break
+                    # Attempt to recreate stream if it was lost
+                    if retry_count < max_retries:
+                        logger.warning(
+                            "Audio stream lost, attempting to recreate (retry %d/%d)...",
+                            retry_count + 1,
+                            max_retries,
+                        )
+                        time.sleep(retry_delay)
+                        try:
+                            self._reinitialize_stream()
+                            logger.info("Audio stream successfully recreated")
+                            retry_count = 0  # Reset on success
+                            continue
+                        except Exception as reinit_exc:
+                            logger.error("Failed to reinitialize audio stream: %s", reinit_exc)
+                            retry_count += 1
+                            retry_delay = min(retry_delay * 2, 10.0)  # Exponential backoff, max 10s
+                            continue
+                    else:
+                        logger.error("Max retries reached, stopping audio capture")
+                        break
+                
                 data = self.stream.read(self.frame_size, exception_on_overflow=False)
                 if self.fanout is not None:
                     self.fanout.push(data, self.sample_rate)
                 now = time.time()
                 if not self.is_muted and now >= self.post_unmute_guard_until:
                     self.audio_queue.put(data)
+                
+                # Reset retry state on successful read
+                retry_count = 0
+                retry_delay = 2.0
+                
             except Exception as exc:
                 logger.error("Audio capture error: %s", exc)
-                break
+                # Mark stream as broken so next iteration will attempt recovery
+                if self.stream:
+                    try:
+                        self.stream.stop_stream()
+                        self.stream.close()
+                    except Exception:  # pragma: no cover - cleanup errors
+                        pass
+                    self.stream = None
+
+    def _reinitialize_stream(self) -> None:
+        """Attempt to recreate the audio stream after a failure."""
+        logger.info("Reinitializing audio stream...")
+        
+        # Close any existing stream
+        if self.stream:
+            try:
+                self.stream.stop_stream()
+                self.stream.close()
+            except Exception:  # pragma: no cover - cleanup errors
+                pass
+            self.stream = None
+        
+        # Recreate PyAudio instance in case it's stale
+        try:
+            self.audio.terminate()
+        except Exception:  # pragma: no cover - cleanup errors
+            pass
+        
+        self.audio = pyaudio.PyAudio()
+        
+        # Recreate stream with saved parameters
+        self.stream = self.audio.open(
+            format=pyaudio.paInt16,
+            channels=1,
+            rate=self.sample_rate,
+            input=True,
+            frames_per_buffer=self.frame_size,
+            input_device_index=self.device_index,
+        )
+        logger.info(
+            "Audio stream recreated: %dHz, device_index=%s",
+            self.sample_rate,
+            self.device_index if self.device_index is not None else "default",
+        )
 
     def stop_capture(self) -> None:
         self.is_recording = False
