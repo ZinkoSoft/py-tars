@@ -101,7 +101,7 @@ PRESETS = {
         "description": "Reset all servos to neutral positions",
         "steps": [
             # Step 1: Raise torso up first
-            {"targets": make_leg_targets(20, 0, 0), "speed": 0.8, "delay_after": 0.2},
+            {"targets": make_leg_targets(50, 0, 0), "speed": 0.8, "delay_after": 0.2},
             # Step 2: Move hands to neutral
             {"targets": make_arm_targets(0, 0, 1, 0, 0, 1), "speed": 0.7, "delay_after": 0.2},
             # Step 3: Move forearms to neutral
@@ -120,7 +120,7 @@ PRESETS = {
         "steps": [
             {"targets": make_leg_targets(50, 50, 50), "speed": 0.6, "delay_after": 0.2},
             {"targets": make_leg_targets(22, 50, 50), "speed": 0.4, "delay_after": 0.2},
-            {"targets": make_leg_targets(40, 17, 17), "speed": 0.35, "delay_after": 0.2},
+            {"targets": make_leg_targets(40, 80, 80), "speed": 0.35, "delay_after": 0.2},
             {"targets": make_leg_targets(85, 50, 50), "speed": 0.2, "delay_after": 0.2},
             {"targets": make_leg_targets(50, 50, 50), "speed": 0.5, "delay_after": 0.5},
         ]
@@ -131,7 +131,7 @@ PRESETS = {
         "steps": [
             {"targets": make_leg_targets(50, 50, 50), "speed": 0.6, "delay_after": 0.2},
             {"targets": make_leg_targets(28, 0, 0), "speed": 0.4, "delay_after": 0.2},
-            {"targets": make_leg_targets(35, 70, 70), "speed": 0.4, "delay_after": 0.2},
+            {"targets": make_leg_targets(35, 15, 15), "speed": 0.4, "delay_after": 0.2},
             {"targets": make_leg_targets(55, 40, 40), "speed": 0.8, "delay_after": 0.2},
             {"targets": make_leg_targets(50, 50, 50), "speed": 0.2, "delay_after": 0.2},
         ]
@@ -142,7 +142,7 @@ PRESETS = {
         "steps": [
             {"targets": make_leg_targets(50, 50, 50), "speed": 0.6, "delay_after": 0.2},
             {"targets": make_leg_targets(100, 0, 0), "speed": 0.2, "delay_after": 0.3},
-            {"targets": make_leg_targets(0, 70, 30), "speed": 0.4, "delay_after": 0.2},
+            {"targets": make_leg_targets(0, 30, 70), "speed": 0.7, "delay_after": 0.2},
             {"targets": make_leg_targets(50, 0, 0), "speed": 0.4, "delay_after": 0.2},
             {"targets": make_leg_targets(0, 50, 50), "speed": 0.7, "delay_after": 0.2},
             {"targets": make_leg_targets(50, 50, 50), "speed": 0.6, "delay_after": 0.2},
@@ -154,10 +154,10 @@ PRESETS = {
         "steps": [
             {"targets": make_leg_targets(50, 50, 50), "speed": 0.6, "delay_after": 0.2},
             {"targets": make_leg_targets(100, 0, 0), "speed": 0.2, "delay_after": 0.3},
-            {"targets": make_leg_targets(0, 30, 70), "speed": 0.7, "delay_after": 0.2},
+            {"targets": make_leg_targets(0, 70, 30), "speed": 0.4, "delay_after": 0.2},
             {"targets": make_leg_targets(50, 0, 0), "speed": 0.4, "delay_after": 0.2},
             {"targets": make_leg_targets(0, 50, 50), "speed": 0.7, "delay_after": 0.2},
-            {"targets": make_leg_targets(50, 50, 50), "speed": 0.6, "delay_after": 0.2},
+            {"targets": make_leg_targets(50, 50, 50), "speed": 0.6, "delay_after": 0.2},        
         ]
     },
     
@@ -166,20 +166,19 @@ PRESETS = {
         "steps": [
             {"targets": make_leg_targets(50, 50, 50), "speed": 0.6, "delay_after": 0.2},
             {"targets": make_leg_targets(80, 50, 50), "speed": 0.2, "delay_after": 0.2},
-            {"targets": make_leg_targets(80, 50, 70), "speed": 0.2, "delay_after": 0.2},
-            {"targets": make_leg_targets(50, 50, 70), "speed": 0.2, "delay_after": 0.2},
+            {"targets": make_leg_targets(80, 50, 15), "speed": 0.2, "delay_after": 0.2},
+            {"targets": make_leg_targets(50, 50, 15), "speed": 0.2, "delay_after": 0.2},
             {"targets": make_arm_targets(1, 1, 1, 0, 0, 0), "speed": 0.5, "delay_after": 0.2},
             {"targets": make_arm_targets(100, 1, 1, 0, 0, 0), "speed": 0.2, "delay_after": 0.2},
             {"targets": make_arm_targets(100, 100, 1, 0, 0, 0), "speed": 0.5, "delay_after": 0.2},
             # Wave 3 times
-            {"targets": make_arm_targets(100, 50, 1, 0, 0, 0), "speed": 0.5, "delay_after": 0.2},
-            {"targets": make_arm_targets(100, 100, 1, 0, 0, 0), "speed": 0.5, "delay_after": 0.2},
-            {"targets": make_arm_targets(100, 50, 1, 0, 0, 0), "speed": 0.5, "delay_after": 0.2},
-            {"targets": make_arm_targets(100, 100, 1, 0, 0, 0), "speed": 0.5, "delay_after": 0.2},
-            {"targets": make_arm_targets(100, 50, 1, 0, 0, 0), "speed": 0.5, "delay_after": 0.2},
+            {"targets": make_arm_targets(100, 50, 1, 0, 0, 0), "speed": 1, "delay_after": 0.2},
+            {"targets": make_arm_targets(100, 100, 1, 0, 0, 0), "speed": 1, "delay_after": 0.2},
+            {"targets": make_arm_targets(100, 50, 1, 0, 0, 0), "speed": 1, "delay_after": 0.2},
+            {"targets": make_arm_targets(100, 100, 1, 0, 0, 0), "speed": 1, "delay_after": 0.2},
+            {"targets": make_arm_targets(100, 50, 1, 0, 0, 0), "speed": 1, "delay_after": 0.2},
             {"targets": make_arm_targets(100, 1, 1, 0, 0, 0), "speed": 0.5, "delay_after": 0.2},
             {"targets": make_arm_targets(1, 1, 1, 0, 0, 0), "speed": 0.4, "delay_after": 0.2},
-            {"targets": make_leg_targets(80, 50, 70), "speed": 0.2, "delay_after": 0.2},
             {"targets": make_leg_targets(80, 50, 50), "speed": 0.2, "delay_after": 0.2},
             {"targets": make_leg_targets(50, 50, 50), "speed": 0.6, "delay_after": 0.2},
         ]
@@ -188,17 +187,17 @@ PRESETS = {
     "laugh": {
         "description": "Bouncing laugh motion",
         "steps": [
-            {"targets": make_leg_targets(50, 50, 50), "speed": 0.5, "delay_after": 0.1},
-            {"targets": make_leg_targets(1, 50, 50), "speed": 0.5, "delay_after": 0.1},
-            {"targets": make_leg_targets(50, 50, 50), "speed": 0.5, "delay_after": 0.1},
-            {"targets": make_leg_targets(1, 50, 50), "speed": 0.5, "delay_after": 0.1},
-            {"targets": make_leg_targets(50, 50, 50), "speed": 0.5, "delay_after": 0.1},
-            {"targets": make_leg_targets(1, 50, 50), "speed": 0.5, "delay_after": 0.1},
-            {"targets": make_leg_targets(50, 50, 50), "speed": 0.5, "delay_after": 0.1},
-            {"targets": make_leg_targets(1, 50, 50), "speed": 0.5, "delay_after": 0.1},
-            {"targets": make_leg_targets(50, 50, 50), "speed": 0.5, "delay_after": 0.1},
-            {"targets": make_leg_targets(1, 50, 50), "speed": 0.5, "delay_after": 0.1},
-            {"targets": make_leg_targets(50, 50, 50), "speed": 0.5, "delay_after": 0.2},
+            {"targets": make_leg_targets(50, 50, 50), "speed": 1, "delay_after": 0.1},
+            {"targets": make_leg_targets(1, 50, 50), "speed": 1, "delay_after": 0.1},
+            {"targets": make_leg_targets(50, 50, 50), "speed": 1, "delay_after": 0.1},
+            {"targets": make_leg_targets(1, 50, 50), "speed": 1, "delay_after": 0.1},
+            {"targets": make_leg_targets(50, 50, 50), "speed": 1, "delay_after": 0.1},
+            {"targets": make_leg_targets(1, 50, 50), "speed": 1, "delay_after": 0.1},
+            {"targets": make_leg_targets(50, 50, 50), "speed": 1, "delay_after": 0.1},
+            {"targets": make_leg_targets(1, 50, 50), "speed": 1, "delay_after": 0.1},
+            {"targets": make_leg_targets(50, 50, 50), "speed": 1, "delay_after": 0.1},
+            {"targets": make_leg_targets(1, 50, 50), "speed": 1, "delay_after": 0.1},
+            {"targets": make_leg_targets(50, 50, 50), "speed": 1, "delay_after": 0.2},
         ]
     },
     
@@ -224,12 +223,12 @@ PRESETS = {
             {"targets": make_leg_targets(50, 50, 50), "speed": 0.6, "delay_after": 0.2},
             {"targets": make_leg_targets(30, 50, 50), "speed": 0.2, "delay_after": 0.2},
             # Balance wobble
-            {"targets": make_leg_targets(30, 60, 60), "speed": 0.5, "delay_after": 0.2},
             {"targets": make_leg_targets(30, 40, 40), "speed": 0.5, "delay_after": 0.2},
             {"targets": make_leg_targets(30, 60, 60), "speed": 0.5, "delay_after": 0.2},
             {"targets": make_leg_targets(30, 40, 40), "speed": 0.5, "delay_after": 0.2},
             {"targets": make_leg_targets(30, 60, 60), "speed": 0.5, "delay_after": 0.2},
             {"targets": make_leg_targets(30, 40, 40), "speed": 0.5, "delay_after": 0.2},
+            {"targets": make_leg_targets(30, 60, 60), "speed": 0.5, "delay_after": 0.2},
             # Back down
             {"targets": make_leg_targets(30, 50, 50), "speed": 0.2, "delay_after": 0.2},
             {"targets": make_leg_targets(50, 50, 50), "speed": 0.2, "delay_after": 0.5},
@@ -241,7 +240,7 @@ PRESETS = {
         "steps": [
             {"targets": make_leg_targets(50, 50, 50), "speed": 0.6, "delay_after": 0.2},
             {"targets": make_leg_targets(80, 50, 50), "speed": 0.2, "delay_after": 0.2},
-            {"targets": make_leg_targets(80, 50, 100), "speed": 0.2, "delay_after": 0.2},
+            {"targets": make_leg_targets(80, 50, 10), "speed": 0.2, "delay_after": 0.2},
             {"targets": make_arm_targets(1, 1, 1, 0, 0, 0), "speed": 0.5, "delay_after": 0.2},
             {"targets": make_arm_targets(60, 50, 1, 0, 0, 0), "speed": 0.5, "delay_after": 0.2},
             {"targets": make_arm_targets(60, 70, 1, 0, 0, 0), "speed": 0.5, "delay_after": 1.0},
@@ -257,10 +256,10 @@ PRESETS = {
         "steps": [
             {"targets": make_leg_targets(50, 50, 50), "speed": 0.6, "delay_after": 0.2},
             {"targets": make_leg_targets(80, 50, 50), "speed": 0.6, "delay_after": 0.2},
-            {"targets": make_leg_targets(80, 70, 70), "speed": 0.6, "delay_after": 0.2},
+            {"targets": make_leg_targets(80, 25, 25), "speed": 0.6, "delay_after": 0.2},
             {"targets": make_arm_targets(1, 1, 1, 1, 1, 1), "speed": 0.2, "delay_after": 0.2},
             {"targets": make_arm_targets(100, 1, 1, 100, 1, 1), "speed": 0.2, "delay_after": 0.2},
-            {"targets": make_leg_targets(50, 70, 70), "speed": 0.6, "delay_after": 0.2},
+            {"targets": make_leg_targets(50, 24, 24), "speed": 0.6, "delay_after": 0.2},
             {"targets": make_arm_targets(100, 100, 1, 100, 100, 1), "speed": 0.5, "delay_after": 0.2},
             {"targets": make_arm_targets(100, 100, 100, 100, 100, 100), "speed": 0.5, "delay_after": 0.2},
             # Claw motions
@@ -277,7 +276,7 @@ PRESETS = {
             {"targets": make_arm_targets(100, 100, 100, 100, 100, 100), "speed": 0.5, "delay_after": 0.2},
             {"targets": make_arm_targets(100, 100, 1, 100, 100, 1), "speed": 0.5, "delay_after": 0.2},
             {"targets": make_arm_targets(100, 1, 1, 100, 1, 1), "speed": 0.5, "delay_after": 0.2},
-            {"targets": make_leg_targets(50, 70, 70), "speed": 0.6, "delay_after": 0.2},
+            {"targets": make_leg_targets(50, 10, 10), "speed": 0.6, "delay_after": 0.2},
             {"targets": make_arm_targets(1, 1, 1, 1, 1, 1), "speed": 0.2, "delay_after": 0.2},
             {"targets": make_leg_targets(80, 50, 50), "speed": 0.6, "delay_after": 0.2},
             {"targets": make_leg_targets(50, 50, 50), "speed": 0.6, "delay_after": 0.2},
@@ -302,10 +301,10 @@ PRESETS = {
         "steps": [
             {"targets": make_leg_targets(50, 50, 50), "speed": 0.6, "delay_after": 0.0},
             {"targets": make_leg_targets(15, 50, 50), "speed": 0.3, "delay_after": 0.0},
-            {"targets": make_leg_targets(15, 70, 70), "speed": 0.3, "delay_after": 0.0},
-            {"targets": make_leg_targets(60, 70, 70), "speed": 0.3, "delay_after": 0.0},
-            {"targets": make_leg_targets(95, 65, 65), "speed": 0.3, "delay_after": 3.0},
-            {"targets": make_leg_targets(15, 65, 65), "speed": 0.3, "delay_after": 0.0},
+            {"targets": make_leg_targets(15, 25, 25), "speed": 0.3, "delay_after": 0.0},
+            {"targets": make_leg_targets(60, 25, 25), "speed": 0.3, "delay_after": 0.0},
+            {"targets": make_leg_targets(95, 35, 35), "speed": 0.3, "delay_after": 3.0},
+            {"targets": make_leg_targets(15, 35, 35), "speed": 0.3, "delay_after": 0.0},
             {"targets": make_leg_targets(50, 50, 50), "speed": 0.6, "delay_after": 0.0},
         ]
     },
