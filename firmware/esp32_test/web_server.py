@@ -56,13 +56,15 @@ h1{text-align:center;color:#4CAF50}
 <h2>Global Speed Control</h2>
 <div class="speed-control">
 <label>Speed: <span id="speedDisplay">1.0</span>x</label>
-<input type="range" class="speed-slider" id="globalSpeed" min="0.1" max="3.0" step="0.1" value="1.0" oninput="updateGlobalSpeed()">
-<small>0.1 = slowest, 1.0 = normal, 1.5 = 50% faster, 3.0 = fastest</small>
+<input type="range" class="speed-slider" id="globalSpeed" min="0.1" max="10.0" step="0.1" value="1.0" oninput="updateGlobalSpeed()">
+<small>0.1 = slowest, 1.0 = normal, 1.5 = 50% faster, 10.0 = maximum</small>
 <div style="margin-top:10px">
 <button onclick="setSpeed(1.0)" style="padding:5px 10px;margin:2px">1.0x</button>
 <button onclick="setSpeed(1.5)" style="padding:5px 10px;margin:2px;background:#ff9800">1.5x</button>
 <button onclick="setSpeed(2.0)" style="padding:5px 10px;margin:2px">2.0x</button>
 <button onclick="setSpeed(3.0)" style="padding:5px 10px;margin:2px">3.0x</button>
+<button onclick="setSpeed(5.0)" style="padding:5px 10px;margin:2px;background:#f44336">5.0x</button>
+<button onclick="setSpeed(10.0)" style="padding:5px 10px;margin:2px;background:#d32f2f">10.0x</button>
 </div>
 </div>
 </div>
@@ -73,6 +75,11 @@ h1{text-align:center;color:#4CAF50}
 <div class="section">
 <h2>Preset Movements</h2>
 <div id="status-indicator" style="text-align:center;margin:10px 0;color:#ff9800"></div>
+<div style="margin:15px 0;text-align:center">
+<label>Repeat: </label>
+<input type="number" id="presetRepeat" min="1" max="50" value="1" style="width:60px;padding:5px;border-radius:4px;border:1px solid #555;background:#2d2d2d;color:#fff">
+<span style="margin-left:10px;color:#888;font-size:12px">1-50 times</span>
+</div>
 <div class="presets" id="presets"></div>
 </div>
 <div class="section">
@@ -201,12 +208,14 @@ showMessage("Speed update failed: "+e.message,true);
 }
 }
 async function executePreset(name){
-document.getElementById("status-indicator").textContent="Executing: "+name+"...";
+const repeat=parseInt(document.getElementById("presetRepeat").value)||1;
+const repeatText=repeat>1?" x"+repeat:"";
+document.getElementById("status-indicator").textContent="Executing: "+name+repeatText+"...";
 try{
 const res=await fetch("/control",{
 method:"POST",
 headers:{"Content-Type":"application/json"},
-body:JSON.stringify({type:"preset",preset:name})
+body:JSON.stringify({type:"preset",preset:name,repeat:repeat})
 });
 const data=await res.json();
 if(data.success){
@@ -401,10 +410,10 @@ async def handle_control(writer, body, servo_controller, presets):
             })
         
         elif cmd_type == 'speed':
-            # Set global speed (0.1 to 3.0)
+            # Set global speed (0.1 to 10.0)
             speed = data.get('speed')
-            if not isinstance(speed, (int, float)) or speed < 0.1 or speed > 3.0:
-                raise ValueError(f"Speed must be between 0.1 and 3.0, got {speed}")
+            if not isinstance(speed, (int, float)) or speed < 0.1 or speed > 10.0:
+                raise ValueError(f"Speed must be between 0.1 and 10.0, got {speed}")
             
             servo_controller.global_speed = speed
             
@@ -416,11 +425,20 @@ async def handle_control(writer, body, servo_controller, presets):
         elif cmd_type == 'preset':
             # Execute preset sequence
             preset_name = data.get('preset')
+            repeat = data.get('repeat', 1)  # Default to 1 if not specified
             
             if preset_name not in presets:
                 await send_json_response(writer, 400, {
                     "success": False,
                     "message": f"Unknown preset: {preset_name}"
+                })
+                return
+            
+            # Validate repeat count
+            if not isinstance(repeat, int) or repeat < 1 or repeat > 50:
+                await send_json_response(writer, 400, {
+                    "success": False,
+                    "message": f"Repeat must be between 1 and 50, got {repeat}"
                 })
                 return
             
@@ -433,11 +451,11 @@ async def handle_control(writer, body, servo_controller, presets):
                 return
             
             # Start preset execution
-            asyncio.create_task(servo_controller.execute_preset(preset_name, presets))
+            asyncio.create_task(servo_controller.execute_preset(preset_name, presets, repeat))
             
             await send_json_response(writer, 200, {
                 "success": True,
-                "message": f"Preset '{preset_name}' started"
+                "message": f"Preset '{preset_name}' started ({repeat} time{'s' if repeat > 1 else ''})"
             })
         
         elif cmd_type == 'multiple':

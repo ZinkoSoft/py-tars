@@ -121,7 +121,7 @@ PRESETS = {
         "steps": [
             {"targets": make_leg_targets(50, 50, 50), "speed": 0.4, "delay_after": 0.2, "description": "Start from neutral"},
             {"targets": make_leg_targets(22, 50, 50), "speed": 0.6, "delay_after": 0.2, "description": "Lower legs for weight shift"},
-            {"targets": make_leg_targets(40, 60, 60), "speed": 0.65, "delay_after": 0.6, "description": "Shift weight forward"},
+            {"targets": make_leg_targets(40, 60, 60), "speed": 0.65, "delay_after": 0.4, "description": "Shift weight forward"},
             {"targets": make_leg_targets(40, 90, 90), "speed": 0.65, "delay_after": 0.2, "description": "Shift weight more forward"},
             {"targets": make_leg_targets(85, 50, 50), "speed": 0.8, "delay_after": 0.2, "description": "Lift legs to advance"},
             {"targets": make_leg_targets(50, 50, 50), "speed": 1.0, "delay_after": 0.5, "description": "Return to neutral position"},

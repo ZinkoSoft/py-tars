@@ -43,7 +43,7 @@ class ServoController:
         # Emergency stop flag
         self.emergency_stop = False
         
-        # Global speed multiplier (0.1 to 3.0, where >1.0 = faster than normal)
+        # Global speed multiplier (0.1 to 10.0, where >1.0 = faster than normal)
         self.global_speed = 1.0
         
         # Active sequence name (None if no sequence running)
@@ -155,8 +155,8 @@ class ServoController:
         
         # Apply global speed multiplier (allows >1.0 for faster movements)
         effective_speed = speed * self.global_speed
-        # Ensure result is within valid range (0.1 to 3.0)
-        effective_speed = max(0.1, min(3.0, effective_speed))
+        # Ensure result is within valid range (0.1 to 10.0)
+        effective_speed = max(0.1, min(10.0, effective_speed))
         
         # Acquire lock for this channel
         async with self.locks[channel]:
@@ -252,13 +252,14 @@ class ServoController:
         
         print("Emergency stop complete - all servos in floating state")
     
-    async def execute_preset(self, preset_name, presets):
+    async def execute_preset(self, preset_name, presets, repeat=1):
         """
         Execute a preset movement sequence
         
         Args:
             preset_name: Name of preset to execute
             presets: Dictionary of all available presets
+            repeat: Number of times to repeat the sequence (default: 1)
         
         Raises:
             ValueError: If preset not found
@@ -273,27 +274,35 @@ class ServoController:
         if preset_name not in presets:
             raise ValueError(f"Unknown preset: {preset_name}")
         
+        # Validate repeat count
+        repeat = max(1, min(50, int(repeat)))  # Clamp to 1-50
+        
         preset = presets[preset_name]
         
         try:
-            self.active_sequence = preset_name
-            print(f"Executing preset: {preset_name}")
+            self.active_sequence = f"{preset_name} x{repeat}" if repeat > 1 else preset_name
+            print(f"Executing preset: {preset_name} ({repeat} time{'s' if repeat > 1 else ''})")
             
-            # Execute each step
-            for i, step in enumerate(preset["steps"]):
-                # Check emergency stop
-                if self.emergency_stop:
-                    print(f"Preset {preset_name} cancelled by emergency stop")
-                    raise asyncio.CancelledError("Emergency stop during preset")
+            # Repeat the sequence
+            for rep in range(repeat):
+                if repeat > 1:
+                    print(f"  Repetition {rep + 1}/{repeat}")
                 
-                print(f"  Step {i+1}/{len(preset['steps'])}: {step.get('description', 'Moving')}")
-                
-                # Move servos
-                await self.move_multiple(step["targets"], step.get("speed", self.global_speed))
-                
-                # Delay after step
-                delay = step.get("delay_after", 0.5)
-                await asyncio.sleep(delay)
+                # Execute each step
+                for i, step in enumerate(preset["steps"]):
+                    # Check emergency stop
+                    if self.emergency_stop:
+                        print(f"Preset {preset_name} cancelled by emergency stop")
+                        raise asyncio.CancelledError("Emergency stop during preset")
+                    
+                    print(f"  Step {i+1}/{len(preset['steps'])}: {step.get('description', 'Moving')}")
+                    
+                    # Move servos
+                    await self.move_multiple(step["targets"], step.get("speed", self.global_speed))
+                    
+                    # Delay after step
+                    delay = step.get("delay_after", 0.5)
+                    await asyncio.sleep(delay)
             
             # Disable servos after sequence
             print(f"Preset {preset_name} complete - disabling servos")
