@@ -252,7 +252,7 @@ class ServoController:
         
         print("Emergency stop complete - all servos in floating state")
     
-    async def execute_preset(self, preset_name, presets, repeat=1):
+    async def execute_preset(self, preset_name, presets, repeat=1, delay_multiplier=1.0):
         """
         Execute a preset movement sequence
         
@@ -260,6 +260,7 @@ class ServoController:
             preset_name: Name of preset to execute
             presets: Dictionary of all available presets
             repeat: Number of times to repeat the sequence (default: 1)
+            delay_multiplier: Multiply all delays by this factor (0.1-2.0, default: 1.0)
         
         Raises:
             ValueError: If preset not found
@@ -277,10 +278,14 @@ class ServoController:
         # Validate repeat count
         repeat = max(1, min(50, int(repeat)))  # Clamp to 1-50
         
+        # Validate delay multiplier
+        delay_multiplier = max(0.1, min(2.0, float(delay_multiplier)))  # Clamp to 0.1-2.0
+        
         preset = presets[preset_name]
         
         try:
-            self.active_sequence = f"{preset_name} x{repeat}" if repeat > 1 else preset_name
+            delay_info = f" @{delay_multiplier}x" if delay_multiplier != 1.0 else ""
+            self.active_sequence = f"{preset_name} x{repeat}{delay_info}" if repeat > 1 or delay_multiplier != 1.0 else preset_name
             print(f"Executing preset: {preset_name} ({repeat} time{'s' if repeat > 1 else ''})")
             
             # Repeat the sequence
@@ -300,8 +305,8 @@ class ServoController:
                     # Move servos
                     await self.move_multiple(step["targets"], step.get("speed", self.global_speed))
                     
-                    # Delay after step
-                    delay = step.get("delay_after", 0.5)
+                    # Delay after step (apply delay multiplier)
+                    delay = step.get("delay_after", 0.5) * delay_multiplier
                     await asyncio.sleep(delay)
             
             # Disable servos after sequence

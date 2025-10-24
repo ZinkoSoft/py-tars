@@ -78,7 +78,10 @@ h1{text-align:center;color:#4CAF50}
 <div style="margin:15px 0;text-align:center">
 <label>Repeat: </label>
 <input type="number" id="presetRepeat" min="1" max="50" value="1" style="width:60px;padding:5px;border-radius:4px;border:1px solid #555;background:#2d2d2d;color:#fff">
-<span style="margin-left:10px;color:#888;font-size:12px">1-50 times</span>
+<span style="margin:0 10px;color:#888;font-size:12px">1-50 times</span>
+<label style="margin-left:20px">Delay: </label>
+<input type="number" id="presetDelay" min="0.1" max="2.0" step="0.1" value="1.0" style="width:60px;padding:5px;border-radius:4px;border:1px solid #555;background:#2d2d2d;color:#fff">
+<span style="margin-left:5px;color:#888;font-size:12px">0.1-2.0x</span>
 </div>
 <div class="presets" id="presets"></div>
 </div>
@@ -209,13 +212,15 @@ showMessage("Speed update failed: "+e.message,true);
 }
 async function executePreset(name){
 const repeat=parseInt(document.getElementById("presetRepeat").value)||1;
+const delayMult=parseFloat(document.getElementById("presetDelay").value)||1.0;
 const repeatText=repeat>1?" x"+repeat:"";
-document.getElementById("status-indicator").textContent="Executing: "+name+repeatText+"...";
+const delayText=delayMult!==1.0?" @"+delayMult.toFixed(1)+"x":"";
+document.getElementById("status-indicator").textContent="Executing: "+name+repeatText+delayText+"...";
 try{
 const res=await fetch("/control",{
 method:"POST",
 headers:{"Content-Type":"application/json"},
-body:JSON.stringify({type:"preset",preset:name,repeat:repeat})
+body:JSON.stringify({type:"preset",preset:name,repeat:repeat,delay_multiplier:delayMult})
 });
 const data=await res.json();
 if(data.success){
@@ -426,6 +431,7 @@ async def handle_control(writer, body, servo_controller, presets):
             # Execute preset sequence
             preset_name = data.get('preset')
             repeat = data.get('repeat', 1)  # Default to 1 if not specified
+            delay_multiplier = data.get('delay_multiplier', 1.0)  # Default to 1.0
             
             if preset_name not in presets:
                 await send_json_response(writer, 400, {
@@ -442,6 +448,14 @@ async def handle_control(writer, body, servo_controller, presets):
                 })
                 return
             
+            # Validate delay multiplier
+            if not isinstance(delay_multiplier, (int, float)) or delay_multiplier < 0.1 or delay_multiplier > 2.0:
+                await send_json_response(writer, 400, {
+                    "success": False,
+                    "message": f"Delay multiplier must be between 0.1 and 2.0, got {delay_multiplier}"
+                })
+                return
+            
             # Check if sequence already running
             if servo_controller.active_sequence is not None:
                 await send_json_response(writer, 409, {
@@ -451,11 +465,12 @@ async def handle_control(writer, body, servo_controller, presets):
                 return
             
             # Start preset execution
-            asyncio.create_task(servo_controller.execute_preset(preset_name, presets, repeat))
+            asyncio.create_task(servo_controller.execute_preset(preset_name, presets, repeat, delay_multiplier))
             
+            delay_info = f" @{delay_multiplier}x delay" if delay_multiplier != 1.0 else ""
             await send_json_response(writer, 200, {
                 "success": True,
-                "message": f"Preset '{preset_name}' started ({repeat} time{'s' if repeat > 1 else ''})"
+                "message": f"Preset '{preset_name}' started ({repeat} time{'s' if repeat > 1 else ''}){delay_info}"
             })
         
         elif cmd_type == 'multiple':
