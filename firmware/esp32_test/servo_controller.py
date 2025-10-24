@@ -43,7 +43,7 @@ class ServoController:
         # Emergency stop flag
         self.emergency_stop = False
         
-        # Global speed multiplier (0.1 to 1.0)
+        # Global speed multiplier (0.1 to 3.0, where >1.0 = faster than normal)
         self.global_speed = 1.0
         
         # Active sequence name (None if no sequence running)
@@ -153,10 +153,10 @@ class ServoController:
         else:
             validate_speed(speed)
         
-        # Apply global speed multiplier
+        # Apply global speed multiplier (allows >1.0 for faster movements)
         effective_speed = speed * self.global_speed
-        # Ensure result is still within valid range
-        effective_speed = max(0.1, min(1.0, effective_speed))
+        # Ensure result is within valid range (0.1 to 3.0)
+        effective_speed = max(0.1, min(3.0, effective_speed))
         
         # Acquire lock for this channel
         async with self.locks[channel]:
@@ -187,9 +187,15 @@ class ServoController:
                     break  # Exit movement loop on failure
                 
                 # Delay based on effective speed (0.02s base, adjusted by speed)
-                # speed=1.0: 0.02s per step (fast)
+                # speed=1.0: 0.02s per step (normal)
                 # speed=0.1: 0.18s per step (slow)
-                delay = 0.02 * (1.1 - effective_speed)
+                # speed=1.5: 0.013s per step (fast)
+                # speed=3.0: 0.007s per step (very fast)
+                if effective_speed <= 1.0:
+                    delay = 0.02 * (1.1 - effective_speed)
+                else:
+                    # For speeds > 1.0, reduce delay proportionally
+                    delay = 0.02 / effective_speed
                 await asyncio.sleep(delay)
     
     async def move_multiple(self, targets, speed=None):

@@ -55,9 +55,15 @@ h1{text-align:center;color:#4CAF50}
 <div class="section">
 <h2>Global Speed Control</h2>
 <div class="speed-control">
-<label>Speed: <span id="speedDisplay">1.0</span></label>
-<input type="range" class="speed-slider" id="globalSpeed" min="0.1" max="1.0" step="0.1" value="1.0" oninput="updateGlobalSpeed()">
-<small>0.1 = slowest, 1.0 = fastest</small>
+<label>Speed: <span id="speedDisplay">1.0</span>x</label>
+<input type="range" class="speed-slider" id="globalSpeed" min="0.1" max="3.0" step="0.1" value="1.0" oninput="updateGlobalSpeed()">
+<small>0.1 = slowest, 1.0 = normal, 1.5 = 50% faster, 3.0 = fastest</small>
+<div style="margin-top:10px">
+<button onclick="setSpeed(1.0)" style="padding:5px 10px;margin:2px">1.0x</button>
+<button onclick="setSpeed(1.5)" style="padding:5px 10px;margin:2px;background:#ff9800">1.5x</button>
+<button onclick="setSpeed(2.0)" style="padding:5px 10px;margin:2px">2.0x</button>
+<button onclick="setSpeed(3.0)" style="padding:5px 10px;margin:2px">3.0x</button>
+</div>
 </div>
 </div>
 <div class="section">
@@ -160,6 +166,23 @@ showMessage(data.message||"Error",true);
 showMessage("Network error: "+e.message,true);
 }
 }
+async function setSpeed(speed){
+document.getElementById("globalSpeed").value=speed;
+document.getElementById("speedDisplay").textContent=speed.toFixed(1);
+try{
+const res=await fetch("/control",{
+method:"POST",
+headers:{"Content-Type":"application/json"},
+body:JSON.stringify({type:"speed",speed:speed})
+});
+const data=await res.json();
+if(data.success){
+showMessage("Global speed set to "+speed+"x");
+}
+}catch(e){
+showMessage("Speed update failed: "+e.message,true);
+}
+}
 async function updateGlobalSpeed(){
 const speed=parseFloat(document.getElementById("globalSpeed").value);
 document.getElementById("speedDisplay").textContent=speed.toFixed(1);
@@ -171,7 +194,7 @@ body:JSON.stringify({type:"speed",speed:speed})
 });
 const data=await res.json();
 if(data.success){
-showMessage("Global speed set to "+speed);
+showMessage("Global speed set to "+speed+"x");
 }
 }catch(e){
 showMessage("Speed update failed: "+e.message,true);
@@ -315,6 +338,12 @@ async def handle_client(reader, writer, servo_controller, presets, boot_time):
         elif path == '/resume' and method == 'POST':
             await handle_resume(writer, servo_controller)
         
+        elif path == '/config' and method == 'GET':
+            await handle_get_config(writer)
+        
+        elif path == '/config/reload' and method == 'POST':
+            await handle_reload_config(writer, servo_controller)
+        
         else:
             await send_json_response(writer, 404, {
                 "success": False,
@@ -372,10 +401,10 @@ async def handle_control(writer, body, servo_controller, presets):
             })
         
         elif cmd_type == 'speed':
-            # Set global speed
+            # Set global speed (0.1 to 3.0)
             speed = data.get('speed')
-            from servo_config import validate_speed
-            validate_speed(speed)
+            if not isinstance(speed, (int, float)) or speed < 0.1 or speed > 3.0:
+                raise ValueError(f"Speed must be between 0.1 and 3.0, got {speed}")
             
             servo_controller.global_speed = speed
             
@@ -520,6 +549,64 @@ async def handle_resume(writer, servo_controller):
         await send_json_response(writer, 500, {
             "success": False,
             "message": "Resume failed",
+            "error": str(e)
+        })
+
+
+async def handle_get_config(writer):
+    """Handle /config endpoint - return current servo configuration"""
+    try:
+        from servo_config import SERVO_CALIBRATION
+        
+        config_data = {}
+        for channel in range(9):
+            if channel in SERVO_CALIBRATION:
+                servo = SERVO_CALIBRATION[channel]
+                config_data[channel] = {
+                    "min": servo["min"],
+                    "max": servo["max"],
+                    "neutral": servo["neutral"],
+                    "label": servo["label"],
+                    "reverse": servo.get("reverse", False)
+                }
+        
+        await send_json_response(writer, 200, {
+            "success": True,
+            "config": config_data,
+            "message": "Current servo configuration"
+        })
+    
+    except Exception as e:
+        await send_json_response(writer, 500, {
+            "success": False,
+            "message": "Failed to get configuration",
+            "error": str(e)
+        })
+
+
+async def handle_reload_config(writer, servo_controller):
+    """Handle /config/reload endpoint - reload config from INI file"""
+    try:
+        from servo_config import reload_config
+        
+        if reload_config():
+            # Re-initialize servos with new config
+            await servo_controller.initialize_servos()
+            
+            await send_json_response(writer, 200, {
+                "success": True,
+                "message": "Configuration reloaded from servo_config.ini and servos re-initialized"
+            })
+        else:
+            await send_json_response(writer, 500, {
+                "success": False,
+                "message": "Failed to reload configuration file"
+            })
+    
+    except Exception as e:
+        await send_json_response(writer, 500, {
+            "success": False,
+            "message": "Config reload failed",
             "error": str(e)
         })
 

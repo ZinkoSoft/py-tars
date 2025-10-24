@@ -1,15 +1,20 @@
 """
 Servo Configuration and Calibration
 V2 Configuration from tars-community-movement-original/config.ini
+
+Supports loading from servo_config.ini file for easy calibration updates
+without re-uploading firmware.
 """
 
-# Servo calibration data per channel
+import os
+
+# Default servo calibration data per channel
 # Format: {channel: {"min": pulse_width, "max": pulse_width, "neutral": pulse_width, "label": name}}
 # Pulse widths are in microseconds * 4.096 (for PCA9685 12-bit resolution at 50Hz)
 # Example: 1.5ms pulse = 1500us = 307.2 ≈ 307 in 12-bit units
 # For servos: typically 1ms (204) to 2ms (409) range
 
-SERVO_CALIBRATION = {
+DEFAULT_SERVO_CALIBRATION = {
     # Leg Servos (LDX-227) - Channels 0-2
     0: {
         "min": 220,        # upHeight (raised position)
@@ -102,6 +107,150 @@ SERVO_LABELS = [
     "Left Elbow",          # Channel 7
     "Left Hand"            # Channel 8
 ]
+
+# Active configuration (loaded from INI or defaults)
+SERVO_CALIBRATION = None
+
+
+def load_config_from_ini(filename="servo_config.ini"):
+    """
+    Load servo configuration from INI file.
+    
+    INI Format:
+    [servo_0]
+    min = 220
+    max = 360
+    neutral = 300
+    label = Main Legs Lift
+    reverse = False
+    
+    Args:
+        filename: Path to INI file (default: servo_config.ini)
+    
+    Returns:
+        dict: Servo calibration dictionary, or None if file doesn't exist
+    """
+    try:
+        # Check if file exists (MicroPython compatible)
+        try:
+            os.stat(filename)
+        except OSError:
+            return None
+        
+        config = {}
+        current_section = None
+        
+        with open(filename, 'r') as f:
+            for line in f:
+                line = line.strip()
+                
+                # Skip empty lines and comments
+                if not line or line.startswith('#') or line.startswith(';'):
+                    continue
+                
+                # Section header [servo_N]
+                if line.startswith('[') and line.endswith(']'):
+                    section_name = line[1:-1].strip()
+                    if section_name.startswith('servo_'):
+                        try:
+                            channel = int(section_name.split('_')[1])
+                            if 0 <= channel <= 8:
+                                current_section = channel
+                                config[channel] = {}
+                        except (ValueError, IndexError):
+                            pass
+                    continue
+                
+                # Key = Value pairs
+                if '=' in line and current_section is not None:
+                    key, value = line.split('=', 1)
+                    key = key.strip()
+                    value = value.strip()
+                    
+                    # Parse values
+                    if key in ('min', 'max', 'neutral'):
+                        config[current_section][key] = int(value)
+                    elif key == 'reverse':
+                        config[current_section][key] = value.lower() in ('true', '1', 'yes')
+                    elif key == 'label':
+                        config[current_section][key] = value
+        
+        # Validate we have all required fields for each servo
+        for channel, servo_config in config.items():
+            required = ['min', 'max', 'neutral', 'label']
+            if not all(k in servo_config for k in required):
+                print(f"Warning: servo_{channel} missing required fields, using defaults")
+                return None
+            
+            # Add reverse flag if missing
+            if 'reverse' not in servo_config:
+                servo_config['reverse'] = False
+        
+        return config
+    
+    except Exception as e:
+        print(f"Error loading {filename}: {e}")
+        return None
+
+
+def save_config_to_ini(config, filename="servo_config.ini"):
+    """
+    Save servo configuration to INI file.
+    
+    Args:
+        config: Servo calibration dictionary
+        filename: Path to INI file (default: servo_config.ini)
+    
+    Returns:
+        bool: True if successful
+    """
+    try:
+        with open(filename, 'w') as f:
+            f.write("# TARS Servo Configuration\n")
+            f.write("# Edit values and reboot ESP32 to apply changes\n")
+            f.write("# No need to re-upload firmware!\n\n")
+            
+            for channel in range(9):
+                if channel in config:
+                    servo = config[channel]
+                    f.write(f"[servo_{channel}]\n")
+                    f.write(f"min = {servo['min']}\n")
+                    f.write(f"max = {servo['max']}\n")
+                    f.write(f"neutral = {servo['neutral']}\n")
+                    f.write(f"label = {servo['label']}\n")
+                    f.write(f"reverse = {servo.get('reverse', False)}\n")
+                    f.write("\n")
+        
+        print(f"Configuration saved to {filename}")
+        return True
+    
+    except Exception as e:
+        print(f"Error saving {filename}: {e}")
+        return False
+
+
+def init_servo_config():
+    """
+    Initialize servo configuration.
+    Load from INI file if exists, otherwise use defaults.
+    Creates INI file from defaults if it doesn't exist.
+    """
+    global SERVO_CALIBRATION
+    
+    # Try to load from INI
+    loaded_config = load_config_from_ini()
+    
+    if loaded_config:
+        SERVO_CALIBRATION = loaded_config
+        print("✓ Loaded servo configuration from servo_config.ini")
+    else:
+        # Use defaults
+        SERVO_CALIBRATION = DEFAULT_SERVO_CALIBRATION.copy()
+        print("✓ Using default servo configuration")
+        
+        # Create INI file for easy editing
+        if save_config_to_ini(SERVO_CALIBRATION):
+            print("✓ Created servo_config.ini for future customization")
 
 
 def reverse_servo(pulse, min_pulse, max_pulse):
@@ -240,3 +389,27 @@ def get_neutral_positions():
         dict: {channel: neutral_pulse_width}
     """
     return {ch: cal["neutral"] for ch, cal in SERVO_CALIBRATION.items()}
+
+
+def reload_config():
+    """
+    Reload configuration from INI file.
+    Useful for applying changes without reboot.
+    
+    Returns:
+        bool: True if reload successful
+    """
+    global SERVO_CALIBRATION
+    
+    loaded_config = load_config_from_ini()
+    if loaded_config:
+        SERVO_CALIBRATION = loaded_config
+        print("✓ Configuration reloaded from servo_config.ini")
+        return True
+    else:
+        print("✗ Failed to reload configuration")
+        return False
+
+
+# Initialize on module load
+init_servo_config()
