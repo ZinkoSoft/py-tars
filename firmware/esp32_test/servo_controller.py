@@ -19,6 +19,9 @@ class ServoController:
     Async servo controller for coordinated multi-servo movements
     """
     
+    # Maximum I2C retry attempts for error recovery
+    MAX_RETRIES = 3
+    
     def __init__(self, pca9685):
         """
         Initialize servo controller
@@ -34,6 +37,9 @@ class ServoController:
         # Locks for thread-safe servo access (one per channel)
         self.locks = [asyncio.Lock() for _ in range(9)]
         
+        # Global I2C bus lock for retry operations
+        self.i2c_lock = asyncio.Lock()
+        
         # Emergency stop flag
         self.emergency_stop = False
         
@@ -45,15 +51,57 @@ class ServoController:
         
         print("ServoController initialized")
     
-    def initialize_servos(self):
+    async def _set_pwm_with_retry(self, channel, pulse):
+        """
+        Set PWM with automatic retry on I2C errors
+        
+        Args:
+            channel: Servo channel (0-15 for PCA9685)
+            pulse: Pulse width (0-4095 for 12-bit PWM)
+        
+        Returns:
+            bool: True if successful, False if all retries exhausted
+        """
+        async with self.i2c_lock:
+            for attempt in range(self.MAX_RETRIES):
+                try:
+                    self.pca9685.set_pwm(channel, 0, pulse)
+                    return True
+                except OSError as e:
+                    # Check for Remote I/O error (errno 121)
+                    is_remote_io = (hasattr(e, 'errno') and e.errno == 121) or \
+                                   "Remote I/O" in str(e)
+                    
+                    if is_remote_io and attempt < self.MAX_RETRIES - 1:
+                        print(f"I2C retry {attempt+1}/{self.MAX_RETRIES} on ch{channel}")
+                        await asyncio.sleep(0.05)  # 50ms delay
+                        continue
+                    else:
+                        print(f"I2C error on ch{channel}: {e}")
+                        return False
+        return False
+    
+    async def initialize_servos(self):
         """
         Initialize all servos to safe starting positions
-        - Legs (0-2): neutral (center) positions
-        - Arms (3-8): minimum (closed/retracted) positions
-        Synchronous function called during startup
+        - Initialize all 16 PCA9685 channels to 0 (floating state) first
+        - Then set active servos (0-8):
+          - Legs (0-2): neutral (center) positions
+          - Arms (3-8): minimum (closed/retracted) positions
+        
+        Uses async retry logic for robust I2C communication
         """
         print("Initializing servos to safe positions...")
         
+        # Initialize all 16 PCA9685 channels to 0 (floating state)
+        print("  Setting all 16 PCA9685 channels to 0 (floating state)...")
+        for channel in range(16):
+            success = await self._set_pwm_with_retry(channel, 0)
+            if not success:
+                print(f"  ✗ Channel {channel} init to 0 failed after retries")
+        
+        # Now initialize the 9 active servos to safe positions
+        print("  Initializing 9 active servos to safe positions...")
         for channel in range(9):
             # Arms (channels 3-8) start at minimum (closed), legs (0-2) at neutral
             if channel >= 3:
@@ -70,12 +118,12 @@ class ServoController:
             # Apply reverse transformation if needed (must match move_servo_smooth behavior)
             actual_target = apply_reverse_if_needed(channel, target)
             
-            try:
-                self.pca9685.set_pwm(channel, 0, actual_target)
+            success = await self._set_pwm_with_retry(channel, actual_target)
+            if success:
                 self.positions[channel] = actual_target
-                print(f"  Channel {channel} ({SERVO_CALIBRATION[channel]['label']}): {target} -> {actual_target} ({pos_desc}) [{reverse_status}]")
-            except Exception as e:
-                print(f"  ✗ Channel {channel} failed: {e}")
+                print(f"    Channel {channel} ({SERVO_CALIBRATION[channel]['label']}): {target} -> {actual_target} ({pos_desc}) [{reverse_status}]")
+            else:
+                print(f"    ✗ Channel {channel} failed after {self.MAX_RETRIES} retries")
         
         print("Servo initialization complete")
     
@@ -130,13 +178,13 @@ class ServoController:
                 # Move one step
                 position += step
                 
-                # Set PWM
-                try:
-                    self.pca9685.set_pwm(channel, 0, position)
+                # Set PWM with retry logic
+                success = await self._set_pwm_with_retry(channel, position)
+                if success:
                     self.positions[channel] = position
-                except Exception as e:
-                    print(f"Error moving servo {channel}: {e}")
-                    raise
+                else:
+                    print(f"Warning: PWM set failed for servo {channel} at position {position}")
+                    break  # Exit movement loop on failure
                 
                 # Delay based on effective speed (0.02s base, adjusted by speed)
                 # speed=1.0: 0.02s per step (fast)
@@ -212,7 +260,8 @@ class ServoController:
         """
         # Check if sequence already running
         if self.active_sequence is not None:
-            raise RuntimeError(f"Sequence already running: {self.active_sequence}")
+            print(f"Movement already in progress: {self.active_sequence}")
+            return  # Return immediately without raising exception
         
         # Get preset
         if preset_name not in presets:

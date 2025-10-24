@@ -84,7 +84,7 @@ const servos=[
 {ch:4,label:"Right Elbow",min:200,max:380},
 {ch:5,label:"Right Hand",min:200,max:280},
 {ch:6,label:"Left Shoulder",min:135,max:440},
-{ch:7,label:"Left Elbow",min:190,max:380},
+{ch:7,label:"Left Elbow",min:200,max:380},
 {ch:8,label:"Left Hand",min:280,max:380}
 ];
 const presets=[
@@ -510,7 +510,7 @@ async def handle_resume(writer, servo_controller):
         servo_controller.emergency_stop = False
         
         # Re-initialize servos to neutral
-        servo_controller.initialize_servos()
+        await servo_controller.initialize_servos()
         
         await send_json_response(writer, 200, {
             "success": True,

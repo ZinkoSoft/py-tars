@@ -236,11 +236,17 @@ class ConfigLibrary:
     async def _mqtt_subscription_loop(self) -> None:
         """Persistent MQTT subscription for configuration updates."""
         topic = f"system/config/{self.service_name}"
+        
+        # Parse MQTT URL (format: mqtt://[user:pass@]host:port)
+        from urllib.parse import urlparse
+        parsed = urlparse(self.mqtt_url)
+        hostname = parsed.hostname or "localhost"
+        port = parsed.port or 1883
 
         while True:
             try:
                 # Connect to MQTT broker
-                async with MQTTClient(self.mqtt_url) as client:
+                async with MQTTClient(hostname=hostname, port=port) as client:
                     await client.subscribe(topic, qos=1)
                     logger.info(f"[{self.service_name}] Subscribed to {topic}")
 

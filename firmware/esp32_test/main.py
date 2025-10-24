@@ -77,7 +77,7 @@ async def main():
     print("\nStep 4: Initializing Servo Controller...")
     try:
         servo_controller = ServoController(pca)
-        servo_controller.initialize_servos()
+        await servo_controller.initialize_servos()
     except Exception as e:
         print(f"✗ Servo controller initialization failed: {e}")
         return

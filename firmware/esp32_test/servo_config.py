@@ -73,9 +73,9 @@ SERVO_CALIBRATION = {
         "reverse": False
     },
     7: {
-        "min": 190,        # starForarmMax (inverted)
+        "min": 200,        # starForarmMax (inverted)
         "max": 380,        # starForarmMin (inverted)
-        "neutral": 190,    # Calculated midpoint
+        "neutral": 200,    # Calculated midpoint
         "label": "Left Elbow",
         "servo_type": "MG90S",
         "reverse": False
