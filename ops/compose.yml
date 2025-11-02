@@ -23,12 +23,34 @@
 name: tars-stack
 
 services:
+  # MQTT Broker - Network-accessible message bus
+  # 
+  # Remote Microphone Support:
+  #   The MQTT broker is configured to accept connections from remote devices
+  #   on the local network (listener binds to 0.0.0.0:1883 in mosquitto.conf).
+  #   This enables remote microphone deployments (see compose.remote-mic.yml)
+  #   where wake-activation and stt-worker services run on separate devices
+  #   (e.g., Radxa Zero 3W with USB-C microphone) and connect to this broker.
+  # 
+  # Security Note:
+  #   Anonymous authentication is enabled (allow_anonymous true) for initial
+  #   implementation. For production deployments on untrusted networks, consider
+  #   adding username/password authentication or TLS encryption.
+  # 
+  # Network Requirements:
+  #   - Firewall must allow port 1883/tcp for remote device connections
+  #   - Remote devices must be on same local network or have network route
+  # 
+  # See also:
+  #   - ops/mosquitto.conf for detailed broker configuration
+  #   - ops/compose.remote-mic.yml for remote microphone deployment
+  #   - docs/REMOTE_MICROPHONE_SETUP.md for setup instructions
   mqtt:
     env_file: ../.env
     image: eclipse-mosquitto:2
     container_name: tars-mqtt
     ports:
-      - "1883:1883"
+      - "1883:1883"    # Exposed on all network interfaces (0.0.0.0) for remote access
     volumes:
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./mosquitto-data:/mosquitto/data
