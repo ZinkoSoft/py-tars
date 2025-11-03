@@ -10,16 +10,10 @@ WORKDIR /opt/ui-eink-display
 # Install system dependencies for e-ink display
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        python3-dev \
-        python3-pil \
-        python3-numpy \
+        build-essential \
+        libgpiod3 \
         fonts-dejavu-core \
-        libgpiod-dev \
-        python3-rpi.gpio \
-        python3-spidev \
-        git \
-        wget \
-        curl \
+        git wget curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install tars-core first (required for contracts)
@@ -35,12 +29,16 @@ COPY apps/ui-eink-display/pyproject.toml ./pyproject.toml
 # Install base dependencies
 RUN python -c "import tomllib; data = tomllib.load(open('pyproject.toml','rb')); deps = data['project']['dependencies']; print('\\n'.join(deps))" > /tmp/requirements.txt \
     && pip install -r /tmp/requirements.txt \
+    && pip install spidev gpiod \
     && rm /tmp/requirements.txt
 
 # Clone and setup waveshare e-Paper library
 RUN git clone --depth=1 https://github.com/waveshare/e-Paper.git /opt/e-Paper \
     && cd /opt/e-Paper/RaspberryPi_JetsonNano/python \
     && python setup.py install || echo "waveshare-epd setup.py install failed, will use PYTHONPATH"
+
+# Override epdconfig with our libgpiod+spidev backend for Radxa Zero 3W
+COPY apps/ui-eink-display/docker/epdconfig.py /opt/e-Paper/RaspberryPi_JetsonNano/python/lib/waveshare_epd/epdconfig.py
 
 # Source code will be provided via volume mount at /workspace/apps/ui-eink-display
 # This enables live code updates without container rebuild

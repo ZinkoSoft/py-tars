@@ -215,6 +215,13 @@ services:
     devices:
       - /dev/spidev0.0:/dev/spidev0.0
       - /dev/gpiomem:/dev/gpiomem
+      - /dev/spidev3.0
+      - /dev/gpiochip0
+      - /dev/gpiochip1
+      - /dev/gpiochip2
+      - /dev/gpiochip3
+      - /dev/gpiochip4
+      - /dev/gpiochip5
     
     # Privileged access for GPIO control
     # Alternative: add user to gpio group and use group_add

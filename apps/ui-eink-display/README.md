@@ -61,7 +61,7 @@ pip install -e .
 
 ```bash
 cp .env.example .env
-# Edit .env with your MQTT_HOST and other settings
+# Edit .env with your MQTT_URL and other settings
 ```
 
 ## Usage
@@ -77,7 +77,7 @@ docker compose -f ops/compose.remote-mic.yml up ui-eink-display
 
 ```bash
 # Set environment variables
-export MQTT_HOST=192.168.1.100
+export MQTT_URL=mqtt://tars:pass@192.168.1.100:1883
 export DISPLAY_TIMEOUT_SEC=45
 export LOG_LEVEL=DEBUG
 export PYTHONPATH=/data/git/e-Paper/RaspberryPi_JetsonNano/python/lib:$PYTHONPATH
@@ -130,10 +130,9 @@ MOCK_DISPLAY=1 pytest
 See `.env.example` for all available configuration options.
 
 ### Required Variables
-- `MQTT_HOST` - IP address of main TARS system
+- `MQTT_URL` - MQTT connection URL with credentials (e.g., `mqtt://tars:pass@192.168.1.100:1883`)
 
 ### Optional Variables
-- `MQTT_PORT` - MQTT broker port (default: 1883)
 - `LOG_LEVEL` - Logging verbosity (default: INFO)
 - `DISPLAY_TIMEOUT_SEC` - Seconds before returning to standby (default: 45)
 - `MOCK_DISPLAY` - Set to 1 for testing without hardware (default: 0)
@@ -157,9 +156,10 @@ See `.env.example` for all available configuration options.
 - Check display connections (refer to Waveshare wiring guide)
 
 ### MQTT Connection Fails
-- Verify MQTT_HOST is correct: `ping $MQTT_HOST`
+- Verify MQTT broker is reachable: `ping <broker-host>`
 - Check broker is running on main TARS system
 - Verify firewall allows port 1883
+- Verify MQTT_URL credentials are correct
 
 ### Text Not Readable
 - Check font files exist: `ls /usr/share/fonts/truetype/dejavu/`

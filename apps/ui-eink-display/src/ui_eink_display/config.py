@@ -10,17 +10,12 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+# MQTT Configuration (centralized)
+MQTT_URL = os.getenv("MQTT_URL", "mqtt://tars:pass@192.168.1.205:1883")
+
 
 class DisplayConfig(BaseModel):
     """Configuration for the e-ink display service."""
-
-    # MQTT Configuration
-    mqtt_host: str = Field(..., description="MQTT broker hostname or IP address")
-    mqtt_port: int = Field(default=1883, description="MQTT broker port", ge=1, le=65535)
-    mqtt_client_id: str = Field(
-        default="ui-eink-display",
-        description="MQTT client identifier",
-    )
 
     # Display Configuration
     display_timeout_sec: int = Field(
@@ -88,9 +83,7 @@ class DisplayConfig(BaseModel):
         Load configuration from environment variables.
 
         Environment variables:
-        - MQTT_HOST (required)
-        - MQTT_PORT (default: 1883)
-        - MQTT_CLIENT_ID (default: ui-eink-display)
+        - MQTT_URL (default: mqtt://tars:pass@127.0.0.1:1883)
         - DISPLAY_TIMEOUT_SEC (default: 45)
         - MOCK_DISPLAY (default: 0, set to 1 to enable)
         - LOG_LEVEL (default: INFO)
@@ -100,18 +93,8 @@ class DisplayConfig(BaseModel):
 
         Returns:
             DisplayConfig: Validated configuration instance
-
-        Raises:
-            ValueError: If MQTT_HOST is missing or validation fails
         """
-        mqtt_host = os.getenv("MQTT_HOST")
-        if not mqtt_host:
-            raise ValueError("MQTT_HOST environment variable is required")
-
         return cls(
-            mqtt_host=mqtt_host,
-            mqtt_port=int(os.getenv("MQTT_PORT", "1883")),
-            mqtt_client_id=os.getenv("MQTT_CLIENT_ID", "ui-eink-display"),
             display_timeout_sec=int(os.getenv("DISPLAY_TIMEOUT_SEC", "45")),
             mock_display=os.getenv("MOCK_DISPLAY", "0") == "1",
             log_level=os.getenv("LOG_LEVEL", "INFO"),

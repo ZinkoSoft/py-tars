@@ -28,15 +28,15 @@ class MockDisplay:
 
     def Clear(self) -> None:
         """Clear mock display."""
-        logger.debug("MockDisplay: Cleared")
+        logger.info("MockDisplay: Cleared")
 
     def display(self, image: Image.Image) -> None:
         """Display image on mock display."""
-        logger.debug(f"MockDisplay: Displaying {image.size} image")
+        logger.info(f"MockDisplay: Displaying {image.size} image")
 
     def sleep(self) -> None:
         """Put mock display to sleep."""
-        logger.debug("MockDisplay: Sleep mode")
+        logger.info("MockDisplay: Sleep mode")
 
 
 class DisplayManager:
@@ -103,25 +103,12 @@ class DisplayManager:
             if self.mock:
                 self.display = MockDisplay()
             else:
-                # Import waveshare library (may be in PYTHONPATH)
-                # Force Raspberry Pi mode since Radxa Zero 3W is RPi-compatible
-                import sys
-                
-                # Patch waveshare_epd.epdconfig to use RaspberryPi mode
-                # This must be done before importing epd2in13_V4
+                # Import waveshare library with our custom epdconfig.py
+                # The epdconfig.py uses libgpiod + spidev for Radxa Zero 3W
                 try:
-                    # Import epdconfig and force RaspberryPi implementation
-                    from waveshare_epd import epdconfig
-                    
-                    # Check if already initialized correctly
-                    if not hasattr(epdconfig, 'implementation') or epdconfig.implementation is None:
-                        # Force RaspberryPi mode
-                        logger.info("Forcing waveshare_epd to use RaspberryPi GPIO mode")
-                        epdconfig.implementation = epdconfig.RaspberryPi()
-                    
-                    # Now import the display module
                     from waveshare_epd import epd2in13_V4
                     self.display = epd2in13_V4.EPD()
+                    logger.info("Successfully initialized waveshare e-ink display")
                     
                 except Exception as import_error:
                     logger.warning(f"Failed to import waveshare_epd: {import_error}")
@@ -159,6 +146,8 @@ class DisplayManager:
             raise RuntimeError("Display not initialized")
 
         try:
+            logger.info(f"Rendering display mode: {state.mode.value}")
+            
             # Create image based on current mode
             if state.mode == DisplayMode.STANDBY:
                 image = self._render_standby()
@@ -176,16 +165,39 @@ class DisplayManager:
 
             # Display image (blocking operation, run in thread)
             await asyncio.to_thread(self._display_image, image)
-            logger.debug(f"Rendered {state.mode.value} mode")
+            logger.info(f"✅ Displayed {state.mode.value} mode successfully")
 
         except Exception as e:
             logger.error(f"Failed to render display: {e}")
             raise
 
-    def _display_image(self, image: Image.Image) -> None:
-        """Display image on hardware (blocking operation)."""
-        if self.display:
-            self.display.display(image)
+    def _display_image(self, image):
+        if not self.display:
+            return
+
+        # Ensure 1-bit and correct canvas size relative to the driver
+        w = getattr(self.display, "width", self.WIDTH)
+        h = getattr(self.display, "height", self.HEIGHT)
+
+        # If your renderer produced 250x122 but the driver is 122x250, rotate 90°/270° or 180°.
+        # Most 2.13 V4s need 180° for HAT wiring; try that first:
+        img = image.convert("1")
+        if (img.size != (w, h)):
+            # If driver is portrait and our image is landscape, rotate
+            if img.size == (self.WIDTH, self.HEIGHT) and (w, h) == (self.HEIGHT, self.WIDTH):
+                img = img.rotate(90, expand=True)
+            # Final orientation tweak many boards want:
+            img = img.rotate(180, expand=False)
+
+        if hasattr(self.display, "getbuffer"):
+            buf = self.display.getbuffer(img)
+        else:
+            # Fallback packer (1-bit, MSB-first per row)
+            buf = img.tobytes()
+
+        self.display.display(buf)
+
+
 
     def _render_standby(self) -> Image.Image:
         """
