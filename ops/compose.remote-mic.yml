@@ -66,12 +66,12 @@ services:
       AUDIO_DEVICE_NAME: ${AUDIO_DEVICE_NAME:-}
       AUDIO_FANOUT_PATH: ${WAKE_AUDIO_FANOUT:-/tmp/tars/audio-fanout.sock}
       
-      # FFT visualization (disabled by default for remote deployment)
+      # FFT visualization (enabled for remote deployment with WebSocket access)
+      # FFT_WS_* settings are loaded from .env file (see env_file above)
       FFT_PUBLISH: ${FFT_PUBLISH:-0}
       FFT_RATE_HZ: ${FFT_RATE_HZ:-12}
       FFT_BINS: ${FFT_BINS:-64}
       FFT_LOG_SCALE: ${FFT_LOG_SCALE:-1}
-      FFT_WS_ENABLE: ${FFT_WS_ENABLE:-0}
       
       # Noise floor calibration
       NOISE_FLOOR_CALIB_SECS: ${NOISE_FLOOR_CALIB_SECS:-2.0}
@@ -99,6 +99,10 @@ services:
     # Audio device access (required for microphone input)
     devices:
       - /dev/snd:/dev/snd
+    
+    # Expose FFT WebSocket port for audio visualization
+    ports:
+      - "8765:8765"
     
     volumes:
       # Whisper model cache (download once, reuse across restarts)
