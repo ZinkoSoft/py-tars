@@ -183,6 +183,64 @@ services:
     
     restart: unless-stopped
 
+  # UI E-Ink Display: Visual feedback on Waveshare 2.13" V4 e-ink display
+  ui-eink-display:
+    build:
+      context: ..
+      dockerfile: docker/specialized/ui-eink-display.Dockerfile
+    image: tars/ui-eink-display:dev
+    container_name: tars-ui-eink-display
+    env_file: ../.env
+    environment:
+      # MQTT connection to main TARS system (REQUIRED - set in .env)
+      MQTT_HOST: ${MQTT_HOST}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      
+      # Display configuration
+      DISPLAY_TIMEOUT_SEC: ${DISPLAY_TIMEOUT_SEC:-45}
+      MOCK_DISPLAY: ${MOCK_DISPLAY:-0}
+      
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      
+      # Font configuration
+      FONT_PATH: ${FONT_PATH:-/usr/share/fonts/truetype/dejavu}
+      
+      # Health check interval
+      HEALTH_CHECK_INTERVAL_SEC: ${HEALTH_CHECK_INTERVAL_SEC:-30}
+      
+      PYTHONPATH: /workspace/apps/ui-eink-display/src:/opt/e-Paper/RaspberryPi_JetsonNano/python/lib
+    
+    # SPI and GPIO device access (required for e-ink display hardware)
+    devices:
+      - /dev/spidev0.0:/dev/spidev0.0
+      - /dev/gpiomem:/dev/gpiomem
+      - /dev/spidev3.0
+      - /dev/gpiochip0
+      - /dev/gpiochip1
+      - /dev/gpiochip2
+      - /dev/gpiochip3
+      - /dev/gpiochip4
+      - /dev/gpiochip5
+    
+    # Privileged access for GPIO control
+    # Alternative: add user to gpio group and use group_add
+    privileged: true
+    
+    volumes:
+      # Source code for development
+      - ..:/workspace:ro
+    
+    restart: unless-stopped
+    
+    # Health check validates display service is responsive
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'python -m ui_eink_display' > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
 # Shared volume for audio fanout socket
 # This enables audio stream sharing between stt-worker (producer) and wake-activation (consumer)
 volumes:
