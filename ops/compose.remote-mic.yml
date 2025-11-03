@@ -1,0 +1,190 @@
+# ops/compose.remote-mic.yml
+# Remote Microphone Deployment Configuration
+#
+# Usage:
+#   docker compose -f ops/compose.remote-mic.yml up --build
+#
+# Purpose:
+#   Deploy ONLY wake-activation and stt-worker services on a remote device
+#   (e.g., Radxa Zero 3W with USB-C microphone) that connects to the main
+#   TARS system's MQTT broker over the network.
+#
+# Prerequisites:
+#   - Remote device (Radxa Zero 3W or similar ARM64 Linux device)
+#   - USB-C microphone connected to remote device
+#   - Main TARS system running with MQTT broker accessible on network
+#   - Both devices on same local network
+#   - Docker and Docker Compose installed on remote device
+#
+# Configuration:
+#   1. Copy ops/.env.remote-mic.example to .env
+#   2. Edit .env and set MQTT_HOST to your main TARS system IP address
+#   3. Optionally configure AUDIO_DEVICE_NAME if multiple microphones present
+#
+# Network Requirements:
+#   - Main TARS MQTT broker must bind to 0.0.0.0:1883 (see ops/mosquitto.conf)
+#   - Firewall must allow port 1883 between devices
+#   - Both devices must be able to ping each other
+#
+# Verification:
+#   docker compose -f ops/compose.remote-mic.yml ps
+#   docker compose -f ops/compose.remote-mic.yml logs
+#
+# Documentation:
+#   See docs/REMOTE_MICROPHONE_SETUP.md for complete setup guide
+
+name: tars-remote-mic
+
+services:
+  # STT Worker: Captures audio, runs VAD, performs transcription
+  # Creates audio fanout socket for wake-activation to consume
+  stt:
+    build:
+      context: ..
+      dockerfile: docker/specialized/stt-worker.Dockerfile
+    image: tars/stt-remote:dev
+    container_name: tars-stt-remote
+    env_file: ../.env
+    environment:
+      # MQTT connection to main TARS system (REQUIRED - set in .env)
+      MQTT_HOST: ${MQTT_HOST}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_URL: mqtt://${MQTT_HOST}:${MQTT_PORT:-1883}
+      
+      # Whisper model and logging
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      
+      # Backend selection (local whisper recommended for remote deployment)
+      STT_BACKEND: ${STT_BACKEND:-whisper}
+      
+      # Audio/VAD configuration
+      SILENCE_THRESHOLD_MS: ${SILENCE_THRESHOLD_MS:-600}
+      CHUNK_DURATION_MS: ${CHUNK_DURATION_MS:-20}
+      VAD_AGGRESSIVENESS: ${VAD_AGGRESSIVENESS:-3}
+      SAMPLE_RATE: ${SAMPLE_RATE:-16000}
+      AUDIO_DEVICE_NAME: ${AUDIO_DEVICE_NAME:-}
+      AUDIO_FANOUT_PATH: ${WAKE_AUDIO_FANOUT:-/tmp/tars/audio-fanout.sock}
+      
+      # FFT visualization (disabled by default for remote deployment)
+      FFT_PUBLISH: ${FFT_PUBLISH:-0}
+      FFT_RATE_HZ: ${FFT_RATE_HZ:-12}
+      FFT_BINS: ${FFT_BINS:-64}
+      FFT_LOG_SCALE: ${FFT_LOG_SCALE:-1}
+      FFT_WS_ENABLE: ${FFT_WS_ENABLE:-0}
+      
+      # Noise floor calibration
+      NOISE_FLOOR_CALIB_SECS: ${NOISE_FLOOR_CALIB_SECS:-2.0}
+      NOISE_FLOOR_CALIB_ENABLE: ${NOISE_FLOOR_CALIB_ENABLE:-1}
+      NOISE_FLOOR_ADAPTIVE_ENABLE: ${NOISE_FLOOR_ADAPTIVE_ENABLE:-1}
+      NOISE_FLOOR_THRESHOLD_MULTIPLIER: ${NOISE_FLOOR_THRESHOLD_MULTIPLIER:-3.0}
+      NOISE_FLOOR_UPDATE_INTERVAL: ${NOISE_FLOOR_UPDATE_INTERVAL:-50}
+      
+      PYTHONPATH: /workspace/apps/stt-worker/src:/workspace/packages/tars-core/src
+    
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["if [ -d /host-models ] && [ -n \"$(ls -A /host-models 2>/dev/null)\" ]; then echo 'Copying models from host...'; cp -r /host-models/* /app/models/ 2>/dev/null || true; fi; exec python -m stt_worker"]
+    
+    restart: unless-stopped
+    
+    # Health check validates audio fanout socket exists and is connectable
+    # This ensures wake-activation only starts when audio stream is ready
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /tmp/tars/audio-fanout.sock && python -c 'import socket; s=socket.socket(socket.AF_UNIX); s.connect(\"/tmp/tars/audio-fanout.sock\"); s.close()' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 15s
+    
+    # Audio device access (required for microphone input)
+    devices:
+      - /dev/snd:/dev/snd
+    
+    volumes:
+      # Whisper model cache (download once, reuse across restarts)
+      - ../models/whisper:/host-models
+      # ALSA audio configuration
+      - ../docker/asoundrc:/etc/asound.conf:ro
+      # Shared volume for audio fanout socket (consumed by wake-activation)
+      - wake-cache:/tmp/tars
+      # Source code for development
+      - ..:/workspace:ro
+
+  # Wake Activation: Detects wake word from audio fanout socket
+  wake-activation:
+    build:
+      context: ..
+      dockerfile: docker/specialized/wake-activation.Dockerfile
+      args:
+        PY_VERSION: "3.11"
+        APP_PATH: apps/wake-activation
+        CONTRACTS_PATH: packages/tars-core
+        APP_MODULE: wake_activation
+    image: tars/wake-activation-remote:dev
+    container_name: tars-wake-activation-remote
+    env_file: ../.env
+    environment:
+      # MQTT connection to main TARS system (REQUIRED - set in .env)
+      MQTT_HOST: ${MQTT_HOST}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_URL: mqtt://${MQTT_HOST}:${MQTT_PORT:-1883}
+      
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      
+      # Audio fanout socket (created by stt-worker)
+      WAKE_AUDIO_FANOUT: ${WAKE_AUDIO_FANOUT:-/tmp/tars/audio-fanout.sock}
+      
+      # Wake word model (TensorFlow Lite - CPU mode)
+      WAKE_MODEL_PATH: ${WAKE_MODEL_PATH:-/models/openwakeword/hey_tars.tflite}
+      
+      # NPU acceleration (disabled for remote deployment by default)
+      # Enable if remote device has RK3588 NPU support
+      WAKE_USE_NPU: ${WAKE_USE_NPU:-0}
+      WAKE_RKNN_MODEL_PATH: ${WAKE_RKNN_MODEL_PATH:-/models/openwakeword/hey_tars.rknn}
+      WAKE_NPU_CORE_MASK: ${WAKE_NPU_CORE_MASK:-0}
+      
+      # Wake sensitivity configuration
+      WAKE_DETECTION_THRESHOLD: ${WAKE_DETECTION_THRESHOLD:-0.35}
+      WAKE_MIN_RETRIGGER_SEC: ${WAKE_MIN_RETRIGGER_SEC:-0.8}
+      WAKE_SPEEX_NOISE_SUPPRESSION: ${WAKE_SPEEX_NOISE_SUPPRESSION:-1}
+      WAKE_VAD_THRESHOLD: ${WAKE_VAD_THRESHOLD:-0.3}
+      
+      # Advanced sensitivity tuning
+      WAKE_ENERGY_BOOST_FACTOR: ${WAKE_ENERGY_BOOST_FACTOR:-1.2}
+      WAKE_LOW_ENERGY_THRESHOLD_FACTOR: ${WAKE_LOW_ENERGY_THRESHOLD_FACTOR:-0.7}
+      WAKE_BACKGROUND_NOISE_SENSITIVITY: ${WAKE_BACKGROUND_NOISE_SENSITIVITY:-1}
+      
+      # STT health monitoring
+      WAKE_WAIT_FOR_STT_HEALTH: ${WAKE_WAIT_FOR_STT_HEALTH:-1}
+      WAKE_STT_HEALTH_TIMEOUT_SEC: ${WAKE_STT_HEALTH_TIMEOUT_SEC:-30}
+      
+      # NPU-specific environment
+      RKNN_LOG_LEVEL: ${RKNN_LOG_LEVEL:-3}
+      
+      PYTHONPATH: /workspace/apps/wake-activation/src
+    
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["echo 'Wake activation: Waiting for STT service to stabilize...'; sleep 3; echo 'Wake activation: Starting wake word detection'; exec python -m wake_activation"]
+    
+    # CRITICAL: wake-activation must wait for stt to be healthy
+    # This ensures audio fanout socket exists before wake-activation starts
+    depends_on:
+      stt:
+        condition: service_healthy
+    
+    volumes:
+      # Wake word model
+      - ../models/openwakeword:/models/openwakeword:ro
+      # Shared volume for audio fanout socket (created by stt-worker)
+      - wake-cache:/tmp/tars
+      # Source code for development
+      - ..:/workspace:ro
+    
+    restart: unless-stopped
+
+# Shared volume for audio fanout socket
+# This enables audio stream sharing between stt-worker (producer) and wake-activation (consumer)
+volumes:
+  wake-cache:
+    driver: local

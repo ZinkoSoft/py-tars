@@ -657,7 +657,36 @@ Extend `apps/llm-worker/llm_worker/providers/` with new provider implementations
 
 ---
 
-## 📌 Roadmap / TODOs
+## � Documentation
+
+### Core Documentation
+- **[Main README](README.md)** - This file
+- **[MQTT Contracts](docs/mqtt-contracts.md)** - Message format specifications
+- **[Configuration Architecture](docs/CONFIGURATION_ARCHITECTURE.md)** - System configuration design
+
+### Service-Specific Guides
+- **[Router](apps/router/README.md)** - Intent routing and wake word handling
+- **[LLM Worker](apps/llm-worker/README.md)** - LLM integration and tool calling
+- **[Memory Worker](apps/memory-worker/README.md)** - Vector memory and character profiles
+- **[STT Worker](apps/stt-worker/README.md)** - Speech-to-text processing
+- **[TTS Worker](apps/tts-worker/README.md)** - Text-to-speech synthesis
+- **[Wake Activation](apps/wake-activation/README.md)** - Wake word detection with NPU support
+- **[Camera Service](apps/camera-service/README.md)** - Live video streaming
+- **[Web UI](apps/ui-web/README.md)** - FastAPI web interface
+- **[MCP Bridge](apps/mcp-bridge/README.md)** - MCP tool integration
+
+### Deployment Guides
+- **[Remote Microphone Setup](docs/REMOTE_MICROPHONE_SETUP.md)** - Deploy wake detection and STT on remote device (e.g., Radxa Zero 3W)
+- **[NPU Setup](docs/NPU_WAKE_ACTIVATION_FIX.md)** - Hardware-accelerated wake word detection for RK3588 devices
+
+### Development Resources
+- **[Developer Onboarding](docs/DEVELOPER_ONBOARDING.md)** - Getting started with TARS development
+- **[Contract Standards](docs/mqtt-contracts.md)** - MQTT message contract specifications
+- **[tars-core Package](packages/tars-core/README.md)** - Shared contracts and utilities
+
+---
+
+## �📌 Roadmap / TODOs
 
 ### Completed ✅
 - [x] **STT Worker** with multiple backends (Whisper, OpenAI, WebSocket)
