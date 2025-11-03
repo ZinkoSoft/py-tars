@@ -104,13 +104,39 @@ class DisplayManager:
                 self.display = MockDisplay()
             else:
                 # Import waveshare library (may be in PYTHONPATH)
-                from waveshare_epd import epd2in13_V4
-                self.display = epd2in13_V4.EPD()
+                # Force Raspberry Pi mode since Radxa Zero 3W is RPi-compatible
+                import sys
+                
+                # Patch waveshare_epd.epdconfig to use RaspberryPi mode
+                # This must be done before importing epd2in13_V4
+                try:
+                    # Import epdconfig and force RaspberryPi implementation
+                    from waveshare_epd import epdconfig
+                    
+                    # Check if already initialized correctly
+                    if not hasattr(epdconfig, 'implementation') or epdconfig.implementation is None:
+                        # Force RaspberryPi mode
+                        logger.info("Forcing waveshare_epd to use RaspberryPi GPIO mode")
+                        epdconfig.implementation = epdconfig.RaspberryPi()
+                    
+                    # Now import the display module
+                    from waveshare_epd import epd2in13_V4
+                    self.display = epd2in13_V4.EPD()
+                    
+                except Exception as import_error:
+                    logger.warning(f"Failed to import waveshare_epd: {import_error}")
+                    logger.info("Falling back to mock display mode")
+                    self.display = MockDisplay()
+                    self.mock = True
 
             # Initialize in thread to avoid blocking
             await asyncio.to_thread(self._init_hardware)
             self._initialized = True
-            logger.info("Display initialized successfully")
+            
+            if self.mock:
+                logger.info("Display initialized successfully (MOCK MODE)")
+            else:
+                logger.info("Display initialized successfully (HARDWARE MODE)")
 
         except Exception as e:
             logger.error(f"Failed to initialize display: {e}")

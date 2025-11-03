@@ -15,6 +15,8 @@ RUN apt-get update \
         python3-numpy \
         fonts-dejavu-core \
         libgpiod-dev \
+        python3-rpi.gpio \
+        python3-spidev \
         git \
         wget \
         curl \
