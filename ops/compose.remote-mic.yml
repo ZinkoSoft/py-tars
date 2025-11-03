@@ -71,7 +71,10 @@ services:
       FFT_RATE_HZ: ${FFT_RATE_HZ:-12}
       FFT_BINS: ${FFT_BINS:-64}
       FFT_LOG_SCALE: ${FFT_LOG_SCALE:-1}
-      FFT_WS_ENABLE: ${FFT_WS_ENABLE:-0}
+      FFT_WS_ENABLE: ${FFT_WS_ENABLE:-1}
+      FFT_WS_HOST: ${FFT_WS_HOST:-0.0.0.0}
+      FFT_WS_PORT: ${FFT_WS_PORT:-8765}
+      FFT_WS_PATH: ${FFT_WS_PATH:-/fft}
       
       # Noise floor calibration
       NOISE_FLOOR_CALIB_SECS: ${NOISE_FLOOR_CALIB_SECS:-2.0}
@@ -86,6 +89,10 @@ services:
     command: ["if [ -d /host-models ] && [ -n \"$(ls -A /host-models 2>/dev/null)\" ]; then echo 'Copying models from host...'; cp -r /host-models/* /app/models/ 2>/dev/null || true; fi; exec python -m stt_worker"]
     
     restart: unless-stopped
+    
+    # Expose FFT WebSocket port for audio visualization
+    ports:
+      - "${FFT_WS_PORT:-8765}:${FFT_WS_PORT:-8765}"
     
     # Health check validates audio fanout socket exists and is connectable
     # This ensures wake-activation only starts when audio stream is ready
