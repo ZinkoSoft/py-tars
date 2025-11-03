@@ -27,6 +27,10 @@ if [ ! -e "$DEVICE" ]; then
     exit 1
 fi
 
+echo "Performing soft reset to stop any running programs..."
+mpremote connect "$DEVICE" soft-reset 2>/dev/null
+sleep 1
+
 echo "Uploading files..."
 echo ""
 

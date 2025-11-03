@@ -208,7 +208,16 @@ password = u.password
 
 class UI:
     def __init__(self):
+        # Initialize pygame - this must happen first
         pygame.init()
+        
+        # Explicitly initialize video subsystem before setting GL attributes
+        if not pygame.display.get_init():
+            import os
+            display = os.environ.get("DISPLAY", ":0")
+            logger.error(f"Video system not initialized. DISPLAY={display}")
+            raise RuntimeError(f"Failed to initialize pygame video system. DISPLAY={display}")
+        
         pygame.display.set_caption("TARS UI")
         flags = DOUBLEBUF | OPENGL
         if FULLSCREEN:

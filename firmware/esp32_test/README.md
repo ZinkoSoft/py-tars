@@ -55,10 +55,12 @@ Open your browser to `http://<ESP32-IP>/` to control servos.
 ### Configuration
 
 - **`wifi_config.py`** - WiFi credentials (created by configure_wifi.sh)
+- **`servo_config.ini`** - Servo calibration settings (editable without firmware re-upload!)
 
 ### Utility Scripts
 
 - **`upload.sh`** - Upload all files to ESP32
+- **`upload_config.sh`** - Upload only servo_config.ini
 - **`configure_wifi.sh`** - Configure WiFi credentials
 - **`start_server.sh`** - Connect to serial console and start system
 - **`diagnose.sh`** - Run system diagnostics
@@ -69,6 +71,26 @@ Open your browser to `http://<ESP32-IP>/` to control servos.
 - **`connect.sh`** - Connect to REPL
 
 ## Common Commands
+
+### Servo Calibration
+
+**Edit servo settings without re-uploading firmware:**
+
+```bash
+# 1. Download current config from ESP32
+mpremote connect /dev/ttyACM0 fs cp :servo_config.ini servo_config.ini
+
+# 2. Edit servo_config.ini with your text editor
+nano servo_config.ini
+
+# 3. Upload changes
+./upload_config.sh
+
+# 4. Reload configuration (no reboot needed!)
+curl -X POST http://<ESP32_IP>/config/reload
+```
+
+See **[CONFIG_GUIDE.md](CONFIG_GUIDE.md)** for detailed calibration instructions.
 
 ### Upload specific file
 

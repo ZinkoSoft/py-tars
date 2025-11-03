@@ -55,9 +55,17 @@ h1{text-align:center;color:#4CAF50}
 <div class="section">
 <h2>Global Speed Control</h2>
 <div class="speed-control">
-<label>Speed: <span id="speedDisplay">1.0</span></label>
-<input type="range" class="speed-slider" id="globalSpeed" min="0.1" max="1.0" step="0.1" value="1.0" oninput="updateGlobalSpeed()">
-<small>0.1 = slowest, 1.0 = fastest</small>
+<label>Speed: <span id="speedDisplay">1.0</span>x</label>
+<input type="range" class="speed-slider" id="globalSpeed" min="0.1" max="10.0" step="0.1" value="1.0" oninput="updateGlobalSpeed()">
+<small>0.1 = slowest, 1.0 = normal, 1.5 = 50% faster, 10.0 = maximum</small>
+<div style="margin-top:10px">
+<button onclick="setSpeed(1.0)" style="padding:5px 10px;margin:2px">1.0x</button>
+<button onclick="setSpeed(1.5)" style="padding:5px 10px;margin:2px;background:#ff9800">1.5x</button>
+<button onclick="setSpeed(2.0)" style="padding:5px 10px;margin:2px">2.0x</button>
+<button onclick="setSpeed(3.0)" style="padding:5px 10px;margin:2px">3.0x</button>
+<button onclick="setSpeed(5.0)" style="padding:5px 10px;margin:2px;background:#f44336">5.0x</button>
+<button onclick="setSpeed(10.0)" style="padding:5px 10px;margin:2px;background:#d32f2f">10.0x</button>
+</div>
 </div>
 </div>
 <div class="section">
@@ -67,6 +75,14 @@ h1{text-align:center;color:#4CAF50}
 <div class="section">
 <h2>Preset Movements</h2>
 <div id="status-indicator" style="text-align:center;margin:10px 0;color:#ff9800"></div>
+<div style="margin:15px 0;text-align:center">
+<label>Repeat: </label>
+<input type="number" id="presetRepeat" min="1" max="50" value="1" style="width:60px;padding:5px;border-radius:4px;border:1px solid #555;background:#2d2d2d;color:#fff">
+<span style="margin:0 10px;color:#888;font-size:12px">1-50 times</span>
+<label style="margin-left:20px">Delay: </label>
+<input type="number" id="presetDelay" min="0.1" max="2.0" step="0.1" value="1.0" style="width:60px;padding:5px;border-radius:4px;border:1px solid #555;background:#2d2d2d;color:#fff">
+<span style="margin-left:5px;color:#888;font-size:12px">0.1-2.0x</span>
+</div>
 <div class="presets" id="presets"></div>
 </div>
 <div class="section">
@@ -84,7 +100,7 @@ const servos=[
 {ch:4,label:"Right Elbow",min:200,max:380},
 {ch:5,label:"Right Hand",min:200,max:280},
 {ch:6,label:"Left Shoulder",min:135,max:440},
-{ch:7,label:"Left Elbow",min:190,max:380},
+{ch:7,label:"Left Elbow",min:200,max:380},
 {ch:8,label:"Left Hand",min:280,max:380}
 ];
 const presets=[
@@ -160,6 +176,23 @@ showMessage(data.message||"Error",true);
 showMessage("Network error: "+e.message,true);
 }
 }
+async function setSpeed(speed){
+document.getElementById("globalSpeed").value=speed;
+document.getElementById("speedDisplay").textContent=speed.toFixed(1);
+try{
+const res=await fetch("/control",{
+method:"POST",
+headers:{"Content-Type":"application/json"},
+body:JSON.stringify({type:"speed",speed:speed})
+});
+const data=await res.json();
+if(data.success){
+showMessage("Global speed set to "+speed+"x");
+}
+}catch(e){
+showMessage("Speed update failed: "+e.message,true);
+}
+}
 async function updateGlobalSpeed(){
 const speed=parseFloat(document.getElementById("globalSpeed").value);
 document.getElementById("speedDisplay").textContent=speed.toFixed(1);
@@ -171,19 +204,23 @@ body:JSON.stringify({type:"speed",speed:speed})
 });
 const data=await res.json();
 if(data.success){
-showMessage("Global speed set to "+speed);
+showMessage("Global speed set to "+speed+"x");
 }
 }catch(e){
 showMessage("Speed update failed: "+e.message,true);
 }
 }
 async function executePreset(name){
-document.getElementById("status-indicator").textContent="Executing: "+name+"...";
+const repeat=parseInt(document.getElementById("presetRepeat").value)||1;
+const delayMult=parseFloat(document.getElementById("presetDelay").value)||1.0;
+const repeatText=repeat>1?" x"+repeat:"";
+const delayText=delayMult!==1.0?" @"+delayMult.toFixed(1)+"x":"";
+document.getElementById("status-indicator").textContent="Executing: "+name+repeatText+delayText+"...";
 try{
 const res=await fetch("/control",{
 method:"POST",
 headers:{"Content-Type":"application/json"},
-body:JSON.stringify({type:"preset",preset:name})
+body:JSON.stringify({type:"preset",preset:name,repeat:repeat,delay_multiplier:delayMult})
 });
 const data=await res.json();
 if(data.success){
@@ -315,6 +352,12 @@ async def handle_client(reader, writer, servo_controller, presets, boot_time):
         elif path == '/resume' and method == 'POST':
             await handle_resume(writer, servo_controller)
         
+        elif path == '/config' and method == 'GET':
+            await handle_get_config(writer)
+        
+        elif path == '/config/reload' and method == 'POST':
+            await handle_reload_config(writer, servo_controller)
+        
         else:
             await send_json_response(writer, 404, {
                 "success": False,
@@ -372,10 +415,10 @@ async def handle_control(writer, body, servo_controller, presets):
             })
         
         elif cmd_type == 'speed':
-            # Set global speed
+            # Set global speed (0.1 to 10.0)
             speed = data.get('speed')
-            from servo_config import validate_speed
-            validate_speed(speed)
+            if not isinstance(speed, (int, float)) or speed < 0.1 or speed > 10.0:
+                raise ValueError(f"Speed must be between 0.1 and 10.0, got {speed}")
             
             servo_controller.global_speed = speed
             
@@ -387,11 +430,29 @@ async def handle_control(writer, body, servo_controller, presets):
         elif cmd_type == 'preset':
             # Execute preset sequence
             preset_name = data.get('preset')
+            repeat = data.get('repeat', 1)  # Default to 1 if not specified
+            delay_multiplier = data.get('delay_multiplier', 1.0)  # Default to 1.0
             
             if preset_name not in presets:
                 await send_json_response(writer, 400, {
                     "success": False,
                     "message": f"Unknown preset: {preset_name}"
+                })
+                return
+            
+            # Validate repeat count
+            if not isinstance(repeat, int) or repeat < 1 or repeat > 50:
+                await send_json_response(writer, 400, {
+                    "success": False,
+                    "message": f"Repeat must be between 1 and 50, got {repeat}"
+                })
+                return
+            
+            # Validate delay multiplier
+            if not isinstance(delay_multiplier, (int, float)) or delay_multiplier < 0.1 or delay_multiplier > 2.0:
+                await send_json_response(writer, 400, {
+                    "success": False,
+                    "message": f"Delay multiplier must be between 0.1 and 2.0, got {delay_multiplier}"
                 })
                 return
             
@@ -404,11 +465,12 @@ async def handle_control(writer, body, servo_controller, presets):
                 return
             
             # Start preset execution
-            asyncio.create_task(servo_controller.execute_preset(preset_name, presets))
+            asyncio.create_task(servo_controller.execute_preset(preset_name, presets, repeat, delay_multiplier))
             
+            delay_info = f" @{delay_multiplier}x delay" if delay_multiplier != 1.0 else ""
             await send_json_response(writer, 200, {
                 "success": True,
-                "message": f"Preset '{preset_name}' started"
+                "message": f"Preset '{preset_name}' started ({repeat} time{'s' if repeat > 1 else ''}){delay_info}"
             })
         
         elif cmd_type == 'multiple':
@@ -510,7 +572,7 @@ async def handle_resume(writer, servo_controller):
         servo_controller.emergency_stop = False
         
         # Re-initialize servos to neutral
-        servo_controller.initialize_servos()
+        await servo_controller.initialize_servos()
         
         await send_json_response(writer, 200, {
             "success": True,
@@ -520,6 +582,64 @@ async def handle_resume(writer, servo_controller):
         await send_json_response(writer, 500, {
             "success": False,
             "message": "Resume failed",
+            "error": str(e)
+        })
+
+
+async def handle_get_config(writer):
+    """Handle /config endpoint - return current servo configuration"""
+    try:
+        from servo_config import SERVO_CALIBRATION
+        
+        config_data = {}
+        for channel in range(9):
+            if channel in SERVO_CALIBRATION:
+                servo = SERVO_CALIBRATION[channel]
+                config_data[channel] = {
+                    "min": servo["min"],
+                    "max": servo["max"],
+                    "neutral": servo["neutral"],
+                    "label": servo["label"],
+                    "reverse": servo.get("reverse", False)
+                }
+        
+        await send_json_response(writer, 200, {
+            "success": True,
+            "config": config_data,
+            "message": "Current servo configuration"
+        })
+    
+    except Exception as e:
+        await send_json_response(writer, 500, {
+            "success": False,
+            "message": "Failed to get configuration",
+            "error": str(e)
+        })
+
+
+async def handle_reload_config(writer, servo_controller):
+    """Handle /config/reload endpoint - reload config from INI file"""
+    try:
+        from servo_config import reload_config
+        
+        if reload_config():
+            # Re-initialize servos with new config
+            await servo_controller.initialize_servos()
+            
+            await send_json_response(writer, 200, {
+                "success": True,
+                "message": "Configuration reloaded from servo_config.ini and servos re-initialized"
+            })
+        else:
+            await send_json_response(writer, 500, {
+                "success": False,
+                "message": "Failed to reload configuration file"
+            })
+    
+    except Exception as e:
+        await send_json_response(writer, 500, {
+            "success": False,
+            "message": "Config reload failed",
             "error": str(e)
         })
 

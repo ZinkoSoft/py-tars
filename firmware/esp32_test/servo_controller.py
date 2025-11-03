@@ -19,6 +19,9 @@ class ServoController:
     Async servo controller for coordinated multi-servo movements
     """
     
+    # Maximum I2C retry attempts for error recovery
+    MAX_RETRIES = 3
+    
     def __init__(self, pca9685):
         """
         Initialize servo controller
@@ -34,10 +37,13 @@ class ServoController:
         # Locks for thread-safe servo access (one per channel)
         self.locks = [asyncio.Lock() for _ in range(9)]
         
+        # Global I2C bus lock for retry operations
+        self.i2c_lock = asyncio.Lock()
+        
         # Emergency stop flag
         self.emergency_stop = False
         
-        # Global speed multiplier (0.1 to 1.0)
+        # Global speed multiplier (0.1 to 10.0, where >1.0 = faster than normal)
         self.global_speed = 1.0
         
         # Active sequence name (None if no sequence running)
@@ -45,15 +51,57 @@ class ServoController:
         
         print("ServoController initialized")
     
-    def initialize_servos(self):
+    async def _set_pwm_with_retry(self, channel, pulse):
+        """
+        Set PWM with automatic retry on I2C errors
+        
+        Args:
+            channel: Servo channel (0-15 for PCA9685)
+            pulse: Pulse width (0-4095 for 12-bit PWM)
+        
+        Returns:
+            bool: True if successful, False if all retries exhausted
+        """
+        async with self.i2c_lock:
+            for attempt in range(self.MAX_RETRIES):
+                try:
+                    self.pca9685.set_pwm(channel, 0, pulse)
+                    return True
+                except OSError as e:
+                    # Check for Remote I/O error (errno 121)
+                    is_remote_io = (hasattr(e, 'errno') and e.errno == 121) or \
+                                   "Remote I/O" in str(e)
+                    
+                    if is_remote_io and attempt < self.MAX_RETRIES - 1:
+                        print(f"I2C retry {attempt+1}/{self.MAX_RETRIES} on ch{channel}")
+                        await asyncio.sleep(0.05)  # 50ms delay
+                        continue
+                    else:
+                        print(f"I2C error on ch{channel}: {e}")
+                        return False
+        return False
+    
+    async def initialize_servos(self):
         """
         Initialize all servos to safe starting positions
-        - Legs (0-2): neutral (center) positions
-        - Arms (3-8): minimum (closed/retracted) positions
-        Synchronous function called during startup
+        - Initialize all 16 PCA9685 channels to 0 (floating state) first
+        - Then set active servos (0-8):
+          - Legs (0-2): neutral (center) positions
+          - Arms (3-8): minimum (closed/retracted) positions
+        
+        Uses async retry logic for robust I2C communication
         """
         print("Initializing servos to safe positions...")
         
+        # Initialize all 16 PCA9685 channels to 0 (floating state)
+        print("  Setting all 16 PCA9685 channels to 0 (floating state)...")
+        for channel in range(16):
+            success = await self._set_pwm_with_retry(channel, 0)
+            if not success:
+                print(f"  ✗ Channel {channel} init to 0 failed after retries")
+        
+        # Now initialize the 9 active servos to safe positions
+        print("  Initializing 9 active servos to safe positions...")
         for channel in range(9):
             # Arms (channels 3-8) start at minimum (closed), legs (0-2) at neutral
             if channel >= 3:
@@ -70,12 +118,12 @@ class ServoController:
             # Apply reverse transformation if needed (must match move_servo_smooth behavior)
             actual_target = apply_reverse_if_needed(channel, target)
             
-            try:
-                self.pca9685.set_pwm(channel, 0, actual_target)
+            success = await self._set_pwm_with_retry(channel, actual_target)
+            if success:
                 self.positions[channel] = actual_target
-                print(f"  Channel {channel} ({SERVO_CALIBRATION[channel]['label']}): {target} -> {actual_target} ({pos_desc}) [{reverse_status}]")
-            except Exception as e:
-                print(f"  ✗ Channel {channel} failed: {e}")
+                print(f"    Channel {channel} ({SERVO_CALIBRATION[channel]['label']}): {target} -> {actual_target} ({pos_desc}) [{reverse_status}]")
+            else:
+                print(f"    ✗ Channel {channel} failed after {self.MAX_RETRIES} retries")
         
         print("Servo initialization complete")
     
@@ -105,10 +153,10 @@ class ServoController:
         else:
             validate_speed(speed)
         
-        # Apply global speed multiplier
+        # Apply global speed multiplier (allows >1.0 for faster movements)
         effective_speed = speed * self.global_speed
-        # Ensure result is still within valid range
-        effective_speed = max(0.1, min(1.0, effective_speed))
+        # Ensure result is within valid range (0.1 to 10.0)
+        effective_speed = max(0.1, min(10.0, effective_speed))
         
         # Acquire lock for this channel
         async with self.locks[channel]:
@@ -130,18 +178,24 @@ class ServoController:
                 # Move one step
                 position += step
                 
-                # Set PWM
-                try:
-                    self.pca9685.set_pwm(channel, 0, position)
+                # Set PWM with retry logic
+                success = await self._set_pwm_with_retry(channel, position)
+                if success:
                     self.positions[channel] = position
-                except Exception as e:
-                    print(f"Error moving servo {channel}: {e}")
-                    raise
+                else:
+                    print(f"Warning: PWM set failed for servo {channel} at position {position}")
+                    break  # Exit movement loop on failure
                 
                 # Delay based on effective speed (0.02s base, adjusted by speed)
-                # speed=1.0: 0.02s per step (fast)
+                # speed=1.0: 0.02s per step (normal)
                 # speed=0.1: 0.18s per step (slow)
-                delay = 0.02 * (1.1 - effective_speed)
+                # speed=1.5: 0.013s per step (fast)
+                # speed=3.0: 0.007s per step (very fast)
+                if effective_speed <= 1.0:
+                    delay = 0.02 * (1.1 - effective_speed)
+                else:
+                    # For speeds > 1.0, reduce delay proportionally
+                    delay = 0.02 / effective_speed
                 await asyncio.sleep(delay)
     
     async def move_multiple(self, targets, speed=None):
@@ -198,13 +252,15 @@ class ServoController:
         
         print("Emergency stop complete - all servos in floating state")
     
-    async def execute_preset(self, preset_name, presets):
+    async def execute_preset(self, preset_name, presets, repeat=1, delay_multiplier=1.0):
         """
         Execute a preset movement sequence
         
         Args:
             preset_name: Name of preset to execute
             presets: Dictionary of all available presets
+            repeat: Number of times to repeat the sequence (default: 1)
+            delay_multiplier: Multiply all delays by this factor (0.1-2.0, default: 1.0)
         
         Raises:
             ValueError: If preset not found
@@ -212,33 +268,46 @@ class ServoController:
         """
         # Check if sequence already running
         if self.active_sequence is not None:
-            raise RuntimeError(f"Sequence already running: {self.active_sequence}")
+            print(f"Movement already in progress: {self.active_sequence}")
+            return  # Return immediately without raising exception
         
         # Get preset
         if preset_name not in presets:
             raise ValueError(f"Unknown preset: {preset_name}")
         
+        # Validate repeat count
+        repeat = max(1, min(50, int(repeat)))  # Clamp to 1-50
+        
+        # Validate delay multiplier
+        delay_multiplier = max(0.1, min(2.0, float(delay_multiplier)))  # Clamp to 0.1-2.0
+        
         preset = presets[preset_name]
         
         try:
-            self.active_sequence = preset_name
-            print(f"Executing preset: {preset_name}")
+            delay_info = f" @{delay_multiplier}x" if delay_multiplier != 1.0 else ""
+            self.active_sequence = f"{preset_name} x{repeat}{delay_info}" if repeat > 1 or delay_multiplier != 1.0 else preset_name
+            print(f"Executing preset: {preset_name} ({repeat} time{'s' if repeat > 1 else ''})")
             
-            # Execute each step
-            for i, step in enumerate(preset["steps"]):
-                # Check emergency stop
-                if self.emergency_stop:
-                    print(f"Preset {preset_name} cancelled by emergency stop")
-                    raise asyncio.CancelledError("Emergency stop during preset")
+            # Repeat the sequence
+            for rep in range(repeat):
+                if repeat > 1:
+                    print(f"  Repetition {rep + 1}/{repeat}")
                 
-                print(f"  Step {i+1}/{len(preset['steps'])}: {step.get('description', 'Moving')}")
-                
-                # Move servos
-                await self.move_multiple(step["targets"], step.get("speed", self.global_speed))
-                
-                # Delay after step
-                delay = step.get("delay_after", 0.5)
-                await asyncio.sleep(delay)
+                # Execute each step
+                for i, step in enumerate(preset["steps"]):
+                    # Check emergency stop
+                    if self.emergency_stop:
+                        print(f"Preset {preset_name} cancelled by emergency stop")
+                        raise asyncio.CancelledError("Emergency stop during preset")
+                    
+                    print(f"  Step {i+1}/{len(preset['steps'])}: {step.get('description', 'Moving')}")
+                    
+                    # Move servos
+                    await self.move_multiple(step["targets"], step.get("speed", self.global_speed))
+                    
+                    # Delay after step (apply delay multiplier)
+                    delay = step.get("delay_after", 0.5) * delay_multiplier
+                    await asyncio.sleep(delay)
             
             # Disable servos after sequence
             print(f"Preset {preset_name} complete - disabling servos")
