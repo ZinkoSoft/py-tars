@@ -170,11 +170,12 @@ services:
     image: tars/ui:dev
     container_name: tars-ui
     env_file: ../.env
+    network_mode: host  # Use host network for MQTT and X11 simplicity
     ipc: host  # Share IPC namespace for X11
     shm_size: "512m"     # (optional but nice)
     environment:
-      MQTT_URL: mqtt://mqtt:1883
-      MQTT_HOST: mqtt
+      MQTT_URL: mqtt://localhost:1883
+      MQTT_HOST: localhost
       MQTT_PORT: "1883"
       UI_CONFIG: /config/ui.toml
       DISPLAY: ${DISPLAY:-:0}
@@ -182,7 +183,7 @@ services:
       SDL_VIDEO_X11_FORCE_EGL: "1"        # <- force EGL instead of GLX on X11
       SDL_HINT_OPENGL_ES_DRIVER: "1"      # <- hint SDL to prefer OpenGL ES driver
       SDL_OPENGL_ES_DRIVER: "1"           # <- older alias of the same hint
-      XAUTHORITY: ${XAUTHORITY:-/tmp/.docker_xauth}
+      XAUTHORITY: ${XAUTHORITY:-${HOME}/.Xauthority}
       UI_FFT_WS_ENABLE: "1"
       UI_FFT_WS_URL: ${UI_FFT_WS_URL:-ws://192.168.1.80:8765/fft}
       UI_FFT_WS_RETRY: "5.0"
@@ -202,7 +203,7 @@ services:
     volumes:
       - ../apps/ui/ui.toml:/config/ui.toml:ro
       - /tmp/.X11-unix:/tmp/.X11-unix:ro
-      - ~/.Xauthority:${XAUTHORITY:-/tmp/.docker_xauth}:ro
+      - ${HOME}/.Xauthority:${HOME}/.Xauthority:ro
       # GPU/DRI access for hardware-accelerated OpenGL
       - /dev/dri:/dev/dri:rw
     devices:
