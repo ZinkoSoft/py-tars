@@ -105,6 +105,14 @@ class DisplayState:
             text: User's transcribed message
         """
         self.user_message = MessageBubble(text=text, is_user=True)
+        
+        # Handle recovery from STANDBY (if display timed out)
+        if self.mode == DisplayMode.STANDBY:
+            # First go to LISTENING, then PROCESSING
+            self.mode = DisplayMode.LISTENING
+            self.last_update = datetime.utcnow()
+            self.last_activity = datetime.utcnow()
+        
         self.transition_to(DisplayMode.PROCESSING)
 
     def set_tars_message(self, text: str) -> None:
@@ -115,6 +123,14 @@ class DisplayState:
             text: TARS response message
         """
         self.tars_message = MessageBubble(text=text, is_user=False)
+        
+        # Handle recovery from STANDBY (if display timed out)
+        if self.mode == DisplayMode.STANDBY:
+            # First go to PROCESSING, then CONVERSATION
+            self.mode = DisplayMode.PROCESSING
+            self.last_update = datetime.utcnow()
+            self.last_activity = datetime.utcnow()
+        
         self.transition_to(DisplayMode.CONVERSATION)
 
     def should_timeout(self, timeout_sec: int) -> bool:
@@ -163,6 +179,7 @@ class DisplayState:
         - PROCESSING -> STANDBY (timeout)
         - CONVERSATION -> STANDBY (timeout)
         - CONVERSATION -> LISTENING (new wake word)
+        - CONVERSATION -> PROCESSING (follow-up question)
         - Any mode -> ERROR (error occurred)
         - ERROR -> STANDBY (recovery)
 
@@ -190,7 +207,7 @@ class DisplayState:
             DisplayMode.STANDBY: {DisplayMode.LISTENING},
             DisplayMode.LISTENING: {DisplayMode.PROCESSING},
             DisplayMode.PROCESSING: {DisplayMode.CONVERSATION},
-            DisplayMode.CONVERSATION: {DisplayMode.LISTENING},
+            DisplayMode.CONVERSATION: {DisplayMode.LISTENING, DisplayMode.PROCESSING},
         }
 
         allowed = valid_transitions.get(from_mode, set())
