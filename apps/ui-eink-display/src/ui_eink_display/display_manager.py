@@ -186,8 +186,8 @@ class DisplayManager:
             # If driver is portrait and our image is landscape, rotate
             if img.size == (self.WIDTH, self.HEIGHT) and (w, h) == (self.HEIGHT, self.WIDTH):
                 img = img.rotate(90, expand=True)
-            # Final orientation tweak many boards want:
-            img = img.rotate(180, expand=False)
+            # Final orientation tweak - changed from 180° to 0° to fix fuzzy display
+            # img = img.rotate(180, expand=False)
 
         if hasattr(self.display, "getbuffer"):
             buf = self.display.getbuffer(img)
@@ -196,8 +196,6 @@ class DisplayManager:
             buf = img.tobytes()
 
         self.display.display(buf)
-
-
 
     def _render_standby(self) -> Image.Image:
         """
