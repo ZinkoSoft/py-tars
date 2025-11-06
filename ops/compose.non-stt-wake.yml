@@ -183,7 +183,7 @@ services:
       SDL_VIDEO_X11_FORCE_EGL: "1"        # <- force EGL instead of GLX on X11
       SDL_HINT_OPENGL_ES_DRIVER: "1"      # <- hint SDL to prefer OpenGL ES driver
       SDL_OPENGL_ES_DRIVER: "1"           # <- older alias of the same hint
-      XAUTHORITY: ${XAUTHORITY:-${HOME}/.Xauthority}
+      XAUTHORITY: ${XAUTHORITY:-/tmp/.docker-xauth/Xauthority}
       UI_FFT_WS_ENABLE: "1"
       UI_FFT_WS_URL: ${UI_FFT_WS_URL:-ws://192.168.1.80:8765/fft}
       UI_FFT_WS_RETRY: "5.0"
@@ -202,8 +202,8 @@ services:
         condition: service_started
     volumes:
       - ../apps/ui/ui.toml:/config/ui.toml:ro
-      - /tmp/.X11-unix:/tmp/.X11-unix:ro
-      - ${HOME}/.Xauthority:${HOME}/.Xauthority:ro
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /tmp/.docker-xauth:/tmp/.docker-xauth:ro
       # GPU/DRI access for hardware-accelerated OpenGL
       - /dev/dri:/dev/dri:rw
     devices:

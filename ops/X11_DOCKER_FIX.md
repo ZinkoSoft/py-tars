@@ -9,33 +9,47 @@ The TARS UI Docker container was unable to access the X11 display, resulting in 
 This issue persisted after container restarts because Docker couldn't properly authenticate with the host's X server.
 
 ## Solution
-The fix involves two changes:
+The fix creates a Docker-accessible Xauthority file that containers can read without permission issues.
 
 ### 1. Use Host Networking Mode
-Changed `compose.non-stt-wake.yml` to use `network_mode: host` for the UI service. This:
-- Simplifies X11 socket access (no need for volume mounts)
+`compose.non-stt-wake.yml` uses `network_mode: host` for the UI service. This:
+- Simplifies X11 socket access (no need for complex volume mounts)
 - Allows the container to directly access `localhost:1883` for MQTT
 - Reduces network isolation but acceptable for local development
 
-### 2. Disable X11 Access Control
-Run `setup-x11-docker.sh` before starting containers. This script runs:
-```bash
-DISPLAY=:0 xhost +
-```
+### 2. Create Docker-Accessible Xauthority File
+Run `setup-x11-docker.sh` before starting containers. This script:
+1. Allows X11 access from Docker: `xhost +local:docker`
+2. Creates a world-readable Xauthority file at `/tmp/.docker-xauth/Xauthority`
+3. Copies X11 auth cookies from your personal `.Xauthority` file
 
-This disables X11 access control, allowing any process on the local machine (including Docker containers) to connect to the X server.
+This approach is more secure than `xhost +` (which disables all access control) while still allowing Docker containers to authenticate properly.
 
 ## Usage
 
-### Before Starting Containers
+### Quick Start (Recommended)
+Use the convenience script that handles everything:
 ```bash
+./ops/start-ui.sh
+```
+
+Or for a specific compose file:
+```bash
+./ops/start-ui.sh ops/compose.yml
+```
+
+### Manual Method
+```bash
+# 1. Setup X11 access
 cd ops
 ./setup-x11-docker.sh
-docker compose -f compose.non-stt-wake.yml up
+
+# 2. Start containers with XAUTHORITY environment variable
+XAUTHORITY=/tmp/.docker-xauth/Xauthority docker compose -f compose.non-stt-wake.yml up
 ```
 
 ### After System Restart
-The `xhost +` setting is not persistent across reboots. You must run `setup-x11-docker.sh` again after restarting your system.
+The X11 settings and Xauthority file are not persistent across reboots. You must run `setup-x11-docker.sh` again after restarting your system.
 
 ### Automatic Setup (Optional)
 To make this permanent, add to your shell startup file (`~/.bashrc` or `~/.zshrc`):
@@ -50,29 +64,35 @@ fi
 
 ⚠️ **For local development only!**
 
-The `xhost +` command disables X11 access control, which means:
-- Any process on your machine can access your X display
-- This is acceptable for single-user development machines
-- **NOT recommended for production or multi-user systems**
+This solution uses `xhost +local:docker` which:
+- ✅ Only allows local Docker containers to access X display
+- ✅ More secure than `xhost +` (which allows ALL local processes)
+- ⚠️ Still not recommended for multi-user or production systems
 
-### More Secure Alternative
-For production, use `xhost +local:docker` instead of `xhost +`:
-```bash
-DISPLAY=:0 xhost +local:docker
-```
-This restricts access to local Docker containers only.
+The world-readable Xauthority file at `/tmp/.docker-xauth/Xauthority`:
+- Is only readable by users on your local machine
+- Contains auth cookies specific to your X session
+- Is automatically regenerated on each run of `setup-x11-docker.sh`
 
 ## Changes Made
 
 1. **compose.non-stt-wake.yml**:
-   - Added `network_mode: host` to UI service
-   - Changed `MQTT_HOST` from `mqtt` to `localhost`
-   - Updated Xauthority volume mount to use `${HOME}/.Xauthority`
+   - Uses `network_mode: host` for UI service (already configured)
+   - `MQTT_HOST` set to `localhost` (for host networking)
+   - Updated `XAUTHORITY` default to `/tmp/.docker-xauth/Xauthority`
+   - Mounts `/tmp/.docker-xauth` directory (read-only)
+   - Changed `/tmp/.X11-unix` to read-write mode
 
 2. **setup-x11-docker.sh**:
-   - Simplified to just run `xhost +`
-   - Removed complex Xauthority file generation (not needed with `xhost +`)
-   - Added clear security warnings
+   - Runs `xhost +local:docker` to allow Docker container access
+   - Creates `/tmp/.docker-xauth/Xauthority` with copied auth cookies
+   - Sets file permissions to 644 (world-readable)
+   - Provides clear instructions for starting containers
+
+3. **start-ui.sh** (new):
+   - Convenience script that runs setup and starts docker compose
+   - Automatically sets XAUTHORITY environment variable
+   - Usage: `./ops/start-ui.sh [compose-file]`
 
 ## Verification
 
@@ -98,11 +118,24 @@ Should see no authorization errors, and UI should initialize pygame successfully
 - Check socket permissions: `ls -la /tmp/.X11-unix/`
 - Re-run setup script with proper DISPLAY set
 
-## Alternative Solutions Tried (Didn't Work)
+## How It Works
 
-1. ❌ **Custom Xauthority file**: Cookie mismatch issues
-2. ❌ **Copying ~/.Xauthority**: Permission and format issues with Docker
-3. ❌ **xhost +local:docker only**: Still had cookie validation failures
-4. ✅ **xhost + with network_mode: host**: Works consistently
+The solution creates a clean authentication path:
 
-The combination of host networking and disabled access control provides the most reliable solution for local development.
+1. **Host**: X server runs with normal security
+2. **setup-x11-docker.sh**: 
+   - Runs `xhost +local:docker` → X server allows Docker containers
+   - Extracts auth cookies from `~/.Xauthority` → creates `/tmp/.docker-xauth/Xauthority`
+   - Makes file world-readable (644) → Docker container can read it
+3. **Docker container**:
+   - Mounts `/tmp/.docker-xauth` volume
+   - Sets `XAUTHORITY=/tmp/.docker-xauth/Xauthority` env var
+   - SDL/pygame reads auth cookies and authenticates with X server
+   - ✅ UI displays successfully
+
+## Alternative Solutions Tried
+
+1. ❌ **Mount ~/.Xauthority directly**: Permission denied (file is 600, container can't read)
+2. ❌ **xhost + alone**: Too permissive, security risk
+3. ❌ **Complex cookie regeneration**: Fragile, breaks on session changes
+4. ✅ **World-readable copy in /tmp with xhost +local:docker**: Reliable and reasonably secure
